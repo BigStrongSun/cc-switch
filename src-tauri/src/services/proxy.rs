@@ -21,6 +21,8 @@ use toml_edit::{DocumentMut, Item, TableLike};
 
 /// 用于接管 Live 配置时的占位符（避免客户端提示缺少 key，同时不泄露真实 Token）
 const PROXY_TOKEN_PLACEHOLDER: &str = "PROXY_MANAGED";
+/// Codex 接管时暴露给官方客户端的本地代理入口名称。
+const CODEX_LOCAL_PROXY_PROVIDER_NAME: &str = "CCSwitch MultiRouter";
 
 /// 代理接管模式下需要从 Claude Live 配置中移除的"模型覆盖"字段。
 ///
@@ -2580,12 +2582,12 @@ impl ProxyService {
             .unwrap_or_else(|_| toml_str.to_string())
     }
 
-    /// 接管 Codex 时，本地客户端必须继续以 Responses wire API 访问代理。
+    /// 接管 Codex 时，把官方客户端指向一个本地自定义 Responses provider。
     ///
-    /// 这里故意把 live `config.toml` 投影成 Codex 内置 `openai` provider，而不是
-    /// 暴露真实上游 provider id。这样 Codex 仍按官方 OpenAI/Codex 模型目录体验展示
-    /// 可选模型，真实 DeepSeek/Qwen/路由 provider 只保留在 CC Switch 后端目标里。
-    /// 上游是否走 Chat Completions 由 provider 配置决定，并在代理内部转换。
+    /// 这里不能使用内置 `openai` provider：官方 Codex 会把它视为保留供应商，
+    /// 并继承 OpenAI/ChatGPT 专用的登录、WebSocket 和 attestation 能力。多路由的
+    /// 正确边界是：Codex 只看到一个本地 Responses 入口，真实上游 provider、
+    /// API 格式和转换层都由 CC Switch 后端路由规则决定。
     fn apply_codex_proxy_toml_config_for_provider(
         toml_str: &str,
         proxy_url: &str,
@@ -2596,12 +2598,22 @@ impl ProxyService {
             Err(_) => return toml_str.to_string(),
         };
 
-        doc["model_provider"] = toml_edit::value("openai");
-        doc["openai_base_url"] = toml_edit::value(proxy_url.trim());
+        let proxy_provider_id = crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID;
+
+        doc["model_provider"] = toml_edit::value(proxy_provider_id);
         doc.as_table_mut().remove("base_url");
+        doc.as_table_mut().remove("openai_base_url");
         doc.as_table_mut().remove("wire_api");
         doc.as_table_mut().remove("experimental_bearer_token");
         doc.as_table_mut().remove("model_providers");
+        doc["model_providers"] = toml_edit::table();
+        doc["model_providers"][proxy_provider_id] = toml_edit::table();
+        doc["model_providers"][proxy_provider_id]["name"] =
+            toml_edit::value(CODEX_LOCAL_PROXY_PROVIDER_NAME);
+        doc["model_providers"][proxy_provider_id]["base_url"] = toml_edit::value(proxy_url.trim());
+        doc["model_providers"][proxy_provider_id]["wire_api"] = toml_edit::value("responses");
+        doc["model_providers"][proxy_provider_id]["requires_openai_auth"] = toml_edit::value(false);
+        doc["model_providers"][proxy_provider_id]["supports_websockets"] = toml_edit::value(false);
 
         if let Some(upstream_model) =
             provider.and_then(crate::proxy::providers::codex_provider_upstream_model)
@@ -4420,7 +4432,7 @@ openai_base_url = "http://127.0.0.1:15721/v1"
     }
 
     #[test]
-    fn apply_codex_proxy_toml_config_uses_builtin_openai_proxy_provider() {
+    fn apply_codex_proxy_toml_config_uses_custom_local_proxy_provider() {
         let input = r#"
 model_provider = "chat_only"
 model = "gpt-5.1-codex"
@@ -4439,19 +4451,47 @@ wire_api = "chat"
 
         assert_eq!(
             parsed.get("model_provider").and_then(|v| v.as_str()),
-            Some("openai")
+            Some(crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID)
         );
         assert_eq!(
-            parsed.get("openai_base_url").and_then(|v| v.as_str()),
+            parsed
+                .get("model_providers")
+                .and_then(|v| v.get(crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID))
+                .and_then(|v| v.get("base_url"))
+                .and_then(|v| v.as_str()),
             Some(proxy_url)
+        );
+        assert_eq!(
+            parsed
+                .get("model_providers")
+                .and_then(|v| v.get(crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID))
+                .and_then(|v| v.get("wire_api"))
+                .and_then(|v| v.as_str()),
+            Some("responses")
+        );
+        assert_eq!(
+            parsed
+                .get("model_providers")
+                .and_then(|v| v.get(crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID))
+                .and_then(|v| v.get("requires_openai_auth"))
+                .and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            parsed
+                .get("model_providers")
+                .and_then(|v| v.get(crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID))
+                .and_then(|v| v.get("supports_websockets"))
+                .and_then(|v| v.as_bool()),
+            Some(false)
         );
         assert_eq!(
             parsed.get("model").and_then(|v| v.as_str()),
             Some("gpt-5.1-codex")
         );
         assert!(
-            parsed.get("model_providers").is_none(),
-            "takeover live config should not expose upstream provider tables to Codex"
+            parsed.get("openai_base_url").is_none(),
+            "takeover live config must not use the reserved built-in OpenAI base URL override"
         );
     }
 
@@ -4494,13 +4534,17 @@ wire_api = "responses"
         );
         assert_eq!(
             parsed.get("model_provider").and_then(|v| v.as_str()),
-            Some("openai")
+            Some(crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID)
         );
         assert_eq!(
-            parsed.get("openai_base_url").and_then(|v| v.as_str()),
+            parsed
+                .get("model_providers")
+                .and_then(|v| v.get(crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID))
+                .and_then(|v| v.get("base_url"))
+                .and_then(|v| v.as_str()),
             Some(proxy_url)
         );
-        assert!(parsed.get("model_providers").is_none());
+        assert!(parsed.get("openai_base_url").is_none());
     }
 
     #[test]
@@ -5427,17 +5471,21 @@ requires_openai_auth = true
         let parsed_live: toml::Value = toml::from_str(live_config).expect("parse live config");
         assert_eq!(
             parsed_live.get("model_provider").and_then(|v| v.as_str()),
-            Some("openai"),
-            "hot-switched takeover live config should keep Codex on the built-in OpenAI provider"
+            Some(crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID),
+            "hot-switched takeover live config should expose the local custom proxy provider"
         );
         assert_eq!(
-            parsed_live.get("openai_base_url").and_then(|v| v.as_str()),
+            parsed_live
+                .get("model_providers")
+                .and_then(|v| v.get(crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID))
+                .and_then(|v| v.get("base_url"))
+                .and_then(|v| v.as_str()),
             Some("http://127.0.0.1:15721/v1"),
-            "built-in OpenAI provider should point at the local proxy during takeover"
+            "local custom provider should point at the local proxy during takeover"
         );
         assert!(
-            parsed_live.get("model_providers").is_none(),
-            "taken-over live config should not expose upstream provider tables"
+            parsed_live.get("openai_base_url").is_none(),
+            "taken-over live config must not use the reserved OpenAI base URL override"
         );
 
         service
@@ -5592,17 +5640,21 @@ requires_openai_auth = true
 
         assert_eq!(
             parsed_live.get("model_provider").and_then(|v| v.as_str()),
-            Some("openai"),
-            "taken-over Codex live config should keep the built-in OpenAI model picker"
+            Some(crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID),
+            "taken-over Codex live config should expose the local custom proxy provider"
         );
         assert_eq!(
-            parsed_live.get("openai_base_url").and_then(|v| v.as_str()),
+            parsed_live
+                .get("model_providers")
+                .and_then(|v| v.get(crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID))
+                .and_then(|v| v.get("base_url"))
+                .and_then(|v| v.as_str()),
             Some("http://127.0.0.1:15721/v1"),
-            "built-in OpenAI provider should be routed through the local proxy"
+            "local custom provider should be routed through the local proxy"
         );
         assert!(
-            parsed_live.get("model_providers").is_none(),
-            "upstream provider tables must stay hidden from Codex during takeover"
+            parsed_live.get("openai_base_url").is_none(),
+            "taken-over live config must not use the reserved OpenAI base URL override"
         );
         assert_eq!(
             parsed_live.get("model").and_then(|v| v.as_str()),
@@ -5999,14 +6051,16 @@ supports_websockets = false
         let live_config = std::fs::read_to_string(crate::codex_config::get_codex_config_path())
             .expect("read Codex live config");
         assert!(
-            live_config.contains("openai_base_url")
+            live_config.contains("base_url = \"http://127.0.0.1:")
                 && live_config.contains("http://127.0.0.1:")
                 && live_config.contains("/v1"),
             "DeepSeek live config must point Codex at the local proxy, got:\n{live_config}"
         );
         assert!(
-            live_config.contains("model_provider = \"openai\""),
-            "Codex should keep the Responses-capable built-in provider facade, got:\n{live_config}"
+            live_config.contains("model_provider = \"custom\"")
+                && live_config.contains("supports_websockets = false")
+                && live_config.contains("requires_openai_auth = false"),
+            "Codex should use the local custom Responses provider facade, got:\n{live_config}"
         );
         assert!(
             live_config.contains("model_catalog_json"),

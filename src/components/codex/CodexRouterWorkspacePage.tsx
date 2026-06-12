@@ -281,6 +281,7 @@ function buildRouteTrafficRows({
 
   for (const log of logs) {
     if (log.appType !== "codex") continue;
+    if ((log.dataSource ?? "proxy") !== "proxy") continue;
     const requestedModel = log.requestModel || log.model;
     const matchedRoute = selectedRoutes.find(({ route }) =>
       routeMatchesModel(route, requestedModel),
@@ -1139,6 +1140,12 @@ function StatusTab({
     options: { refetchInterval: 5000 },
   });
   const logs = requestLogs?.data ?? [];
+  const proxyLogs = logs.filter(
+    (log) => (log.dataSource ?? "proxy") === "proxy",
+  );
+  const sessionLogs = logs.filter(
+    (log) => (log.dataSource ?? "proxy") !== "proxy",
+  );
   const selectedRoutes = selectedPlan
     ? routeEntries.filter(({ provider }) => provider.id === selectedPlan.id)
     : routeEntries;
@@ -1147,22 +1154,22 @@ function StatusTab({
     selectedPlan,
   );
   const trafficRows = buildRouteTrafficRows({
-    logs,
+    logs: proxyLogs,
     routes: routeEntries,
     selectedPlan,
     providersById,
   });
   const routerLogs = selectedPlan
-    ? logs.filter((log) => log.providerId === selectedPlan.id)
+    ? proxyLogs.filter((log) => log.providerId === selectedPlan.id)
     : [];
-  const routedLogs = logs.filter((log) =>
+  const routedLogs = proxyLogs.filter((log) =>
     trafficRows.some(
       (row) =>
         row.providerId === log.providerId ||
         row.model === (log.requestModel || log.model),
     ),
   );
-  const latestLog = logs[0];
+  const latestLog = proxyLogs[0];
   const latestForwardOk = latestLog
     ? latestLog.statusCode >= 200 && latestLog.statusCode < 400
     : false;
@@ -1177,13 +1184,16 @@ function StatusTab({
   const hasEnabledRoutes = selectedRoutes.some(
     ({ route }) => route.enabled !== false,
   );
-  const linkOnline = Boolean(
+  const configReady = Boolean(
     isProxyRunning &&
       isCodexTakeoverActive &&
       selectedPlan &&
       routeEnabled &&
       hasEnabledRoutes,
   );
+  const trafficVerified =
+    proxyLogs.length > 0 || (proxyStatus?.total_requests ?? 0) > 0;
+  const linkOnline = Boolean(configReady && trafficVerified);
   const readinessIssues = [
     !isProxyRunning ? "本地代理未监听" : "",
     !isCodexTakeoverActive ? "Codex live 配置未接管" : "",
@@ -1218,11 +1228,13 @@ function StatusTab({
           <StatusCard
             ok={linkOnline}
             label="当前链路"
-            value={linkOnline ? "在线" : "未就绪"}
+            value={linkOnline ? "在线" : configReady ? "待请求验证" : "未就绪"}
             detail={
               linkOnline
                 ? "Codex 请求会进入本地代理并按 model 分流"
-                : readinessIssues.join("；") || "等待状态刷新"
+                : configReady
+                  ? "配置和监听已就绪，但今天还没有真实代理转发日志"
+                  : readinessIssues.join("；") || "等待状态刷新"
             }
           />
           <StatusCard
@@ -1374,14 +1386,15 @@ function StatusTab({
           ) : (
             <div className="p-4 text-sm leading-6 text-slate-400">
               暂无可归属到子 Provider 的请求日志。今日 Codex 日志 {logs.length}{" "}
-              条， 外层 MultiRouter 日志 {routerLogs.length} 条，目标 Provider
-              数 {targetProviderIds.size} 个。
+              条，其中真实代理转发 {proxyLogs.length} 条，Codex 会话同步{" "}
+              {sessionLogs.length} 条，外层 MultiRouter 日志 {routerLogs.length}{" "}
+              条，目标 Provider 数 {targetProviderIds.size} 个。
             </div>
           )}
         </div>
         <div className="mt-3 text-xs text-slate-500">
-          已尝试归属日志 {routedLogs.length} 条；这里显示最近 500 条 Codex
-          请求的实时聚合。
+          已尝试归属真实代理日志 {routedLogs.length} 条；这里不把
+          codex_session 历史同步当作转发。
         </div>
       </section>
     </div>
