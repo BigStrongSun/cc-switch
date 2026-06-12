@@ -361,12 +361,13 @@ pub fn sync_single_server_to_codex(
     let mut doc = if config_path.exists() {
         let content =
             std::fs::read_to_string(&config_path).map_err(|e| AppError::io(&config_path, e))?;
-        // 尝试解析现有配置，如果失败则创建新文档（容错处理）
+        // 尝试解析现有配置；失败时直接返回错误，避免用只包含 MCP 的新文档覆盖用户配置。
         match content.parse::<toml_edit::DocumentMut>() {
             Ok(doc) => doc,
             Err(e) => {
-                log::warn!("解析 Codex config.toml 失败: {e}，将创建新配置");
-                toml_edit::DocumentMut::new()
+                return Err(AppError::McpValidation(format!(
+                    "解析 config.toml 失败: {e}"
+                )))
             }
         }
     } else {
@@ -677,4 +678,78 @@ fn json_server_to_toml_table(spec: &Value) -> Result<toml_edit::Table, AppError>
     }
 
     Ok(t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    use std::env;
+    use tempfile::TempDir;
+
+    struct TempHome {
+        _dir: TempDir,
+        original_test_home: Option<String>,
+    }
+
+    impl TempHome {
+        /// 创建隔离的 Codex home，避免测试读写真实用户配置。
+        fn new() -> Self {
+            let dir = TempDir::new().expect("create temp home");
+            let original_test_home = env::var("CC_SWITCH_TEST_HOME").ok();
+            env::set_var("CC_SWITCH_TEST_HOME", dir.path());
+            crate::settings::reload_settings().expect("reload settings");
+
+            Self {
+                _dir: dir,
+                original_test_home,
+            }
+        }
+    }
+
+    impl Drop for TempHome {
+        /// 恢复测试前的 home 环境变量，避免污染其它测试。
+        fn drop(&mut self) {
+            match &self.original_test_home {
+                Some(value) => env::set_var("CC_SWITCH_TEST_HOME", value),
+                None => env::remove_var("CC_SWITCH_TEST_HOME"),
+            }
+            crate::settings::reload_settings().expect("reload settings");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn sync_single_server_to_codex_does_not_overwrite_invalid_config() {
+        let _home = TempHome::new();
+        let codex_dir = crate::codex_config::get_codex_config_dir();
+        std::fs::create_dir_all(&codex_dir).expect("create codex dir");
+        let config_path = crate::codex_config::get_codex_config_path();
+        let original = r#"approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+broken = [
+"#;
+        std::fs::write(&config_path, original).expect("seed invalid codex config");
+
+        let err = sync_single_server_to_codex(
+            &MultiAppConfig::default(),
+            "echo",
+            &json!({
+                "type": "stdio",
+                "command": "node",
+                "args": ["server.js"]
+            }),
+        )
+        .expect_err("invalid config.toml must abort single MCP sync");
+
+        assert!(
+            err.to_string().contains("config.toml"),
+            "error should name config.toml, got: {err}"
+        );
+        let after = std::fs::read_to_string(&config_path).expect("read config after failed sync");
+        assert_eq!(
+            after, original,
+            "single MCP sync must not replace invalid config.toml with a partial document"
+        );
+    }
 }
