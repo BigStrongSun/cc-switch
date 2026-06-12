@@ -400,7 +400,9 @@ impl RequestForwarder {
             });
         }
 
-        let attempt_providers = expand_codex_router_attempt_providers(app_type, &providers, &body);
+        let attempt_providers = build_forward_attempt_providers_preserving_codex_router_context(
+            app_type, &providers, &body,
+        );
         let mut last_error = None;
         let mut last_provider = None;
         let mut attempted_providers = 0usize;
@@ -2955,30 +2957,18 @@ fn prepare_upstream_request_body(request_body: Value) -> Value {
     canonicalize_value(filter_private_params_with_whitelist(request_body, &[]))
 }
 
-/// 将 Codex router provider 展开成可逐个尝试的 route provider。
+/// 构建本次转发要尝试的 provider 列表。
 ///
-/// Router 在 UI/配置里是一个 provider，但运行时每个 route 才是真正的上游。展开后，
-/// official route 的高负载/首包失败可以复用外层 provider failover 逻辑继续尝试后备 route。
-fn expand_codex_router_attempt_providers(
+/// Codex MultiRouter 必须保留父 provider 进入 `forward()`，再由 `forward()` 在请求上下文内解析
+/// 具体 route。提前展开成 `parent::route::*` 会让状态页、健康记录、日志 outer_provider 和后续
+/// 转换器判定丢掉父 router 身份，表现为“监听正常但没有命中当前 MultiRouter”。
+fn build_forward_attempt_providers_preserving_codex_router_context(
     app_type: &AppType,
     providers: &[Provider],
     body: &Value,
 ) -> Vec<Provider> {
-    providers
-        .iter()
-        .flat_map(|provider| {
-            if !matches!(app_type, AppType::Codex) {
-                return vec![provider.clone()];
-            }
-
-            let routed = super::providers::resolve_codex_model_routed_providers(provider, body);
-            if routed.is_empty() {
-                vec![provider.clone()]
-            } else {
-                routed
-            }
-        })
-        .collect()
+    let _ = (app_type, body);
+    providers.to_vec()
 }
 
 fn log_prompt_cache_trace(
@@ -3204,6 +3194,41 @@ mod tests {
 
         provider.settings_config = json!({ "modelRoutes": [] });
         assert!(codex_provider_has_routing_config(&provider));
+    }
+
+    #[test]
+    fn codex_multirouter_attempts_keep_parent_provider_context() {
+        let mut provider = test_provider_with_type(None);
+        provider.id = "codex-openai-router".to_string();
+        provider.name = "OpenAI Multi-Model Router".to_string();
+        provider.settings_config = json!({
+            "codexRouting": {
+                "enabled": true,
+                "routes": [
+                    {
+                        "id": "qwen-local",
+                        "name": "Qwen Local vLLM",
+                        "enabled": true,
+                        "models": ["qwen3.6"],
+                        "base_url": "https://example.test/v1",
+                        "wireApi": "chat"
+                    }
+                ]
+            }
+        });
+
+        let attempts = build_forward_attempt_providers_preserving_codex_router_context(
+            &AppType::Codex,
+            &[provider.clone()],
+            &json!({ "model": "qwen3.6" }),
+        );
+
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0].id, "codex-openai-router");
+        assert!(attempts[0]
+            .settings_config
+            .get("codexResolvedRouteId")
+            .is_none());
     }
 
     #[test]

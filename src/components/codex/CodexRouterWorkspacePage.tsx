@@ -1920,6 +1920,10 @@ function DiagnosticsPanel({
                   value={`${diagnostics.routerLog.totalScanned}`}
                 />
                 <DetailRow
+                  label="匹配当前 Router"
+                  value={`${diagnostics.routerLog.matchedScanned}`}
+                />
+                <DetailRow
                   label="最近请求"
                   value={diagnostics.routerLog.latestRequestAt ?? "无"}
                 />
@@ -1986,7 +1990,11 @@ function DiagnosticsPanel({
                 >
                   <span className="truncate">{event.timestamp}</span>
                   <span className="truncate font-mono">{event.event}</span>
-                  <span className="truncate">{event.provider ?? "-"}</span>
+                  <span className="truncate">
+                    {event.outerProvider && event.effectiveProvider
+                      ? `${event.outerProvider} -> ${event.effectiveProvider}`
+                      : event.provider ?? "-"}
+                  </span>
                   <span className="truncate">{event.status ?? "-"}</span>
                   <span className="truncate" title={event.line}>
                     {event.error ?? event.model ?? event.line}

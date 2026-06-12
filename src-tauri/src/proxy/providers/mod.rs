@@ -52,8 +52,8 @@ pub use codex::{
     codex_provider_uses_chat_completions, codex_route_persistent_provider,
     codex_route_target_provider_id, is_origin_only_url,
     materialize_codex_routed_provider_from_target, resolve_codex_chat_reasoning_config,
-    resolve_codex_model_routed_provider, resolve_codex_model_routed_providers,
-    should_convert_codex_responses_to_chat, should_convert_codex_responses_to_messages,
+    resolve_codex_model_routed_provider, should_convert_codex_responses_to_chat,
+    should_convert_codex_responses_to_messages,
 };
 pub use gemini::GeminiAdapter;
 

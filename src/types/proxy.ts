@@ -81,6 +81,8 @@ export interface CodexRouterLogEvent {
   event: string;
   model: string | null;
   provider: string | null;
+  outerProvider: string | null;
+  effectiveProvider: string | null;
   status: string | null;
   error: string | null;
   line: string;
@@ -90,6 +92,7 @@ export interface CodexRouterLogDiagnostics {
   path: string;
   exists: boolean;
   totalScanned: number;
+  matchedScanned: number;
   hasRecentRequest: boolean;
   latestRequestAt: string | null;
   latestError: string | null;

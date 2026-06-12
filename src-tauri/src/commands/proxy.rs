@@ -64,6 +64,8 @@ pub struct CodexRouterLogEvent {
     pub event: String,
     pub model: Option<String>,
     pub provider: Option<String>,
+    pub outer_provider: Option<String>,
+    pub effective_provider: Option<String>,
     pub status: Option<String>,
     pub error: Option<String>,
     pub line: String,
@@ -76,6 +78,7 @@ pub struct CodexRouterLogDiagnostics {
     pub path: String,
     pub exists: bool,
     pub total_scanned: usize,
+    pub matched_scanned: usize,
     pub has_recent_request: bool,
     pub latest_request_at: Option<String>,
     pub latest_error: Option<String>,
@@ -220,7 +223,7 @@ pub async fn diagnose_codex_multirouter(
 
     let live_config = codex_live_config_diagnostics(probe_port);
     let route_plan = codex_route_plan_diagnostics(&state, provider_id.as_deref())?;
-    let router_log = codex_router_log_diagnostics();
+    let router_log = codex_router_log_diagnostics(route_plan.provider_id.as_deref());
 
     let mut checks = Vec::new();
     checks.push(codex_check(
@@ -379,6 +382,7 @@ pub async fn diagnose_codex_multirouter(
         vec![
             format!("log_exists={}", router_log.exists),
             format!("events_scanned={}", router_log.total_scanned),
+            format!("matched_events={}", router_log.matched_scanned),
         ],
     ));
     checks.push(codex_check(
@@ -832,7 +836,7 @@ fn codex_json_string_array(value: &Value, key: &str) -> Vec<String> {
 }
 
 /// 读取 Codex router 本地诊断日志，并提取最近事件和错误。
-fn codex_router_log_diagnostics() -> CodexRouterLogDiagnostics {
+fn codex_router_log_diagnostics(provider_id: Option<&str>) -> CodexRouterLogDiagnostics {
     let path = crate::config::get_app_config_dir()
         .join("logs")
         .join("codex-router.log");
@@ -845,6 +849,7 @@ fn codex_router_log_diagnostics() -> CodexRouterLogDiagnostics {
                 path: path_text,
                 exists,
                 total_scanned: 0,
+                matched_scanned: 0,
                 has_recent_request: false,
                 latest_request_at: None,
                 latest_error: None,
@@ -853,38 +858,113 @@ fn codex_router_log_diagnostics() -> CodexRouterLogDiagnostics {
         }
     };
 
+    codex_router_log_diagnostics_from_text(path_text, exists, &text, provider_id)
+}
+
+/// 从 router 日志文本生成诊断摘要，先按当前 MultiRouter provider 过滤再判断“近期请求”。
+fn codex_router_log_diagnostics_from_text(
+    path_text: String,
+    exists: bool,
+    text: &str,
+    provider_id: Option<&str>,
+) -> CodexRouterLogDiagnostics {
+    codex_router_log_diagnostics_from_text_at(
+        path_text,
+        exists,
+        text,
+        provider_id,
+        chrono::Local::now().naive_local(),
+    )
+}
+
+/// 从 router 日志文本生成诊断摘要；`now` 可注入，便于测试“旧错误不算近期”。
+fn codex_router_log_diagnostics_from_text_at(
+    path_text: String,
+    exists: bool,
+    text: &str,
+    provider_id: Option<&str>,
+    now: chrono::NaiveDateTime,
+) -> CodexRouterLogDiagnostics {
+    let recent_window = chrono::Duration::minutes(30);
     let mut recent_events = text
         .lines()
         .rev()
-        .take(200)
+        .take(500)
         .filter_map(codex_parse_router_log_line)
+        .filter(|event| codex_router_log_event_matches_provider(event, provider_id))
         .collect::<Vec<_>>();
-    let total_scanned = recent_events.len();
+    let total_scanned = text.lines().rev().take(500).count();
+    let matched_scanned = recent_events.len();
     let latest_request_at = recent_events
         .iter()
-        .find(|event| {
-            matches!(
-                event.event.as_str(),
-                "route_resolved" | "request_prepared" | "upstream_send" | "upstream_status"
-            )
-        })
+        .find(|event| codex_router_log_is_request_event(event))
         .map(|event| event.timestamp.clone());
     let latest_error = recent_events
         .iter()
+        .filter(|event| codex_router_log_event_is_recent(event, now, recent_window))
         .find(|event| event.event.contains("error"))
         .and_then(|event| event.error.clone().or_else(|| Some(event.line.clone())));
-    let has_recent_request = latest_request_at.is_some();
+    let has_recent_request = recent_events
+        .iter()
+        .filter(|event| codex_router_log_event_is_recent(event, now, recent_window))
+        .any(|event| codex_router_log_is_request_event(event));
     recent_events.truncate(30);
 
     CodexRouterLogDiagnostics {
         path: path_text,
         exists,
         total_scanned,
+        matched_scanned,
         has_recent_request,
         latest_request_at,
         latest_error,
         recent_events,
     }
+}
+
+/// 判断日志事件是否属于当前 MultiRouter provider 或它派生出的临时 route provider。
+fn codex_router_log_event_matches_provider(
+    event: &CodexRouterLogEvent,
+    provider_id: Option<&str>,
+) -> bool {
+    let Some(provider_id) = provider_id
+        .map(str::trim)
+        .filter(|provider_id| !provider_id.is_empty())
+    else {
+        return true;
+    };
+    let route_prefix = format!("{provider_id}::route::");
+    [
+        event.provider.as_deref(),
+        event.outer_provider.as_deref(),
+        event.effective_provider.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| value == provider_id || value.starts_with(&route_prefix))
+}
+
+/// 判断日志事件是否代表一次请求已经进入 router 转发链路。
+fn codex_router_log_is_request_event(event: &CodexRouterLogEvent) -> bool {
+    matches!(
+        event.event.as_str(),
+        "route_resolved" | "request_prepared" | "upstream_send" | "upstream_status"
+    )
+}
+
+/// 只把近窗口内的匹配事件视为“当前链路”的近期事件，避免旧 backup 错误污染结论。
+fn codex_router_log_event_is_recent(
+    event: &CodexRouterLogEvent,
+    now: chrono::NaiveDateTime,
+    window: chrono::Duration,
+) -> bool {
+    let Ok(timestamp) =
+        chrono::NaiveDateTime::parse_from_str(&event.timestamp, "%Y-%m-%d %H:%M:%S%.f")
+    else {
+        return false;
+    };
+    let age = now.signed_duration_since(timestamp);
+    age >= chrono::Duration::zero() && age <= window
 }
 
 /// 解析一行 `codex-router.log`，字段均为已清洗的 key=value 片段。
@@ -917,10 +997,81 @@ fn codex_parse_router_log_line(line: &str) -> Option<CodexRouterLogEvent> {
             .get("provider")
             .cloned()
             .or_else(|| fields.get("effective_provider").cloned()),
+        outer_provider: fields.get("outer_provider").cloned(),
+        effective_provider: fields.get("effective_provider").cloned(),
         status: fields.get("status").cloned(),
         error,
         line: line.to_string(),
     })
+}
+
+#[cfg(test)]
+mod codex_router_log_diagnostics_tests {
+    use super::*;
+
+    #[test]
+    fn filters_router_log_to_selected_multirouter_provider() {
+        let text = concat!(
+            "2026-06-11 13:48:17.854 event=upstream_error model=gpt-5.4-mini provider=codex-official status=400 body_summary=Input_must_be_a_list\n",
+            "2026-06-12 21:55:01.022 event=upstream_status model=visible-model provider=external-openai-api::hermes::selected status=200\n",
+            "2026-06-13 00:20:00.000 event=route_resolved model=qwen3.6 outer_provider=codex-openai-router effective_provider=codex-openai-router::route::qwen-local route_id=qwen-local routing_configured=true\n",
+            "2026-06-13 00:20:01.000 event=upstream_status model=qwen3.6 provider=codex-openai-router::route::qwen-local outer_provider=codex-openai-router effective_provider=codex-openai-router::route::qwen-local status=200\n",
+        );
+        let now = chrono::NaiveDateTime::parse_from_str(
+            "2026-06-13 00:24:36.000",
+            "%Y-%m-%d %H:%M:%S%.f",
+        )
+        .expect("valid test time");
+
+        let diagnostics = codex_router_log_diagnostics_from_text_at(
+            "codex-router.log".to_string(),
+            true,
+            text,
+            Some("codex-openai-router"),
+            now,
+        );
+
+        assert_eq!(diagnostics.total_scanned, 4);
+        assert_eq!(diagnostics.matched_scanned, 2);
+        assert!(diagnostics.has_recent_request);
+        assert_eq!(
+            diagnostics.latest_request_at.as_deref(),
+            Some("2026-06-13 00:20:01.000")
+        );
+        assert_eq!(diagnostics.latest_error, None);
+        assert!(diagnostics.recent_events.iter().all(|event| {
+            codex_router_log_event_matches_provider(event, Some("codex-openai-router"))
+        }));
+    }
+
+    #[test]
+    fn stale_router_errors_do_not_block_current_diagnostics() {
+        let text = concat!(
+            "2026-06-13 00:00:00.000 event=route_resolved model=qwen3.6 outer_provider=codex-openai-router effective_provider=codex-openai-router::route::qwen-local route_id=qwen-local routing_configured=true\n",
+            "2026-06-13 00:00:01.000 event=upstream_error model=qwen3.6 provider=codex-openai-router::route::qwen-local outer_provider=codex-openai-router effective_provider=codex-openai-router::route::qwen-local status=400 body_summary=old_error\n",
+        );
+        let now = chrono::NaiveDateTime::parse_from_str(
+            "2026-06-13 01:00:00.000",
+            "%Y-%m-%d %H:%M:%S%.f",
+        )
+        .expect("valid test time");
+
+        let diagnostics = codex_router_log_diagnostics_from_text_at(
+            "codex-router.log".to_string(),
+            true,
+            text,
+            Some("codex-openai-router"),
+            now,
+        );
+
+        assert_eq!(diagnostics.matched_scanned, 2);
+        assert!(!diagnostics.has_recent_request);
+        assert_eq!(
+            diagnostics.latest_request_at.as_deref(),
+            Some("2026-06-13 00:00:00.000")
+        );
+        assert_eq!(diagnostics.latest_error, None);
+    }
 }
 
 /// 根据失败/告警项生成最短下一步动作。
