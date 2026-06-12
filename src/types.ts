@@ -280,6 +280,7 @@ export interface CodexRoutingRoute {
   id: string;
   label?: string;
   enabled?: boolean;
+  targetProviderId?: string;
   match: {
     models?: string[];
     prefixes?: string[];

@@ -822,6 +822,24 @@ fn resolve_external_codex_router_target(
             {
                 continue;
             }
+            if let Some(target_provider_id) =
+                super::providers::codex_route_target_provider_id(&resolved)
+            {
+                let target = state
+                    .db
+                    .get_provider_by_id(target_provider_id, "codex")
+                    .map_err(|e| ProxyError::DatabaseError(e.to_string()))?
+                    .ok_or_else(|| {
+                        ProxyError::InvalidRequest(format!(
+                            "Codex router route target provider not found: {target_provider_id}"
+                        ))
+                    })?;
+                return Ok(Some(
+                    super::providers::materialize_codex_routed_provider_from_target(
+                        &resolved, &target,
+                    ),
+                ));
+            }
             return Ok(Some(resolved));
         }
     }
@@ -2235,7 +2253,7 @@ mod tests {
     };
     use crate::{
         database::Database,
-        provider::Provider,
+        provider::{Provider, ProviderMeta},
         proxy::{
             external_openai_api::{
                 self, ExternalOpenAiApiBackendType, ExternalOpenAiApiProfile,
@@ -2245,6 +2263,7 @@ mod tests {
             provider_router::ProviderRouter,
             providers::{
                 codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore,
+                should_convert_codex_responses_to_chat,
             },
             server::ProxyState,
             types::{ProxyConfig, ProxyStatus},
@@ -2685,6 +2704,79 @@ data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\"}}\n
                 .and_then(|value| value.as_str()),
             Some("deepseek")
         );
+    }
+
+    #[test]
+    fn external_codex_router_target_provider_reuses_provider_config() {
+        let db = Arc::new(Database::memory().expect("memory db"));
+        db.save_provider(
+            "codex",
+            &Provider::with_id(
+                "codex-router".to_string(),
+                "Codex Router".to_string(),
+                json!({
+                    "codexRouting": {
+                        "enabled": true,
+                        "routes": [{
+                            "id": "deepseek",
+                            "label": "DeepSeek",
+                            "targetProviderId": "codex-deepseek",
+                            "match": { "models": ["deepseek-v4-flash"] }
+                        }]
+                    }
+                }),
+                None,
+            ),
+        )
+        .expect("save router");
+        let mut target = Provider::with_id(
+            "codex-deepseek".to_string(),
+            "DeepSeek".to_string(),
+            json!({
+                "base_url": "https://api.deepseek.com",
+                "auth": { "OPENAI_API_KEY": "sk-target" },
+                "model": "deepseek-chat"
+            }),
+            None,
+        );
+        target.meta = Some(ProviderMeta {
+            api_format: Some("openai_chat".to_string()),
+            ..Default::default()
+        });
+        db.save_provider("codex", &target).expect("save target");
+
+        let state = build_state(db);
+        let profile = ExternalOpenAiApiProfile {
+            enabled: true,
+            backend_type: ExternalOpenAiApiBackendType::Provider,
+            app_type: Some("codex".to_string()),
+            provider_id: Some("codex-router".to_string()),
+            route_id: Some("deepseek".to_string()),
+            default_model: Some("deepseek-v4-flash".to_string()),
+            listen_address: None,
+            listen_port: None,
+            api_key_hash: None,
+            api_key_prefix: None,
+            updated_at: None,
+        };
+
+        let resolved = resolve_external_codex_router_target(
+            &state,
+            &json!({ "model": "deepseek-v4-flash" }),
+            &profile,
+        )
+        .expect("resolve")
+        .expect("route provider");
+
+        assert_eq!(
+            resolved.settings_config["base_url"],
+            "https://api.deepseek.com"
+        );
+        assert_eq!(resolved.settings_config["model"], "deepseek-chat");
+        assert!(should_convert_codex_responses_to_chat(
+            &resolved,
+            "/v1/responses"
+        ));
     }
 
     fn build_state(db: Arc<Database>) -> ProxyState {

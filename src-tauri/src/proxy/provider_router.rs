@@ -29,6 +29,19 @@ impl ProviderRouter {
         }
     }
 
+    /// 按应用和 ID 读取真实 provider 配置。
+    ///
+    /// Codex 多模型 route 可以引用一个已存在的 Codex provider；forwarder 需要在
+    /// request-local route 命中后读取该 provider，让 base_url、认证和转换策略跟随
+    /// 这个真实供应商配置，而不是复制一份 route 内联配置。
+    pub fn get_provider_by_id(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+    ) -> Result<Option<Provider>, AppError> {
+        self.db.get_provider_by_id(provider_id, app_type)
+    }
+
     /// 选择可用的供应商（支持故障转移）
     ///
     /// 返回按优先级排序的可用供应商列表：

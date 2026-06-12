@@ -140,6 +140,7 @@ function createRoutingRow(seed?: Partial<CodexRoutingRoute>): CodexRoutingRow {
     id: seed?.id ?? `route-${Math.random().toString(36).slice(2, 8)}`,
     label: seed?.label ?? "",
     enabled: seed?.enabled ?? true,
+    targetProviderId: seed?.targetProviderId,
     match: {
       models: seed?.match?.models ?? [],
       prefixes: seed?.match?.prefixes ?? [],
@@ -156,7 +157,10 @@ function createRoutingRow(seed?: Partial<CodexRoutingRoute>): CodexRoutingRow {
 }
 
 // 比较路由数据时忽略 rowId，避免父子状态同步造成重复刷新。
-function routingRowsMatchConfig(rows: CodexRoutingRow[], config?: CodexRoutingConfig): boolean {
+function routingRowsMatchConfig(
+  rows: CodexRoutingRow[],
+  config?: CodexRoutingConfig,
+): boolean {
   const routes = config?.routes ?? [];
   if (rows.length !== routes.length) return false;
   return rows.every((row, index) => {
@@ -254,7 +258,9 @@ export function CodexFormFields({
   useEffect(() => {
     setRoutingRows((current) => {
       if (routingRowsMatchConfig(current, codexRouting)) return current;
-      return (codexRouting.routes ?? []).map((route) => createRoutingRow(route));
+      return (codexRouting.routes ?? []).map((route) =>
+        createRoutingRow(route),
+      );
     });
     lastSentRoutingRef.current = codexRouting;
   }, [codexRouting]);
@@ -267,7 +273,8 @@ export function CodexFormFields({
       defaultRouteId: codexRouting.defaultRouteId ?? "",
       routes: routingRows.map(({ rowId: _rowId, ...route }) => route),
     };
-    if (JSON.stringify(next) === JSON.stringify(lastSentRoutingRef.current)) return;
+    if (JSON.stringify(next) === JSON.stringify(lastSentRoutingRef.current))
+      return;
     lastSentRoutingRef.current = next;
     onCodexRoutingChange(next);
   }, [
@@ -591,7 +598,9 @@ export function CodexFormFields({
                       {route.label || route.id || "路由"}
                     </span>
                     <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                      {route.upstream.apiFormat}
+                      {route.targetProviderId
+                        ? `目标: ${route.targetProviderId}`
+                        : route.upstream.apiFormat}
                     </span>
                     {route.enabled === false && (
                       <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
@@ -611,7 +620,9 @@ export function CodexFormFields({
                     匹配模型：{matchedModels}；匹配前缀：{matchedPrefixes}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {route.upstream.baseUrl || "尚未填写上游 Base URL"}
+                    {route.targetProviderId
+                      ? `复用供应商配置：${route.targetProviderId}`
+                      : route.upstream.baseUrl || "尚未填写上游 Base URL"}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -709,6 +720,19 @@ export function CodexFormFields({
                   })}
                 </label>
               </div>
+
+              <Input
+                value={editingRoute.targetProviderId ?? ""}
+                onChange={(event) =>
+                  handleUpdateRoute(editingRouteIndex, {
+                    targetProviderId: event.target.value.trim() || undefined,
+                  })
+                }
+                placeholder={t("codexConfig.targetProviderIdPlaceholder", {
+                  defaultValue:
+                    "目标供应商 ID（可选；填写后复用该供应商的 Base URL、认证和转换配置）",
+                })}
+              />
 
               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                 <Input
@@ -886,7 +910,9 @@ export function CodexFormFields({
                         capabilities: {
                           ...editingRoute.capabilities,
                           textOnly: checked,
-                          inputModalities: checked ? ["text"] : ["text", "image"],
+                          inputModalities: checked
+                            ? ["text"]
+                            : ["text", "image"],
                         },
                       })
                     }
@@ -903,7 +929,9 @@ export function CodexFormFields({
                         capabilities: {
                           ...editingRoute.capabilities,
                           textOnly: !checked,
-                          inputModalities: checked ? ["text", "image"] : ["text"],
+                          inputModalities: checked
+                            ? ["text", "image"]
+                            : ["text"],
                         },
                       })
                     }
@@ -912,7 +940,9 @@ export function CodexFormFields({
                 </label>
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Switch
-                    checked={editingRoute.capabilities?.supportsReasoning === true}
+                    checked={
+                      editingRoute.capabilities?.supportsReasoning === true
+                    }
                     onCheckedChange={(checked) =>
                       handleUpdateRoute(editingRouteIndex, {
                         capabilities: {

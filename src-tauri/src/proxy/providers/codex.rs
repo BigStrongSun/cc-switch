@@ -18,6 +18,8 @@ use toml::Value as TomlValue;
 
 const CODEX_ROUTER_PARENT_PROVIDER_ID: &str = "codexRouterParentProviderId";
 const CODEX_ROUTER_PARENT_PROVIDER_NAME: &str = "codexRouterParentProviderName";
+const CODEX_RESOLVED_TARGET_PROVIDER_ID: &str = "codexResolvedTargetProviderId";
+const CODEX_RESOLVED_UPSTREAM_MODEL_OVERRIDE: &str = "codexResolvedUpstreamModelOverride";
 
 /// 官方 Codex 客户端 User-Agent 正则
 #[allow(dead_code)]
@@ -198,6 +200,66 @@ pub fn codex_route_persistent_provider(provider: &Provider) -> (&str, &str) {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(provider.name.as_str());
     (id, name)
+}
+
+/// 返回 routed Codex provider 引用的真实目标 provider id。
+pub fn codex_route_target_provider_id(provider: &Provider) -> Option<&str> {
+    provider
+        .settings_config
+        .get(CODEX_RESOLVED_TARGET_PROVIDER_ID)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+/// 用 route 命中的真实目标 provider 作为底座，生成本次请求的 effective provider。
+///
+/// route 引用已有供应商时，base_url、认证、apiFormat、reasoning 等转换配置都应该跟随
+/// 该供应商；route 只叠加 request-local 的路由身份、匹配状态、能力声明和显式模型映射。
+pub fn materialize_codex_routed_provider_from_target(
+    route_provider: &Provider,
+    target_provider: &Provider,
+) -> Provider {
+    let mut materialized = target_provider.clone();
+    materialized.id = route_provider.id.clone();
+    materialized.name = route_provider.name.clone();
+
+    let mut settings = target_provider
+        .settings_config
+        .as_object()
+        .cloned()
+        .unwrap_or_else(Map::new);
+    let route_settings = route_provider.settings_config.as_object();
+
+    for key in [
+        "codexResolvedRouteId",
+        "codexResolvedRouteMatched",
+        "codexResolvedCapabilities",
+        CODEX_ROUTER_PARENT_PROVIDER_ID,
+        CODEX_ROUTER_PARENT_PROVIDER_NAME,
+        CODEX_RESOLVED_TARGET_PROVIDER_ID,
+    ] {
+        if let Some(value) = route_settings
+            .and_then(|settings| settings.get(key))
+            .cloned()
+        {
+            settings.insert(key.to_string(), value);
+        }
+    }
+
+    if let Some(model_override) = route_settings
+        .and_then(|settings| settings.get(CODEX_RESOLVED_UPSTREAM_MODEL_OVERRIDE))
+        .cloned()
+    {
+        settings.insert("model".to_string(), model_override.clone());
+        settings.insert(
+            CODEX_RESOLVED_UPSTREAM_MODEL_OVERRIDE.to_string(),
+            model_override,
+        );
+    }
+
+    materialized.settings_config = JsonValue::Object(settings);
+    materialized
 }
 
 /// 从新旧配置中挑出本次请求的 route 候选；匹配 route 在前，fallback route 在后。
@@ -437,38 +499,20 @@ fn build_codex_routed_provider(
         );
     }
 
-    let upstream_model = upstream
-        .get("modelMap")
-        .or_else(|| upstream.get("model_map"))
-        .and_then(|value| value.as_object())
-        .and_then(|map| map.get(request_model))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-        .or_else(|| {
-            upstream
-                .get("upstreamModel")
-                .or_else(|| upstream.get("upstream_model"))
-                .or_else(|| upstream.get("model"))
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|model| !model.is_empty())
-        })
-        .or_else(|| {
-            route
-                .get("upstreamModel")
-                .or_else(|| route.get("upstream_model"))
-                .or_else(|| route.get("model"))
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|model| !model.is_empty())
-        })
+    let explicit_upstream_model = explicit_codex_route_model_override(route, request_model);
+    let upstream_model = explicit_upstream_model
         .or_else(|| first_codex_route_model(route))
         .unwrap_or(request_model);
     settings.insert(
         "model".to_string(),
         JsonValue::String(upstream_model.to_string()),
     );
+    if explicit_upstream_model.is_some() {
+        settings.insert(
+            CODEX_RESOLVED_UPSTREAM_MODEL_OVERRIDE.to_string(),
+            JsonValue::String(upstream_model.to_string()),
+        );
+    }
 
     if codex_route_uses_managed_codex_oauth(upstream, route) {
         // 托管 Codex OAuth route 不能继承外层 provider 的 Bearer key，否则会覆盖 managed account 注入链路。
@@ -491,6 +535,12 @@ fn build_codex_routed_provider(
         "codexResolvedRouteId".to_string(),
         JsonValue::String(route_id.to_string()),
     );
+    if let Some(target_provider_id) = codex_route_target_provider_id_from_route(route) {
+        settings.insert(
+            CODEX_RESOLVED_TARGET_PROVIDER_ID.to_string(),
+            JsonValue::String(target_provider_id.to_string()),
+        );
+    }
     settings.insert(
         CODEX_ROUTER_PARENT_PROVIDER_ID.to_string(),
         JsonValue::String(provider.id.clone()),
@@ -540,6 +590,66 @@ fn build_codex_routed_provider(
     routed.meta = Some(meta);
 
     routed
+}
+
+/// 从 route 中读取显式声明的目标 provider id。
+fn codex_route_target_provider_id_from_route(route: &JsonValue) -> Option<&str> {
+    let upstream = route.get("upstream").unwrap_or(route);
+    [
+        upstream.get("targetProviderId"),
+        upstream.get("target_provider_id"),
+        upstream.get("providerId"),
+        upstream.get("provider_id"),
+        upstream.get("upstreamProviderId"),
+        upstream.get("upstream_provider_id"),
+        upstream.get("provider"),
+        route.get("targetProviderId"),
+        route.get("target_provider_id"),
+        route.get("providerId"),
+        route.get("provider_id"),
+        route.get("upstreamProviderId"),
+        route.get("upstream_provider_id"),
+        route.get("provider"),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|value| value.as_str())
+    .map(str::trim)
+    .find(|value| !value.is_empty())
+}
+
+/// 从 route 中读取显式模型覆盖；没有覆盖时应交给目标 provider 自己的 model 配置。
+fn explicit_codex_route_model_override<'a>(
+    route: &'a JsonValue,
+    request_model: &str,
+) -> Option<&'a str> {
+    let upstream = route.get("upstream").unwrap_or(route);
+    upstream
+        .get("modelMap")
+        .or_else(|| upstream.get("model_map"))
+        .and_then(|value| value.as_object())
+        .and_then(|map| map.get(request_model))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .or_else(|| {
+            upstream
+                .get("upstreamModel")
+                .or_else(|| upstream.get("upstream_model"))
+                .or_else(|| upstream.get("model"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+        })
+        .or_else(|| {
+            route
+                .get("upstreamModel")
+                .or_else(|| route.get("upstream_model"))
+                .or_else(|| route.get("model"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+        })
 }
 
 /// 读取 route 自己声明的第一个模型，用于跨模型 fallback 时的默认上游模型。
@@ -1369,6 +1479,60 @@ mod tests {
         assert!(should_convert_codex_responses_to_chat(
             &routed,
             "/responses"
+        ));
+    }
+
+    #[test]
+    fn test_codex_route_target_provider_reuses_provider_conversion_config() {
+        let router = create_provider(json!({
+            "codexRouting": {
+                "enabled": true,
+                "routes": [{
+                    "id": "deepseek",
+                    "label": "DeepSeek Route",
+                    "targetProviderId": "codex-deepseek",
+                    "match": { "models": ["deepseek-v4-flash"] }
+                }]
+            }
+        }));
+        let mut target = Provider::with_id(
+            "codex-deepseek".to_string(),
+            "DeepSeek".to_string(),
+            json!({
+                "base_url": "https://api.deepseek.com",
+                "auth": { "OPENAI_API_KEY": "sk-target" },
+                "model": "deepseek-chat"
+            }),
+            None,
+        );
+        target.meta = Some(ProviderMeta {
+            api_format: Some("openai_chat".to_string()),
+            ..Default::default()
+        });
+
+        let routed =
+            resolve_codex_model_routed_provider(&router, &json!({ "model": "deepseek-v4-flash" }))
+                .expect("deepseek route");
+        assert_eq!(
+            codex_route_target_provider_id(&routed),
+            Some("codex-deepseek")
+        );
+
+        let materialized = materialize_codex_routed_provider_from_target(&routed, &target);
+
+        assert_eq!(materialized.id, "test::route::deepseek");
+        assert_eq!(
+            materialized.settings_config["base_url"],
+            "https://api.deepseek.com"
+        );
+        assert_eq!(materialized.settings_config["model"], "deepseek-chat");
+        assert_eq!(
+            codex_route_persistent_provider(&materialized),
+            ("test", "Test Codex")
+        );
+        assert!(should_convert_codex_responses_to_chat(
+            &materialized,
+            "/v1/responses"
         ));
     }
 

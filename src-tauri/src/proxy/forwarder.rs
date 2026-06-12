@@ -1169,6 +1169,35 @@ impl RequestForwarder {
         } else {
             None
         };
+        let routed_provider = if let Some(route_provider) = routed_provider {
+            if let Some(target_provider_id) =
+                super::providers::codex_route_target_provider_id(&route_provider)
+            {
+                let Some(target_provider) = self
+                    .router
+                    .get_provider_by_id(target_provider_id, app_type.as_str())
+                    .map_err(|err| {
+                        ProxyError::ConfigError(format!(
+                            "读取 Codex route 目标供应商 '{target_provider_id}' 失败: {err}"
+                        ))
+                    })?
+                else {
+                    return Err(ProxyError::ConfigError(format!(
+                        "Codex route 引用了不存在的目标供应商 '{target_provider_id}'"
+                    )));
+                };
+                Some(
+                    super::providers::materialize_codex_routed_provider_from_target(
+                        &route_provider,
+                        &target_provider,
+                    ),
+                )
+            } else {
+                Some(route_provider)
+            }
+        } else {
+            None
+        };
         let codex_route_missed = codex_router_configured && routed_provider.is_none();
         let provider = routed_provider.as_ref().unwrap_or(provider);
 
