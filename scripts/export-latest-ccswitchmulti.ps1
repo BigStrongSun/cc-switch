@@ -43,6 +43,53 @@ function Copy-Artifacts {
     return $items.Count
 }
 
+# Clear release output without failing the whole export when an old exe is still running.
+function Clear-ExportRoot {
+    param([string]$Root)
+
+    New-Item -ItemType Directory -Force -Path $Root | Out-Null
+    $items = @(Get-ChildItem -LiteralPath $Root -Force -ErrorAction SilentlyContinue)
+    foreach ($item in $items) {
+        try {
+            Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-Warning "Could not remove old release item '$($item.FullName)': $($_.Exception.Message)"
+        }
+    }
+}
+
+# Copy the raw exe while tolerating the common case where the stable alias is still running.
+function Copy-RawExe {
+    param(
+        [string]$SourceExe,
+        [string]$Destination,
+        [string]$Version
+    )
+
+    if (-not (Test-Path -LiteralPath $SourceExe)) {
+        return
+    }
+
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    $versionedName = "CCSwitchMulti_$Version`_x64.exe"
+    Copy-Item -LiteralPath $SourceExe -Destination (Join-Path $Destination $versionedName) -Force
+
+    $stablePath = Join-Path $Destination "CCSwitchMulti.exe"
+    try {
+        Copy-Item -LiteralPath $SourceExe -Destination $stablePath -Force -ErrorAction Stop
+        Remove-Item -LiteralPath (Join-Path $Destination "RAW_EXE_ALIAS_LOCKED.txt") -Force -ErrorAction SilentlyContinue
+    } catch {
+        $note = @(
+            "CCSwitchMulti.exe could not be replaced because it is probably running.",
+            "The fresh raw executable was still exported as $versionedName.",
+            "Close the running app and rerun the export if you need the stable alias updated.",
+            "Error: $($_.Exception.Message)"
+        ) -join "`r`n"
+        Set-Content -LiteralPath (Join-Path $Destination "RAW_EXE_ALIAS_LOCKED.txt") -Value $note -Encoding UTF8
+        Write-Warning $note
+    }
+}
+
 # Write a clear note for platforms that cannot be built on the current host.
 function Write-PlatformNote {
     param(
@@ -128,10 +175,7 @@ if (-not $SkipBuild) {
     }
 }
 
-if (Test-Path -LiteralPath $exportRoot) {
-    Remove-Item -LiteralPath $exportRoot -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $exportRoot | Out-Null
+Clear-ExportRoot -Root $exportRoot
 
 $windowsInstaller = Join-Path $exportRoot "windows\installer"
 $windowsPortable = Join-Path $exportRoot "windows\portable"
@@ -150,10 +194,7 @@ if (Test-Path -LiteralPath $sourceExe) {
     Remove-Item -LiteralPath $stage -Recurse -Force
 }
 
-if (Test-Path -LiteralPath $sourceExe) {
-    New-Item -ItemType Directory -Force -Path $windowsRawExe | Out-Null
-    Copy-Item -LiteralPath $sourceExe -Destination (Join-Path $windowsRawExe "CCSwitchMulti.exe") -Force
-}
+Copy-RawExe -SourceExe $sourceExe -Destination $windowsRawExe -Version $version
 
 Write-PlatformNote -Path (Join-Path $exportRoot "linux") -Platform "Linux" -Reason "Run pnpm tauri build on a Linux host with Rust, Node/pnpm, and Tauri WebKit/GTK dependencies installed, then run this export script."
 Write-PlatformNote -Path (Join-Path $exportRoot "macos") -Platform "macOS" -Reason "Run pnpm tauri build on a macOS host with Xcode Command Line Tools, Rust, and Node/pnpm installed, then run this export script."

@@ -13,6 +13,10 @@
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,css,json}\"",
     "release:export": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/export-latest-ccswitchmulti.ps1",
+    "release:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-release-pipeline.ps1",
+    "release:local:skip-build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-release-pipeline.ps1 -SkipBuild",
+    "release:hook:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-local-release-hook.ps1",
+    "release:hook:install:sync": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-local-release-hook.ps1 -Synchronous",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest watch"
   },
