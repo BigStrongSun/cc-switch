@@ -333,7 +333,8 @@ function buildRouteTrafficRows({
     .sort((a, b) => b.requestCount - a.requestCount);
 }
 
-/// 显示 Codex 多模型路由工作台；它只复用 Provider 配置，不创建第二套数据库或切换 current provider。
+/// 显示 Codex 多模型路由工作台；它只复用 Provider 配置，不创建第二套数据库。
+/// 注意：要让 Codex 请求真正进入路由，仍然必须开启 Codex app takeover，把 Codex live 配置指向本地代理。
 export function CodexRouterWorkspacePage({
   providers,
   proxyStatus,
@@ -351,7 +352,7 @@ export function CodexRouterWorkspacePage({
   onEditProvider: (provider: Provider) => void;
   onCreateProvider: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>("overview");
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("status");
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [selectedRouteKey, setSelectedRouteKey] = useState<string | null>(null);
   const [testModel, setTestModel] = useState("");
@@ -492,6 +493,8 @@ export function CodexRouterWorkspacePage({
           modelSources={modelSources}
           routeEntries={routeEntries}
           enabledRoutes={enabledRoutes}
+          isProxyRunning={isProxyRunning}
+          isCodexTakeoverActive={isCodexTakeoverActive}
           onCreatePlan={handleCreatePlan}
           onJump={(tab) => setActiveTab(tab)}
         />
@@ -617,6 +620,8 @@ function HeaderPanel({
   modelSources,
   routeEntries,
   enabledRoutes,
+  isProxyRunning,
+  isCodexTakeoverActive,
   onCreatePlan,
   onJump,
 }: {
@@ -624,9 +629,17 @@ function HeaderPanel({
   modelSources: Provider[];
   routeEntries: RouteEntry[];
   enabledRoutes: RouteEntry[];
+  isProxyRunning: boolean;
+  isCodexTakeoverActive: boolean;
   onCreatePlan: () => void;
   onJump: (tab: WorkspaceTab) => void;
 }) {
+  const enabledPlanCount = routingPlans.filter(
+    (provider) => readCodexRouting(provider)?.enabled !== false,
+  ).length;
+  const linkReady =
+    isProxyRunning && isCodexTakeoverActive && enabledPlanCount > 0;
+
   return (
     <div className="overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950/30">
       <div className="grid gap-4 border-b border-slate-700/70 bg-gradient-to-r from-blue-950/60 via-slate-900 to-emerald-950/40 p-5 xl:grid-cols-[1.3fr_1fr]">
@@ -658,11 +671,11 @@ function HeaderPanel({
             </Button>
             <Button
               variant="outline"
-              onClick={() => onJump("test")}
+              onClick={() => onJump("status")}
               className="gap-2"
             >
-              <Play className="h-4 w-4" />
-              预览匹配结果
+              <Activity className="h-4 w-4" />
+              查看链路状态
             </Button>
           </div>
         </div>
@@ -671,30 +684,37 @@ function HeaderPanel({
           <MetricCard
             color="blue"
             icon={Layers3}
-            label="多路路由"
-            value={`${routingPlans.length} 个`}
-            detail="可直接承载 Codex 多模型分流"
+            label="路由入口"
+            value={`${enabledPlanCount} / ${routingPlans.length}`}
+            detail="已启用 / 已配置的 MultiRouter provider"
           />
           <MetricCard
-            color="emerald"
-            icon={Route}
-            label="启用规则"
-            value={`${enabledRoutes.length} / ${routeEntries.length}`}
-            detail="匹配请求里的 model"
+            color={linkReady ? "emerald" : "rose"}
+            icon={Activity}
+            label="当前链路"
+            value={linkReady ? "在线" : "未就绪"}
+            detail="监听、Codex 接管、路由入口都通过才在线"
+          />
+          <MetricCard
+            color={isProxyRunning ? "emerald" : "amber"}
+            icon={RadioTower}
+            label="本地监听"
+            value={isProxyRunning ? "成功" : "未启动"}
+            detail="CC Switch 本地代理服务"
+          />
+          <MetricCard
+            color={isCodexTakeoverActive ? "emerald" : "rose"}
+            icon={ShieldCheck}
+            label="Codex 接管"
+            value={isCodexTakeoverActive ? "已接管" : "未接管"}
+            detail="未接管时 Codex 不会进入 MultiRouter"
           />
           <MetricCard
             color="amber"
-            icon={Server}
-            label="可接入模型源"
-            value={`${modelSources.length} 个`}
-            detail="可编辑后加入路由方案"
-          />
-          <MetricCard
-            color="rose"
-            icon={ShieldCheck}
-            label="隔离策略"
-            value="不接管"
-            detail="不修改 Codex 当前 Provider"
+            icon={Route}
+            label="启用规则"
+            value={`${enabledRoutes.length} / ${routeEntries.length}`}
+            detail={`${modelSources.length} 个模型源可接入`}
           />
         </div>
       </div>
@@ -708,14 +728,14 @@ function HeaderPanel({
         <FlowStep
           index="2"
           title="多路路由"
-          detail="把多个上游收进一个 Codex 入口"
+          detail="把多个上游收进一个 Codex 代理入口"
         />
-        <FlowStep index="3" title="匹配规则" detail="按精确模型名或前缀分流" />
         <FlowStep
-          index="4"
-          title="测试发布"
-          detail="预览 model 会命中哪条规则"
+          index="3"
+          title="接管 Codex"
+          detail="让 Codex live 配置指向本地代理"
         />
+        <FlowStep index="4" title="匹配规则" detail="按精确模型名或前缀分流" />
       </div>
     </div>
   );
@@ -1034,7 +1054,7 @@ function RoutesTab({
           <SectionHeader
             icon={Route}
             title="规则列表"
-            detail="点击规则查看详情；增删改规则在右上角编辑多路路由里完成。"
+            detail="点击规则查看详情；每条规则的“启用”只表示参与匹配，不是启动服务。"
             action={
               selectedPlan ? (
                 <Button
@@ -1045,7 +1065,7 @@ function RoutesTab({
                   className="gap-2 bg-emerald-600 hover:bg-emerald-500"
                 >
                   <Pencil className="h-4 w-4" />
-                  编辑规则
+                  编辑匹配规则
                 </Button>
               ) : null
             }
@@ -1154,9 +1174,25 @@ function StatusTab({
       ? `${providersById.get(activeProviderId)?.name} (${activeProviderId})`
       : activeProviderId || "未命中";
   const routeEnabled = selectedRouting?.enabled !== false;
-  const linkOnline = Boolean(
-    isProxyRunning && isCodexTakeoverActive && selectedPlan && routeEnabled,
+  const hasEnabledRoutes = selectedRoutes.some(
+    ({ route }) => route.enabled !== false,
   );
+  const linkOnline = Boolean(
+    isProxyRunning &&
+      isCodexTakeoverActive &&
+      selectedPlan &&
+      routeEnabled &&
+      hasEnabledRoutes,
+  );
+  const readinessIssues = [
+    !isProxyRunning ? "本地代理未监听" : "",
+    !isCodexTakeoverActive ? "Codex live 配置未接管" : "",
+    !selectedPlan ? "未选择 MultiRouter provider" : "",
+    selectedPlan && !routeEnabled ? "MultiRouter 入口已关闭" : "",
+    selectedPlan && routeEnabled && !hasEnabledRoutes
+      ? "没有启用的匹配规则"
+      : "",
+  ].filter(Boolean);
 
   return (
     <div className="space-y-4">
@@ -1164,7 +1200,7 @@ function StatusTab({
         <SectionHeader
           icon={Activity}
           title="链路状态"
-          detail="这里展示 Codex 到 CC Switch 再到各个子供应商的当前运行状态。"
+          detail="默认先看这里：只有监听、Codex 接管、路由入口和至少一条匹配规则都通过，Codex 请求才会进入 MultiRouter。"
           action={
             selectedPlan ? (
               <Button
@@ -1183,7 +1219,11 @@ function StatusTab({
             ok={linkOnline}
             label="当前链路"
             value={linkOnline ? "在线" : "未就绪"}
-            detail="需要监听、Codex 接管和 MultiRouter 同时启用"
+            detail={
+              linkOnline
+                ? "Codex 请求会进入本地代理并按 model 分流"
+                : readinessIssues.join("；") || "等待状态刷新"
+            }
           />
           <StatusCard
             ok={isProxyRunning}
@@ -1199,7 +1239,7 @@ function StatusTab({
           />
           <StatusCard
             ok={Boolean(selectedPlan && routeEnabled)}
-            label="多路路由"
+            label="路由入口"
             value={
               selectedPlan ? (routeEnabled ? "已启用" : "已关闭") : "未选择"
             }
@@ -1226,9 +1266,15 @@ function StatusTab({
         <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
           <DetailRow label="当前代理目标" value={activeTargetLabel} />
           <DetailRow
+            label="启用匹配规则"
+            value={`${selectedRoutes.filter(({ route }) => route.enabled !== false).length} / ${selectedRoutes.length}`}
+          />
+          <DetailRow
             label="代理累计请求"
             value={`${proxyStatus?.total_requests ?? 0} 次，成功率 ${proxyStatus?.success_rate ?? 0}%`}
           />
+        </div>
+        <div className="mt-3">
           <DetailRow
             label="最近错误"
             value={proxyStatus?.last_error || latestLog?.errorMessage || "无"}
@@ -1271,7 +1317,7 @@ function StatusTab({
                         : "border-emerald-500/50 bg-emerald-500/15 text-emerald-100",
                     )}
                   >
-                    {entry.route.enabled === false ? "停用" : "启用"}
+                    {entry.route.enabled === false ? "规则停用" : "规则已启用"}
                   </Badge>
                 </div>
                 <div className="mt-3 text-xs leading-5 text-slate-400">
@@ -1644,7 +1690,7 @@ function PlanCardContent({
               : "border-emerald-500/50 bg-emerald-500/15 text-emerald-100",
           )}
         >
-          {routing?.enabled === false ? "已停用" : "已启用"}
+          {routing?.enabled === false ? "入口已停用" : "入口已启用"}
         </Badge>
       </div>
       <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
@@ -1699,7 +1745,7 @@ function RouteListButton({
               : "border-emerald-500/50 bg-emerald-500/15 text-emerald-100",
           )}
         >
-          {entry.route.enabled === false ? "停用" : "启用"}
+          {entry.route.enabled === false ? "规则停用" : "规则已启用"}
         </Badge>
       </div>
       <div className="mt-3 flex flex-wrap gap-2 text-xs">
