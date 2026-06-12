@@ -779,6 +779,10 @@ impl ProxyService {
             return Ok(()); // 未接管，幂等返回
         }
 
+        log::info!(
+            "set_takeover_for_app 正在关闭 {app_type_str} takeover：source=proxy_toggle_or_command"
+        );
+
         // 1) 恢复 Live 配置
         //
         // 必须走 with_fallback 版本：备份 → SSOT → 清理占位符 的三层兜底。
@@ -857,6 +861,13 @@ impl ProxyService {
         if !current_config.enabled && !has_backup && !live_taken_over {
             return Ok(());
         }
+
+        log::info!(
+            "provider switch 正在关闭 {app_type_str} takeover：source=official_switch enabled={} has_backup={} live_taken_over={}",
+            current_config.enabled,
+            has_backup,
+            live_taken_over
+        );
 
         self.restore_live_config_for_app_with_fallback_inner(app)
             .await?;

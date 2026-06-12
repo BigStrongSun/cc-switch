@@ -248,6 +248,16 @@ export const useSwitchProviderMutation = (appId: AppId) => {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+      if (appId === "codex") {
+        await queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+        await queryClient.invalidateQueries({ queryKey: ["proxyRunning"] });
+        await queryClient.invalidateQueries({
+          queryKey: ["proxyTakeoverStatus"],
+        });
+        await queryClient.invalidateQueries({
+          queryKey: ["liveTakeoverActive"],
+        });
+      }
       if (appId === "claude-desktop") {
         await queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
         await queryClient.invalidateQueries({

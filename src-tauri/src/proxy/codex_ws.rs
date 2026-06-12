@@ -281,6 +281,15 @@ pub async fn relay_responses_websocket(
                 let mut fields = close_frame_fields(frame.as_ref());
                 fields.push(("before_first_upstream_frame", (frames == 1).to_string()));
                 log_ws_event(&trace, "upstream_close", &fields);
+                if frames == 1 {
+                    log_ws_event(&trace, "upstream_close_before_data_fallback", &fields);
+                    client_sink
+                        .send(AxumWsMessage::Text(websocket_http_fallback_payload()))
+                        .await
+                        .map_err(|err| err.to_string())?;
+                    client_sink.close().await.map_err(|err| err.to_string())?;
+                    return Ok::<RelaySummary, String>(RelaySummary { frames, bytes });
+                }
             }
             if let Some(client_message) = tungstenite_to_axum_message(message) {
                 client_sink
@@ -291,6 +300,11 @@ pub async fn relay_responses_websocket(
         }
         if frames == 0 {
             log_ws_event(&trace, "upstream_ended_without_frames", &[]);
+            client_sink
+                .send(AxumWsMessage::Text(websocket_http_fallback_payload()))
+                .await
+                .map_err(|err| err.to_string())?;
+            client_sink.close().await.map_err(|err| err.to_string())?;
         }
         Ok::<RelaySummary, String>(RelaySummary { frames, bytes })
     };
@@ -357,21 +371,41 @@ async fn resolve_official_ws_provider(
             candidates.push(provider);
         }
 
-        for candidate in candidates {
-            if codex_provider_uses_chat_completions(&candidate) {
-                continue;
-            }
-            let adapter = get_adapter(&AppType::Codex);
-            let base_url = adapter.extract_base_url(&candidate)?;
-            if base_url.trim_end_matches('/') == CHATGPT_CODEX_BASE_URL {
-                return Ok(candidate);
-            }
-        }
+        return select_official_ws_candidate(candidates);
     }
 
     Err(ProxyError::ConfigError(
         "current Codex route is not ChatGPT official websocket upstream".to_string(),
     ))
+}
+
+/// 选择本次 WebSocket 请求真正允许直连的 official upstream。
+///
+/// 这里只检查第一条 effective route，不能继续扫描 fallback route；否则非 official/chat
+/// 模型会被后续 official fallback 误送进 ChatGPT WebSocket，绕过 HTTP bridge。
+fn select_official_ws_candidate(candidates: Vec<Provider>) -> Result<Provider, ProxyError> {
+    let Some(candidate) = candidates.into_iter().next() else {
+        return Err(ProxyError::ConfigError(
+            "current Codex route has no websocket candidate".to_string(),
+        ));
+    };
+    if codex_provider_uses_chat_completions(&candidate) {
+        return Err(ProxyError::ConfigError(format!(
+            "selected Codex route {} requires HTTP Responses fallback",
+            candidate.id
+        )));
+    }
+
+    let adapter = get_adapter(&AppType::Codex);
+    let base_url = adapter.extract_base_url(&candidate)?;
+    if base_url.trim_end_matches('/') == CHATGPT_CODEX_BASE_URL {
+        return Ok(candidate);
+    }
+
+    Err(ProxyError::ConfigError(format!(
+        "selected Codex route {} is not ChatGPT official websocket upstream",
+        candidate.id
+    )))
 }
 
 /// 构建发往 ChatGPT Codex official backend 的 WebSocket 握手请求。
@@ -403,7 +437,7 @@ async fn build_upstream_request(
     {
         let headers = request.headers_mut();
         copy_official_client_headers(headers, client_headers)?;
-        insert_default_header(headers, "origin", "https://chatgpt.com")?;
+        insert_required_header(headers, "origin", "https://chatgpt.com")?;
 
         for (name, value) in codex_auth_headers(state, provider).await? {
             if name.as_str().eq_ignore_ascii_case("originator") {
@@ -466,16 +500,7 @@ async fn codex_auth_headers(
 
 /// 向客户端发送官方可识别的 WebSocket 内 HTTP 426 错误事件。
 async fn send_websocket_http_fallback(trace: &str, client_socket: &mut WebSocket) {
-    let payload = json!({
-        "type": "error",
-        "status_code": 426,
-        "error": {
-            "message": "CC Switch route requires HTTP Responses fallback.",
-            "type": "cc_switch_websocket_fallback",
-            "code": "responses_websocket_not_supported"
-        }
-    })
-    .to_string();
+    let payload = websocket_http_fallback_payload();
 
     match client_socket.send(AxumWsMessage::Text(payload)).await {
         Ok(()) => log_ws_event(trace, "fallback_event_send_ok", &[]),
@@ -489,6 +514,23 @@ async fn send_websocket_http_fallback(trace: &str, client_socket: &mut WebSocket
         Ok(()) => log_ws_event(trace, "fallback_close_ok", &[]),
         Err(err) => log_ws_event(trace, "fallback_close_error", &[("error", err.to_string())]),
     }
+}
+
+/// 生成官方客户端可识别的 WebSocket 内 426 fallback 事件正文。
+///
+/// WS relay 已经完成握手后无法再返回 HTTP 426 状态码，因此用官方客户端已有的
+/// error-event 语义触发它回退到 HTTP Responses 路径。
+fn websocket_http_fallback_payload() -> String {
+    json!({
+        "type": "error",
+        "status_code": 426,
+        "error": {
+            "message": "CC Switch route requires HTTP Responses fallback.",
+            "type": "cc_switch_websocket_fallback",
+            "code": "responses_websocket_not_supported"
+        }
+    })
+    .to_string()
 }
 
 /// 用指定 close code 和原因关闭客户端连接。
@@ -667,17 +709,15 @@ fn should_skip_client_ws_header(name: &str) -> bool {
     )
 }
 
-/// 缺省写入静态字符串 header；若官方客户端已经提供同名头则不覆盖。
-fn insert_default_header(
+/// 写入必须由官方 upstream 看到的固定 header；用于覆盖本地代理握手里的占位值。
+fn insert_required_header(
     headers: &mut ws_http::HeaderMap,
     name: &'static str,
     value: &'static str,
 ) -> Result<(), ProxyError> {
     let name = ws_http::HeaderName::from_static(name);
     let value = ws_http::HeaderValue::from_static(value);
-    if !headers.contains_key(&name) {
-        headers.insert(name, value);
-    }
+    headers.insert(name, value);
     Ok(())
 }
 
@@ -806,5 +846,50 @@ mod tests {
         assert!(!should_skip_client_ws_header("x-codex-window-id"));
         assert!(!should_skip_client_ws_header("originator"));
         assert!(!should_skip_client_ws_header("user-agent"));
+    }
+
+    /// 验证 chat route 位于第一候选时必须走 HTTP fallback，不能扫描后面的 official fallback。
+    #[test]
+    fn test_ws_candidate_does_not_skip_primary_chat_route_to_official_fallback() {
+        let chat_provider = Provider::with_id(
+            "route-qwen".to_string(),
+            "Qwen route".to_string(),
+            json!({
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "wire_api": "chat",
+            }),
+            None,
+        );
+        let official_provider = Provider::with_id(
+            "route-official".to_string(),
+            "Official fallback".to_string(),
+            json!({
+                "base_url": CHATGPT_CODEX_BASE_URL,
+                "wire_api": "responses",
+            }),
+            None,
+        );
+
+        let err = select_official_ws_candidate(vec![chat_provider, official_provider])
+            .expect_err("primary chat route must not be skipped to official fallback");
+        assert!(err.to_string().contains("requires HTTP Responses fallback"));
+    }
+
+    /// 验证 official route 作为第一候选时仍允许透明 WebSocket relay。
+    #[test]
+    fn test_ws_candidate_accepts_primary_official_route() {
+        let official_provider = Provider::with_id(
+            "route-official".to_string(),
+            "Official primary".to_string(),
+            json!({
+                "base_url": CHATGPT_CODEX_BASE_URL,
+                "wire_api": "responses",
+            }),
+            None,
+        );
+
+        let selected = select_official_ws_candidate(vec![official_provider])
+            .expect("primary official route should relay websocket");
+        assert_eq!(selected.id, "route-official");
     }
 }

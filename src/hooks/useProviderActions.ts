@@ -172,7 +172,8 @@ export function useProviderActions(
         codexRouting &&
         typeof codexRouting === "object" &&
         (codexRouting.enabled !== false ||
-          (Array.isArray(codexRouting.routes) && codexRouting.routes.length > 0));
+          (Array.isArray(codexRouting.routes) &&
+            codexRouting.routes.length > 0));
 
       // Determine why this provider requires the proxy
       let proxyRequiredReason: string | null = null;
@@ -264,13 +265,17 @@ export function useProviderActions(
           );
         }
 
-        // 若已弹过 proxyRequired 警告则不再弹 success
-        if (!proxyRequiredReason) {
+        const shouldShowSuccess = !proxyRequiredReason || activeApp === "codex";
+        if (shouldShowSuccess) {
           let messageKey = "notifications.switchSuccess";
-          let defaultMessage = "切换成功！";
+          let defaultMessage = "切换成功";
           if (activeApp === "codex") {
-            messageKey = "notifications.codexRestartRequired";
-            defaultMessage = "切换成功，请重启客户端以生效";
+            messageKey = isCodexRouterProvider
+              ? "notifications.codexRouterRestartRequired"
+              : "notifications.codexRestartRequired";
+            defaultMessage = isCodexRouterProvider
+              ? "已启用 Codex Multi Router，请保持 CC Switch 运行，并完全重启或新开 Codex 会话后生效"
+              : "切换成功，请重启客户端以生效";
           } else if (activeApp === "claude-desktop") {
             if (provider.meta?.claudeDesktopMode === "proxy") {
               messageKey = "notifications.claudeDesktopProxyRestartRequired";
@@ -286,6 +291,7 @@ export function useProviderActions(
           }
           toast.success(t(messageKey, { defaultValue: defaultMessage }), {
             closeButton: true,
+            duration: activeApp === "codex" ? 8000 : undefined,
           });
         }
       } catch {

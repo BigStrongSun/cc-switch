@@ -1848,6 +1848,13 @@ impl ProviderService {
         // Block switching to official providers when proxy takeover is active.
         // Using a proxy with official APIs (Anthropic/OpenAI/Google) may cause account bans.
         if should_hot_switch && _provider.category.as_deref() == Some("official") {
+            log::info!(
+                "provider switch 正在退出 {} takeover：target_provider={} category=official has_backup={} live_taken_over={}",
+                app_type.as_str(),
+                id,
+                is_app_taken_over,
+                live_taken_over
+            );
             // 官方兜底 provider 不是走本地代理热切，而是退出当前 app 的接管态后
             // 写回干净 live 配置；否则 Codex 会继续命中旧的本地 router。
             block_on_tauri_runtime(
