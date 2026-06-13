@@ -226,6 +226,7 @@
     "providerDeleted": "プロバイダーを削除しました",
     "switchSuccess": "切り替え成功！",
     "codexRestartRequired": "切り替えました。反映するにはクライアントを再起動してください",
+    "codexRouterRestartRequired": "Codex Multi Router を有効にしました。すべての Codex Desktop/app-server プロセスを完全に終了してから Codex を開き直し、モデルメニューを確認してください。",
     "claudeDesktopRestartRequired": "切り替えました。反映するには Claude Desktop を再起動してください",
     "claudeDesktopProxyRestartRequired": "切り替えました。CC Switch を起動したまま Claude Desktop を再起動してください",
     "addToConfigSuccess": "設定に追加しました",

@@ -11,9 +11,11 @@ use crate::proxy::external_openai_api::{
 use crate::proxy::types::*;
 use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats};
 use crate::store::AppState;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{Duration, SystemTime};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
@@ -44,6 +46,7 @@ pub struct CodexDiagnosticCheck {
 pub struct CodexLiveConfigDiagnostics {
     pub path: String,
     pub exists: bool,
+    pub config_modified_at: Option<String>,
     pub parse_error: Option<String>,
     pub model_provider: Option<String>,
     pub active_base_url: Option<String>,
@@ -52,8 +55,38 @@ pub struct CodexLiveConfigDiagnostics {
     pub supports_websockets: Option<bool>,
     pub wire_api: Option<String>,
     pub model_catalog_json: Option<String>,
+    pub model_catalog_path: Option<String>,
+    pub model_catalog_modified_at: Option<String>,
+    pub model_catalog_model_count: Option<usize>,
     pub uses_builtin_openai_with_local_base: bool,
     pub points_to_local_proxy: bool,
+}
+
+/// Codex Desktop/app-server runtime state that can explain stale model picker data.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAppServerProcessDiagnostics {
+    pub pid: u32,
+    pub name: Option<String>,
+    pub executable_path: Option<String>,
+    pub command_line: Option<String>,
+    pub started_at: Option<String>,
+    pub is_app_server: bool,
+}
+
+/// Codex Desktop runtime summary used to detect catalog changes after startup.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexDesktopRuntimeDiagnostics {
+    pub running: bool,
+    pub app_server_running: bool,
+    pub process_count: usize,
+    pub app_server_count: usize,
+    pub processes: Vec<CodexAppServerProcessDiagnostics>,
+    pub newest_app_server_started_at: Option<String>,
+    pub may_have_stale_model_catalog: bool,
+    pub stale_reason: Option<String>,
+    pub detection_error: Option<String>,
 }
 
 /// 单条 `codex-router.log` 事件的清洗后展示结构。
@@ -129,6 +162,7 @@ pub struct CodexMultiRouterDiagnostics {
     pub proxy_status: ProxyStatus,
     pub takeover: ProxyTakeoverStatus,
     pub live_config: CodexLiveConfigDiagnostics,
+    pub desktop_runtime: CodexDesktopRuntimeDiagnostics,
     pub router_log: CodexRouterLogDiagnostics,
     pub route_plan: CodexRoutePlanDiagnostics,
 }
@@ -225,6 +259,7 @@ pub async fn diagnose_codex_multirouter(
     let live_config = codex_live_config_diagnostics(probe_port);
     let route_plan = codex_route_plan_diagnostics(&state, provider_id.as_deref())?;
     let router_log = codex_router_log_diagnostics(route_plan.provider_id.as_deref());
+    let desktop_runtime = codex_desktop_runtime_diagnostics(&live_config);
 
     let mut checks = Vec::new();
     checks.push(codex_check(
@@ -387,6 +422,38 @@ pub async fn diagnose_codex_multirouter(
         ],
     ));
     checks.push(codex_check(
+        "codex_desktop_runtime",
+        "Codex Desktop runtime",
+        if desktop_runtime.may_have_stale_model_catalog {
+            CodexDiagnosticStatus::Warn
+        } else {
+            CodexDiagnosticStatus::Info
+        },
+        desktop_runtime.stale_reason.clone().unwrap_or_else(|| {
+            if desktop_runtime.app_server_running {
+                "Codex app-server is running; compare startup time with config/catalog mtimes when the picker looks stale.".to_string()
+            } else if desktop_runtime.running {
+                "Codex Desktop process is running, but no app-server command line was detected.".to_string()
+            } else {
+                "No running Codex Desktop/app-server process was detected.".to_string()
+            }
+        }),
+        vec![
+            format!(
+                "processes={} app_servers={}",
+                desktop_runtime.process_count, desktop_runtime.app_server_count
+            ),
+            format!(
+                "newest_app_server_started_at={:?}",
+                desktop_runtime.newest_app_server_started_at
+            ),
+            format!(
+                "catalog_modified_at={:?}",
+                live_config.model_catalog_modified_at
+            ),
+        ],
+    ));
+    checks.push(codex_check(
         "recent_router_error",
         "近期路由错误",
         if router_log.latest_error.is_some() {
@@ -424,6 +491,7 @@ pub async fn diagnose_codex_multirouter(
         proxy_status,
         takeover,
         live_config,
+        desktop_runtime,
         router_log,
         route_plan,
     })
@@ -538,12 +606,14 @@ fn codex_live_config_diagnostics(proxy_port: u16) -> CodexLiveConfigDiagnostics 
     let path = crate::codex_config::get_codex_config_path();
     let path_text = path.display().to_string();
     let exists = path.exists();
+    let config_modified_at = file_modified_at(&path);
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(err) => {
             return CodexLiveConfigDiagnostics {
                 path: path_text,
                 exists,
+                config_modified_at,
                 parse_error: Some(format!("读取失败：{err}")),
                 model_provider: None,
                 active_base_url: None,
@@ -552,6 +622,9 @@ fn codex_live_config_diagnostics(proxy_port: u16) -> CodexLiveConfigDiagnostics 
                 supports_websockets: None,
                 wire_api: None,
                 model_catalog_json: None,
+                model_catalog_path: None,
+                model_catalog_modified_at: None,
+                model_catalog_model_count: None,
                 uses_builtin_openai_with_local_base: false,
                 points_to_local_proxy: false,
             };
@@ -565,6 +638,7 @@ fn codex_live_config_diagnostics(proxy_port: u16) -> CodexLiveConfigDiagnostics 
                 path: path_text,
                 exists,
                 parse_error: Some(format!("TOML 解析失败：{err}")),
+                config_modified_at,
                 model_provider: None,
                 active_base_url: crate::codex_config::extract_codex_base_url(&text),
                 openai_base_url: None,
@@ -572,6 +646,9 @@ fn codex_live_config_diagnostics(proxy_port: u16) -> CodexLiveConfigDiagnostics 
                 supports_websockets: None,
                 wire_api: None,
                 model_catalog_json: None,
+                model_catalog_path: None,
+                model_catalog_modified_at: None,
+                model_catalog_model_count: None,
                 uses_builtin_openai_with_local_base: false,
                 points_to_local_proxy: false,
             };
@@ -623,6 +700,13 @@ fn codex_live_config_diagnostics(proxy_port: u16) -> CodexLiveConfigDiagnostics 
                 .and_then(|value| value.as_str())
                 .map(ToString::to_string)
         });
+    let model_catalog_path = model_catalog_json
+        .as_deref()
+        .map(|catalog| resolve_codex_catalog_path(&path, catalog));
+    let model_catalog_modified_at = model_catalog_path.as_deref().and_then(file_modified_at);
+    let model_catalog_model_count = model_catalog_path
+        .as_deref()
+        .and_then(count_codex_catalog_models);
     let uses_builtin_openai_with_local_base = model_provider
         .as_deref()
         .is_none_or(|provider| provider.eq_ignore_ascii_case("openai"))
@@ -636,6 +720,7 @@ fn codex_live_config_diagnostics(proxy_port: u16) -> CodexLiveConfigDiagnostics 
     CodexLiveConfigDiagnostics {
         path: path_text,
         exists,
+        config_modified_at,
         parse_error: None,
         model_provider,
         active_base_url,
@@ -644,8 +729,200 @@ fn codex_live_config_diagnostics(proxy_port: u16) -> CodexLiveConfigDiagnostics 
         supports_websockets,
         wire_api,
         model_catalog_json,
+        model_catalog_path: model_catalog_path.map(|path| path.display().to_string()),
+        model_catalog_modified_at,
+        model_catalog_model_count,
         uses_builtin_openai_with_local_base,
         points_to_local_proxy,
+    }
+}
+
+/// 读取文件修改时间并格式化为诊断面板可显示的时间戳。
+fn file_modified_at(path: &Path) -> Option<String> {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .map(system_time_to_rfc3339)
+}
+
+/// 将 SystemTime 转成 RFC3339，便于前端展示和人工比对。
+fn system_time_to_rfc3339(time: SystemTime) -> String {
+    let datetime: chrono::DateTime<chrono::Local> = time.into();
+    datetime.to_rfc3339()
+}
+
+/// 按 Codex 规则把相对 model_catalog_json 解析到 config 所在目录。
+fn resolve_codex_catalog_path(config_path: &Path, catalog: &str) -> PathBuf {
+    let catalog_path = PathBuf::from(catalog);
+    if catalog_path.is_absolute() {
+        catalog_path
+    } else {
+        config_path
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(catalog_path)
+    }
+}
+
+/// 统计生成的模型目录数量，避免只看到路径却不知道 catalog 是否为空。
+fn count_codex_catalog_models(path: &Path) -> Option<usize> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<Value>(&text).ok()?;
+    value
+        .get("models")
+        .and_then(|models| models.as_array())
+        .map(|models| models.len())
+}
+
+/// 查询 Codex Desktop/app-server 运行态，并与 catalog 写入时间做保守对比。
+fn codex_desktop_runtime_diagnostics(
+    live_config: &CodexLiveConfigDiagnostics,
+) -> CodexDesktopRuntimeDiagnostics {
+    let (processes, detection_error) = query_codex_processes();
+    let app_server_count = processes
+        .iter()
+        .filter(|process| process.is_app_server)
+        .count();
+    let newest_app_server_started_at = processes
+        .iter()
+        .filter(|process| process.is_app_server)
+        .filter_map(|process| process.started_at.as_deref())
+        .filter_map(parse_rfc3339_to_local)
+        .max()
+        .map(|started_at| started_at.to_rfc3339());
+
+    let catalog_or_config_modified_at = [
+        live_config.config_modified_at.as_deref(),
+        live_config.model_catalog_modified_at.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(parse_rfc3339_to_local)
+    .max();
+    let app_server_started_at = newest_app_server_started_at
+        .as_deref()
+        .and_then(parse_rfc3339_to_local);
+    let may_have_stale_model_catalog = app_server_started_at
+        .zip(catalog_or_config_modified_at)
+        .is_some_and(|(started_at, modified_at)| started_at < modified_at);
+    let stale_reason = if may_have_stale_model_catalog {
+        Some(
+            "Codex app-server started before the latest config/catalog write, so its in-memory model manager may still expose the old picker list.".to_string(),
+        )
+    } else {
+        None
+    };
+
+    CodexDesktopRuntimeDiagnostics {
+        running: !processes.is_empty(),
+        app_server_running: app_server_count > 0,
+        process_count: processes.len(),
+        app_server_count,
+        processes,
+        newest_app_server_started_at,
+        may_have_stale_model_catalog,
+        stale_reason,
+        detection_error,
+    }
+}
+
+/// 解析诊断时间戳，用于判断 app-server 是否早于配置或 catalog 写入。
+fn parse_rfc3339_to_local(text: &str) -> Option<chrono::DateTime<chrono::Local>> {
+    chrono::DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|datetime| datetime.with_timezone(&chrono::Local))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct RawWindowsCodexProcess {
+    process_id: Option<u32>,
+    name: Option<String>,
+    executable_path: Option<String>,
+    command_line: Option<String>,
+    started_at: Option<String>,
+}
+
+/// 通过 Windows CIM 读取 Codex 进程；非 Windows 构建返回空快照。
+fn query_codex_processes() -> (Vec<CodexAppServerProcessDiagnostics>, Option<String>) {
+    #[cfg(target_os = "windows")]
+    {
+        let script = r#"
+Get-CimInstance Win32_Process -Filter "Name = 'Codex.exe' OR Name = 'codex.exe'" |
+  Select-Object ProcessId,Name,ExecutablePath,CommandLine,@{Name='StartedAt';Expression={$_.CreationDate.ToLocalTime().ToString('o')}} |
+  ConvertTo-Json -Compress
+"#;
+        let output = match Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .output()
+        {
+            Ok(output) => output,
+            Err(err) => return (Vec::new(), Some(format!("PowerShell failed: {err}"))),
+        };
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return (
+                Vec::new(),
+                Some(if stderr.is_empty() {
+                    format!("PowerShell exited with {}", output.status)
+                } else {
+                    stderr
+                }),
+            );
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if stdout.is_empty() {
+            return (Vec::new(), None);
+        }
+        let raw_value = match serde_json::from_str::<Value>(&stdout) {
+            Ok(value) => value,
+            Err(err) => {
+                return (
+                    Vec::new(),
+                    Some(format!(
+                        "Process JSON parse failed: {err}; payload={stdout}"
+                    )),
+                )
+            }
+        };
+        let raw_processes = if raw_value.is_array() {
+            serde_json::from_value::<Vec<RawWindowsCodexProcess>>(raw_value)
+        } else {
+            serde_json::from_value::<RawWindowsCodexProcess>(raw_value).map(|item| vec![item])
+        };
+        match raw_processes {
+            Ok(processes) => (
+                processes
+                    .into_iter()
+                    .map(|process| {
+                        let command_line = process.command_line;
+                        let is_app_server = command_line
+                            .as_deref()
+                            .is_some_and(|line| line.contains("app-server"));
+                        CodexAppServerProcessDiagnostics {
+                            pid: process.process_id.unwrap_or_default(),
+                            name: process.name,
+                            executable_path: process.executable_path,
+                            command_line,
+                            started_at: process.started_at,
+                            is_app_server,
+                        }
+                    })
+                    .collect(),
+                None,
+            ),
+            Err(err) => (
+                Vec::new(),
+                Some(format!(
+                    "Process JSON shape parse failed: {err}; payload={stdout}"
+                )),
+            ),
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        (Vec::new(), None)
     }
 }
 

@@ -2031,13 +2031,20 @@ function DiagnosticsPanel({
             </div>
           )}
 
+          {diagnostics.desktopRuntime?.mayHaveStaleModelCatalog && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
+              {diagnostics.desktopRuntime.staleReason ??
+                "Codex app-server may still be using an older in-memory model catalog. Fully quit Codex Desktop/app-server, reopen Codex, and then check the model picker again."}
+            </div>
+          )}
+
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {diagnostics.checks.map((check) => (
               <DiagnosticCheckCard key={check.id} check={check} />
             ))}
           </div>
 
-          <div className="grid gap-3 text-sm xl:grid-cols-3">
+          <div className="grid gap-3 text-sm xl:grid-cols-4">
             <div className="rounded-lg border border-slate-700 bg-slate-950/50 p-3">
               <div className="mb-3 flex items-center gap-2 font-semibold text-slate-100">
                 <Settings2 className="h-4 w-4 text-blue-300" />
@@ -2063,6 +2070,70 @@ function DiagnosticsPanel({
                 <DetailRow
                   label="wire_api"
                   value={diagnostics.liveConfig.wireApi ?? "未设置"}
+                />
+                <DetailRow
+                  label="model_catalog_json"
+                  value={diagnostics.liveConfig.modelCatalogJson ?? "未设置"}
+                />
+                <DetailRow
+                  label="catalog 模型数"
+                  value={
+                    diagnostics.liveConfig.modelCatalogModelCount == null
+                      ? "未知"
+                      : `${diagnostics.liveConfig.modelCatalogModelCount}`
+                  }
+                />
+                <DetailRow
+                  label="config 修改时间"
+                  value={diagnostics.liveConfig.configModifiedAt ?? "未知"}
+                />
+                <DetailRow
+                  label="catalog 修改时间"
+                  value={diagnostics.liveConfig.modelCatalogModifiedAt ?? "未知"}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-700 bg-slate-950/50 p-3">
+              <div className="mb-3 flex items-center gap-2 font-semibold text-slate-100">
+                <Server className="h-4 w-4 text-violet-300" />
+                Codex Desktop
+              </div>
+              <div className="space-y-2">
+                <DetailRow
+                  label="进程"
+                  value={
+                    diagnostics.desktopRuntime?.running
+                      ? `${diagnostics.desktopRuntime.processCount} 个`
+                      : "未检测到"
+                  }
+                />
+                <DetailRow
+                  label="app-server"
+                  value={
+                    diagnostics.desktopRuntime?.appServerRunning
+                      ? `${diagnostics.desktopRuntime.appServerCount} 个`
+                      : "未检测到"
+                  }
+                />
+                <DetailRow
+                  label="最新 app-server 启动"
+                  value={
+                    diagnostics.desktopRuntime?.newestAppServerStartedAt ??
+                    "未知"
+                  }
+                />
+                <DetailRow
+                  label="stale catalog"
+                  value={
+                    diagnostics.desktopRuntime?.mayHaveStaleModelCatalog
+                      ? "可能"
+                      : "未发现"
+                  }
+                />
+                <DetailRow
+                  label="检测错误"
+                  value={diagnostics.desktopRuntime?.detectionError ?? "无"}
                 />
               </div>
             </div>

@@ -226,6 +226,7 @@
     "providerDeleted": "供應商刪除成功",
     "switchSuccess": "切換成功！",
     "codexRestartRequired": "切換成功，請重新啟動客戶端以套用",
+    "codexRouterRestartRequired": "已啟用 Codex Multi Router。請完全退出所有 Codex Desktop/app-server 進程後重新開啟，再檢查模型選單。",
     "claudeDesktopRestartRequired": "切換成功，重新啟動 Claude Desktop 後生效",
     "claudeDesktopProxyRestartRequired": "切換成功，請保持 CC Switch 執行，並重新啟動 Claude Desktop 後生效",
     "addToConfigSuccess": "已新增至設定",

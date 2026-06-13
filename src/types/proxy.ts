@@ -64,6 +64,7 @@ export interface CodexDiagnosticCheck {
 export interface CodexLiveConfigDiagnostics {
   path: string;
   exists: boolean;
+  configModifiedAt: string | null;
   parseError: string | null;
   modelProvider: string | null;
   activeBaseUrl: string | null;
@@ -72,8 +73,32 @@ export interface CodexLiveConfigDiagnostics {
   supportsWebsockets: boolean | null;
   wireApi: string | null;
   modelCatalogJson: string | null;
+  modelCatalogPath: string | null;
+  modelCatalogModifiedAt: string | null;
+  modelCatalogModelCount: number | null;
   usesBuiltinOpenAIWithLocalBase: boolean;
   pointsToLocalProxy: boolean;
+}
+
+export interface CodexAppServerProcessDiagnostics {
+  pid: number;
+  name: string | null;
+  executablePath: string | null;
+  commandLine: string | null;
+  startedAt: string | null;
+  isAppServer: boolean;
+}
+
+export interface CodexDesktopRuntimeDiagnostics {
+  running: boolean;
+  appServerRunning: boolean;
+  processCount: number;
+  appServerCount: number;
+  processes: CodexAppServerProcessDiagnostics[];
+  newestAppServerStartedAt: string | null;
+  mayHaveStaleModelCatalog: boolean;
+  staleReason: string | null;
+  detectionError: string | null;
 }
 
 export interface CodexRouterLogEvent {
@@ -134,6 +159,7 @@ export interface CodexMultiRouterDiagnostics {
   proxyStatus: ProxyStatus;
   takeover: ProxyTakeoverStatus;
   liveConfig: CodexLiveConfigDiagnostics;
+  desktopRuntime: CodexDesktopRuntimeDiagnostics;
   routerLog: CodexRouterLogDiagnostics;
   routePlan: CodexRoutePlanDiagnostics;
 }

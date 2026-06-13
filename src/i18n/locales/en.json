@@ -226,6 +226,7 @@
     "providerDeleted": "Provider deleted successfully",
     "switchSuccess": "Switch successful!",
     "codexRestartRequired": "Switched successfully. Restart the client to apply changes.",
+    "codexRouterRestartRequired": "Codex Multi Router is enabled. Fully quit all Codex Desktop/app-server processes, reopen Codex, and then check the model picker.",
     "claudeDesktopRestartRequired": "Switched successfully. Restart Claude Desktop to apply changes.",
     "claudeDesktopProxyRestartRequired": "Switched successfully. Keep CC Switch running and restart Claude Desktop to apply changes.",
     "addToConfigSuccess": "Added to config",
