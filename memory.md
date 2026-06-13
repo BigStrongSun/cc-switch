@@ -1,5 +1,14 @@
 # CC Switch Repository Memory
 
+## 2026-06-14 Codex Desktop Three-Model Runtime Snapshot
+
+- Re-focused the 3-model picker report on the current running Codex Desktop state, not only on provider-id/history cleanup.
+- Current live files are valid for MultiRouter: `~/.codex/config.toml` has `model_provider = "cc_switch_codex_router"`, top-level `model_catalog_json = "cc-switch-model-catalog.json"`, and `[model_providers.cc_switch_codex_router]` pointing at `http://127.0.0.1:15721/v1`; both `cc-switch-model-catalog.json` and `models_cache.json` contain the 7 expected slugs.
+- A fresh Codex CLI process using the current `~/.codex/config.toml` (`codex debug models`) returns all 7 slugs, proving the generated catalog is parseable by Codex and the model fields are not filtered out by `visibility` / `supported_in_api`.
+- The active Desktop session JSONL still records only `gpt-5.5`, `gpt-5.4`, and `gpt-5.4-mini` in dynamic thread-tool model descriptions, so at least one Desktop runtime model list remains a 3-model snapshot even while `session_meta.model_provider` is the router provider.
+- Codex app-server `model/list` is served from `supported_models(thread_manager)`, and `ThreadManager::new` builds a shared `models_manager` once from the startup `Config`. Later config/catalog writes do not automatically rebuild this manager. The direct remaining verification is to call the live Desktop `model/list` endpoint over its app-server control socket (`\\.\pipe\codex-ipc` on this host); if it returns 3, the root cause is confirmed as app-server runtime snapshot/cache, not CCSwitch catalog generation.
+- Do not use dynamic tool model descriptions alone as final proof of the visible menu, because the current session also appears to use catalog-derived `gpt-5.5` model metadata. The strongest evidence chain is: live files 7 -> fresh CLI 7 -> Desktop session/tool runtime 3 -> app-server `model/list` runtime result.
+
 ## 2026-06-13 Codex MultiRouter Stable Bucket Reconciliation
 
 - Re-checked the 3-model Codex Desktop picker issue after the 3.16.2-5 build.
