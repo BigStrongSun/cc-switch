@@ -340,8 +340,12 @@ mod tests {
 
         {
             let conn = crate::database::lock_conn!(db.conn);
-            let date_str = chrono::DateTime::from_timestamp(old_ts, 0)
-                .unwrap()
+            // rollup 聚合使用 SQLite `localtime` 分桶；测试预置的已有 rollup
+            // 也必须用同一个本地日期，避免 UTC 日期在本地凌晨附近错开一天。
+            let date_str = Local
+                .timestamp_opt(old_ts, 0)
+                .single()
+                .expect("old timestamp should map to one local date")
                 .format("%Y-%m-%d")
                 .to_string();
             conn.execute(

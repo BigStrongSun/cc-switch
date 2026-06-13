@@ -741,6 +741,140 @@ openai_base_url = "http://127.0.0.1:15721/v1"
             "switching a Codex MultiRouter provider should enable Codex takeover"
         );
 
+        let seed_stale_three_model_picker = || {
+            // 模拟用户现场：DB/current provider 已经有完整 MultiRouter 目录，
+            // 但 Codex live catalog/cache 仍停在旧的三个 OpenAI 模型。
+            let stale_live_config = r#"model_provider = "codex_model_router_v2"
+model = "gpt-5.4-mini"
+model_catalog_json = "cc-switch-model-catalog.json"
+
+[model_providers.codex_model_router_v2]
+name = "CCSwitch MultiRouter"
+base_url = "http://127.0.0.1:15721/v1"
+wire_api = "responses"
+requires_openai_auth = false
+supports_websockets = false
+experimental_bearer_token = "PROXY_MANAGED"
+"#;
+            crate::codex_config::write_codex_live_atomic(
+                &json!({ "OPENAI_API_KEY": "PROXY_MANAGED" }),
+                Some(stale_live_config),
+            )
+            .expect("seed stale Codex live config");
+
+            let stale_models = json!([
+                { "slug": "gpt-5.5", "display_name": "GPT-5.5" },
+                { "slug": "gpt-5.4", "display_name": "GPT-5.4" },
+                { "slug": "gpt-5.4-mini", "display_name": "GPT-5.4 Mini" }
+            ]);
+            std::fs::write(
+                crate::codex_config::get_codex_model_catalog_path(),
+                serde_json::to_string_pretty(&json!({ "models": stale_models }))
+                    .expect("serialize stale catalog"),
+            )
+            .expect("write stale catalog");
+            std::fs::write(
+                &cache_path,
+                serde_json::to_string_pretty(&json!({
+                    "fetched_at": "2026-06-12T00:00:00.000000000Z",
+                    "etag": "official-cache",
+                    "client_version": "0.140.0",
+                    "models": [
+                        { "slug": "gpt-5.5", "display_name": "GPT-5.5" },
+                        { "slug": "gpt-5.4", "display_name": "GPT-5.4" },
+                        { "slug": "gpt-5.4-mini", "display_name": "GPT-5.4 Mini" }
+                    ]
+                }))
+                .expect("serialize stale cache"),
+            )
+            .expect("write stale cache");
+        };
+
+        let assert_live_picker_has_multirouter_models = |label: &str| {
+            let live_config = std::fs::read_to_string(crate::codex_config::get_codex_config_path())
+                .expect("read refreshed Codex live config");
+            assert!(
+                live_config.contains("model_provider = \"codex_model_router_v2\""),
+                "{label}: live config must stay on the stable MultiRouter provider, got:\n{live_config}"
+            );
+            assert!(
+                live_config.contains("model_catalog_json = \"cc-switch-model-catalog.json\""),
+                "{label}: live config must keep the generated catalog pointer, got:\n{live_config}"
+            );
+            assert!(
+                !live_config.contains("model_provider = \"openai\""),
+                "{label}: live config must not fall back to built-in OpenAI, got:\n{live_config}"
+            );
+            assert!(
+                !live_config.contains("openai_base_url"),
+                "{label}: live config must not use built-in OpenAI base URL, got:\n{live_config}"
+            );
+
+            let catalog_text =
+                std::fs::read_to_string(crate::codex_config::get_codex_model_catalog_path())
+                    .expect("read refreshed catalog");
+            let catalog: serde_json::Value =
+                serde_json::from_str(&catalog_text).expect("parse refreshed catalog");
+            let catalog_slugs: Vec<&str> = catalog
+                .get("models")
+                .and_then(|value| value.as_array())
+                .expect("refreshed catalog should contain models")
+                .iter()
+                .filter_map(|model| model.get("slug").and_then(|value| value.as_str()))
+                .collect();
+
+            let cache_text =
+                std::fs::read_to_string(&cache_path).expect("read refreshed models cache");
+            let cache: serde_json::Value =
+                serde_json::from_str(&cache_text).expect("parse refreshed models cache");
+            let cache_slugs: Vec<&str> = cache
+                .get("models")
+                .and_then(|value| value.as_array())
+                .expect("refreshed cache should contain models")
+                .iter()
+                .filter_map(|model| model.get("slug").and_then(|value| value.as_str()))
+                .collect();
+
+            for expected in [
+                "gpt-5.5",
+                "gpt-5.4",
+                "gpt-5.4-mini",
+                "gpt-5.3-codex-spark",
+                "qwen3.6",
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
+            ] {
+                assert!(
+                    catalog_slugs.contains(&expected),
+                    "{label}: catalog should include {expected}, got: {catalog_slugs:?}"
+                );
+                assert!(
+                    cache_slugs.contains(&expected),
+                    "{label}: cache should include {expected}, got: {cache_slugs:?}"
+                );
+            }
+        };
+
+        seed_stale_three_model_picker();
+        ProviderService::update(
+            &state,
+            AppType::Codex,
+            Some("codex-openai-router"),
+            router.clone(),
+        )
+        .expect("saving current router provider should refresh stale Codex picker files");
+        assert_live_picker_has_multirouter_models("provider update");
+
+        seed_stale_three_model_picker();
+        ProviderService::sync_current_provider_for_app(&state, AppType::Codex)
+            .expect("single-app current provider sync should refresh stale Codex picker files");
+        assert_live_picker_has_multirouter_models("single-app sync");
+
+        seed_stale_three_model_picker();
+        ProviderService::sync_current_to_live(&state)
+            .expect("global current provider sync should refresh stale Codex picker files");
+        assert_live_picker_has_multirouter_models("global sync");
+
         state.proxy_service.stop().await.expect("stop proxy");
     }
 
@@ -1888,6 +2022,19 @@ impl ProviderService {
                     )
                     .map_err(|e| AppError::Message(format!("同步 Claude Live 配置失败: {e}")))?;
                 }
+
+                if matches!(app_type, AppType::Codex)
+                    && (live_taken_over || block_on_tauri_runtime(state.proxy_service.is_running()))
+                {
+                    // Codex 模型菜单读取 live catalog/cache；接管期间保存当前 provider 时，
+                    // 只更新 backup 会让 Desktop 继续使用旧的三模型缓存。
+                    block_on_tauri_runtime(
+                        state
+                            .proxy_service
+                            .sync_codex_live_from_provider_while_proxy_active(&provider),
+                    )
+                    .map_err(|e| AppError::Message(format!("同步 Codex Live 配置失败: {e}")))?;
+                }
             } else {
                 write_live_with_common_config(state.db.as_ref(), &app_type, &provider)?;
                 // Sync MCP
@@ -2340,6 +2487,18 @@ impl ProviderService {
                     .update_live_backup_from_provider(app_type.as_str(), provider),
             )
             .map_err(|e| AppError::Message(format!("更新 Live 备份失败: {e}")))?;
+
+            if matches!(app_type, AppType::Codex)
+                && (live_taken_over || block_on_tauri_runtime(state.proxy_service.is_running()))
+            {
+                // 显式同步当前 Codex provider 时，接管 live 也必须重新投影最新 catalog/cache。
+                block_on_tauri_runtime(
+                    state
+                        .proxy_service
+                        .sync_codex_live_from_provider_while_proxy_active(provider),
+                )
+                .map_err(|e| AppError::Message(format!("同步 Codex Live 配置失败: {e}")))?;
+            }
             return Ok(());
         }
 

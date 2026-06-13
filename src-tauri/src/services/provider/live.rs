@@ -995,6 +995,18 @@ fn sync_current_provider_for_app_respecting_takeover(
                     .update_live_backup_from_provider(app_type.as_str(), provider),
             )
             .map_err(|e| AppError::Message(format!("更新 Live 备份失败: {e}")))?;
+
+            if matches!(app_type, AppType::Codex)
+                && (live_taken_over || block_on_tauri_runtime(state.proxy_service.is_running()))
+            {
+                // 全量同步当前 provider 时也要刷新 Codex live catalog/cache，否则模型菜单会停在旧缓存。
+                block_on_tauri_runtime(
+                    state
+                        .proxy_service
+                        .sync_codex_live_from_provider_while_proxy_active(provider),
+                )
+                .map_err(|e| AppError::Message(format!("同步 Codex Live 配置失败: {e}")))?;
+            }
         }
         return Ok(());
     }
