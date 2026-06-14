@@ -621,6 +621,45 @@ struct CodexCatalogModelSpec {
     is_default: bool,
 }
 
+/// 为 Codex 多 Agent 工具的模型说明生成稳定排序键。
+///
+/// Codex 0.137.0 的 `spawn_agent` 工具说明最多只展示前 5 个 picker-visible 模型；
+/// 如果完全沿用 DB 顺序，DeepSeek 往往排在 OpenAI/Spark/Qwen 后面而被截断。
+/// 这里仅调整 catalog priority/展示顺序，不改变模型可用性、默认模型、路由或统计归属。
+fn codex_catalog_model_priority_key(
+    spec: &CodexCatalogModelSpec,
+    original_index: usize,
+) -> (u8, usize) {
+    let model = spec.model.to_ascii_lowercase();
+    let provider_rank = if spec.is_default {
+        0
+    } else if model.contains("qwen") {
+        1
+    } else if model.contains("deepseek") {
+        2
+    } else if model.contains("codex-spark") || model.contains("spark") {
+        3
+    } else {
+        4
+    };
+
+    (provider_rank, original_index)
+}
+
+/// 按 Codex 工具说明展示限制重排 catalog 条目。
+///
+/// 返回值保留所有模型，只让跨 provider 的代表模型进入前 5，避免 DeepSeek 只因为
+/// priority 靠后而不出现在 `spawn_agent` 的 Available model overrides 文本里。
+fn sort_codex_catalog_specs_for_picker(
+    specs: Vec<CodexCatalogModelSpec>,
+) -> Vec<CodexCatalogModelSpec> {
+    let mut indexed_specs = specs.into_iter().enumerate().collect::<Vec<_>>();
+    indexed_specs.sort_by_key(|(original_index, spec)| {
+        codex_catalog_model_priority_key(spec, *original_index)
+    });
+    indexed_specs.into_iter().map(|(_, spec)| spec).collect()
+}
+
 fn codex_catalog_model_specs(settings: &Value, config_text: &str) -> Vec<CodexCatalogModelSpec> {
     let Some(models) = settings
         .get("modelCatalog")
@@ -685,7 +724,7 @@ fn codex_catalog_model_specs(settings: &Value, config_text: &str) -> Vec<CodexCa
         }
     }
 
-    specs
+    sort_codex_catalog_specs_for_picker(specs)
 }
 
 fn find_codex_model_template(catalog: &Value) -> Option<Value> {
@@ -3375,6 +3414,44 @@ openai_base_url = "http://127.0.0.1:15721/v1"
                 .get("web_search_tool_type")
                 .and_then(|value| value.as_str()),
             Some("text")
+        );
+    }
+
+    #[test]
+    /// Codex 0.137.0 的 spawn_agent 工具说明只展示前 5 个 picker-visible 模型。
+    /// MultiRouter 需要把 Qwen/DeepSeek 这类跨 provider 模型排进前 5，同时保留全部模型。
+    fn codex_model_catalog_prioritizes_cross_provider_models_for_spawn_agent_description() {
+        let settings = json!({
+            "modelCatalog": {
+                "models": [
+                    { "model": "gpt-5.5", "displayName": "GPT-5.5" },
+                    { "model": "gpt-5.4", "displayName": "GPT-5.4" },
+                    { "model": "gpt-5.4-mini", "displayName": "GPT-5.4 Mini" },
+                    { "model": "gpt-5.3-codex-spark", "displayName": "Codex Spark" },
+                    { "model": "qwen3.6", "displayName": "Qwen3.6 Local" },
+                    { "model": "deepseek-v4-flash", "displayName": "DeepSeek V4 Flash" },
+                    { "model": "deepseek-v4-pro", "displayName": "DeepSeek V4 Pro" }
+                ]
+            }
+        });
+        let specs = codex_catalog_model_specs(&settings, r#"model = "gpt-5.5""#);
+        let ordered = specs
+            .iter()
+            .map(|spec| spec.model.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ordered,
+            vec![
+                "gpt-5.5",
+                "qwen3.6",
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
+                "gpt-5.3-codex-spark",
+                "gpt-5.4",
+                "gpt-5.4-mini"
+            ],
+            "DeepSeek must be inside Codex spawn_agent's first five model overrides"
         );
     }
 
