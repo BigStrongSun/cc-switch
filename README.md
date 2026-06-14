@@ -1,13 +1,13 @@
 <div align="center">
 
-# CC Switch
+# CCSwitchMulti
 
-### The All-in-One Manager for Claude Code, Claude Desktop, Codex, Gemini CLI, OpenCode, OpenClaw & Hermes Agent
+### A Codex MultiRouter branch of CC Switch
 
-[![Version](https://img.shields.io/github/v/release/farion1231/cc-switch?color=blue&label=version)](https://github.com/farion1231/cc-switch/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/farion1231/cc-switch/releases)
+[![Version](https://img.shields.io/github/v/release/BigStrongSun/cc-switch?color=blue&label=version)](https://github.com/BigStrongSun/cc-switch/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/BigStrongSun/cc-switch/releases)
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-orange.svg)](https://tauri.app/)
-[![Downloads](https://img.shields.io/github/downloads/farion1231/cc-switch/total)](https://github.com/farion1231/cc-switch/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/BigStrongSun/cc-switch/total)](https://github.com/BigStrongSun/cc-switch/releases/latest)
 
 <a href="https://trendshift.io/repositories/15372" target="_blank"><img src="https://trendshift.io/api/badge/repositories/15372" alt="farion1231%2Fcc-switch | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
@@ -16,6 +16,54 @@
 English | [中文](README_ZH.md) | [日本語](README_JA.md) | [Deutsch](README_DE.md) | [Changelog](CHANGELOG.md)
 
 </div>
+
+## CCSwitchMulti Branch Notice
+
+CCSwitchMulti is a downstream branch of the official [CC Switch](https://github.com/farion1231/cc-switch). It keeps the upstream desktop manager, provider database, local proxy, MCP/Skills sync, session management, cloud sync, and cross-platform Tauri app structure, while adding a Codex-focused MultiRouter workflow for running several model sources behind one Codex provider.
+
+The rest of this README still contains the inherited upstream CC Switch documentation. Read this section first when you are using builds from the `BigStrongSun/cc-switch` fork, because the branch adds behavior that does not exist in stock CC Switch.
+
+### Extra Capabilities In This Branch
+
+- **Codex MultiRouter provider**: exposes one Codex provider, usually named `OpenAI Multi-Model Router`, that can show and route multiple model families such as official OpenAI/Codex models, Codex Spark, Qwen, and DeepSeek from the same Codex model picker.
+- **Model catalog projection**: stores the router catalog in CC Switch provider settings, then writes Codex-readable `model_catalog_json`, `cc-switch-model-catalog.json`, and owned `models_cache.json` data so Codex can discover the merged candidate list.
+- **Per-model routing**: stores route rules in `settings_config.codexRouting`; the Rust local proxy reads each request model, selects the matching upstream, injects the right credentials, and bridges OpenAI Responses traffic to Chat Completions backends when needed.
+- **Stable Codex runtime bucket**: uses the router provider bucket `codex_model_router_v2` instead of the built-in `openai` provider or an unstable generic custom bucket, avoiding OpenAI WebSocket semantics and reducing Codex history split.
+- **Codex Desktop picker unlock**: includes runtime diagnostics and a CDP-based renderer unlock for Codex Desktop model-list filtering, including the Statsig model whitelist path that can otherwise hide local/router models.
+- **History visibility repair**: includes a dedicated Codex history repair workspace that can dry-run and apply fixes for provider buckets, session index entries, project hints, user-event markers, and active Desktop sqlite locations.
+- **External OpenAI-compatible API sidecar**: provides a separate local API surface for third-party OpenAI-compatible clients, distinct from the Codex takeover port.
+
+### How It Works
+
+For Codex MultiRouter, CCSwitchMulti does not simply switch Codex to a single third-party provider. It enables app-level takeover for Codex, starts the local Codex proxy on the takeover port, writes Codex live config to a local Responses-compatible provider, and keeps the real upstream routing plan inside CC Switch's database.
+
+The important pieces are:
+
+- `model_provider = "codex_model_router_v2"` in Codex live config for the MultiRouter runtime bucket.
+- `model_catalog_json = "cc-switch-model-catalog.json"` at the top level of Codex config, plus generated catalog/cache files under the user's Codex config directory.
+- `settings_config.modelCatalog` as the CC Switch-side source of truth for visible models.
+- `settings_config.codexRouting` as the CC Switch-side source of truth for model-to-upstream route rules.
+- `supports_websockets = false` for the local router provider, so Codex uses the HTTP Responses path instead of falling back into built-in OpenAI WebSocket behavior.
+- `requires_openai_auth = true` for Desktop integration, so ChatGPT OAuth account/quota state remains visible while requests still go through the local router.
+
+### Usage Notes
+
+- Use this fork's releases from [BigStrongSun/cc-switch](https://github.com/BigStrongSun/cc-switch/releases), not the upstream release page, when you need CCSwitchMulti features.
+- Keep CCSwitchMulti running while Codex is using `OpenAI Multi-Model Router`; Codex traffic goes through the local takeover proxy.
+- Fully quit and reopen Codex Desktop after changing the router catalog, routes, or takeover state. A running Codex app-server can keep an older model manager in memory.
+- If the Codex Desktop picker still shows only the official models even though diagnostics show a full catalog, start Codex through the CCSwitchMulti unlock flow so the renderer can be launched with a remote debugging port and patched at runtime.
+- CCSwitchMulti does not patch Codex Desktop's `app.asar` on disk; picker unlock is a runtime renderer injection for the active Desktop session.
+- Do not put router TOML, `model_catalog_json`, or `127.0.0.1:<port>` entries into shared Codex common config. They are provider-owned takeover fields and should be written by CCSwitchMulti.
+- Do not route MultiRouter through the built-in Codex `openai` provider or `openai_base_url`. That path can re-enable official OpenAI/WebSocket semantics and break the router/fallback boundary.
+- Qwen, DeepSeek, and other non-OpenAI routes still depend on their upstream endpoints and keys. A model appearing in the picker only proves catalog visibility; request success still depends on route configuration and upstream availability.
+- The Codex takeover port and the external OpenAI-compatible API sidecar are different surfaces. Do not use the sidecar health check as proof that Codex MultiRouter takeover is active.
+
+### Build And Release Notes
+
+- Current branch package/product identity is `cc-switch-multi` / `CCSwitchMulti`.
+- Windows release exports are produced by `pnpm release:export`; local packaging intentionally disables updater artifact signing when no signing key is available.
+- The portable build still uses the normal user app-data/config locations, so avoid running an upstream official CC Switch instance and a CCSwitchMulti instance at the same time unless you deliberately want them to share state.
+- macOS assets require a macOS build/signing environment; Windows/WSL builds do not produce notarized macOS artifacts.
 
 ## ❤️Sponsor
 
