@@ -14,6 +14,7 @@ use crate::store::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpStream;
