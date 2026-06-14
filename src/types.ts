@@ -123,12 +123,16 @@ export interface ProviderTestConfig {
   maxRetries?: number;
 }
 
-export type AuthBindingSource = "provider_config" | "managed_account";
+export type AuthBindingSource =
+  | "provider_config"
+  | "managed_account"
+  | "managed_codex_oauth";
 
 export interface AuthBinding {
   source: AuthBindingSource;
   authProvider?: string;
   accountId?: string;
+  account_id?: string;
 }
 
 export interface ClaudeDesktopModelRoute {

@@ -5,7 +5,7 @@ import type {
   DraggableAttributes,
   DraggableSyntheticListeners,
 } from "@dnd-kit/core";
-import type { Provider } from "@/types";
+import type { Provider, ProviderMeta } from "@/types";
 import type { AppId } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ProviderActions } from "@/components/providers/ProviderActions";
@@ -109,6 +109,59 @@ function hasCodexRoutingConfig(provider: Provider): boolean {
     routing.enabled !== false ||
     (Array.isArray(routing.routes) && routing.routes.length > 0)
   );
+}
+
+// 从 Codex MultiRouter 子路由里提取 OpenAI OAuth 账号绑定，用于恢复 provider 卡片的额度显示。
+function resolveCodexRouteOauthMeta(provider: Provider): ProviderMeta | undefined {
+  const routing = (provider.settingsConfig as Record<string, any>)
+    ?.codexRouting;
+  const routes = Array.isArray(routing?.routes) ? routing.routes : [];
+
+  for (const route of routes) {
+    const upstreamAuth = route?.upstream?.auth;
+    const fallbackAuth = route?.auth;
+    const auth =
+      upstreamAuth && typeof upstreamAuth === "object"
+        ? upstreamAuth
+        : fallbackAuth;
+    if (!auth || typeof auth !== "object") continue;
+
+    const source =
+      typeof auth.source === "string" ? auth.source.trim() : undefined;
+    const authProvider =
+      typeof auth.authProvider === "string"
+        ? auth.authProvider
+        : typeof auth.auth_provider === "string"
+          ? auth.auth_provider
+          : undefined;
+    const isCodexOauthRoute =
+      source === "managed_codex_oauth" ||
+      (source === "managed_account" &&
+        authProvider === PROVIDER_TYPES.CODEX_OAUTH);
+
+    if (!isCodexOauthRoute) continue;
+
+    const accountId =
+      typeof auth.accountId === "string"
+        ? auth.accountId
+        : typeof auth.account_id === "string"
+          ? auth.account_id
+          : undefined;
+
+    return {
+      providerType: PROVIDER_TYPES.CODEX_OAUTH,
+      authBinding: {
+        source:
+          source === "managed_account"
+            ? "managed_account"
+            : "managed_codex_oauth",
+        authProvider: PROVIDER_TYPES.CODEX_OAUTH,
+        ...(accountId ? { accountId } : {}),
+      },
+    };
+  }
+
+  return undefined;
 }
 
 const extractApiUrl = (provider: Provider, fallbackText: string) => {
@@ -229,6 +282,16 @@ export function ProviderCard({
     appId === "hermes" && isHermesReadOnlyProvider(provider.settingsConfig);
   const isCodexOauth =
     provider.meta?.providerType === PROVIDER_TYPES.CODEX_OAUTH;
+  const codexRouteOauthMeta = useMemo(
+    () =>
+      appId === "codex" && !isCodexOauth
+        ? resolveCodexRouteOauthMeta(provider)
+        : undefined,
+    [appId, isCodexOauth, provider],
+  );
+  const codexOauthQuotaMeta = isCodexOauth
+    ? provider.meta
+    : codexRouteOauthMeta;
   const codexHasRouting = appId === "codex" && hasCodexRoutingConfig(provider);
   const codexNeedsRouting = useMemo(() => {
     if (appId !== "codex") return false;
@@ -499,9 +562,9 @@ export function ProviderCard({
                   inline={true}
                   isCurrent={isCurrent}
                 />
-              ) : isCodexOauth ? (
+              ) : codexOauthQuotaMeta ? (
                 <CodexOauthQuotaFooter
-                  meta={provider.meta}
+                  meta={codexOauthQuotaMeta}
                   inline={true}
                   isCurrent={isCurrent}
                 />
