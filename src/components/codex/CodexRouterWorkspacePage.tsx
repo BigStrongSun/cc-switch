@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { proxyApi } from "@/lib/api/proxy";
 import { useRequestLogs } from "@/lib/query/usage";
@@ -48,6 +49,7 @@ type WorkspaceTab =
   | "sources"
   | "routes"
   | "status"
+  | "history"
   | "test"
   | "records";
 
@@ -643,7 +645,7 @@ export function CodexRouterWorkspacePage({
           onValueChange={(value) => setActiveTab(value as WorkspaceTab)}
         >
           <div className="sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-2 backdrop-blur">
-            <TabsList className="grid w-full grid-cols-6 bg-slate-950/40 p-1">
+            <TabsList className="grid w-full grid-cols-7 bg-slate-950/40 p-1">
               <WorkspaceTabTrigger
                 value="overview"
                 icon={Layers3}
@@ -663,6 +665,11 @@ export function CodexRouterWorkspacePage({
                 value="status"
                 icon={Activity}
                 label="状态"
+              />
+              <WorkspaceTabTrigger
+                value="history"
+                icon={FileClock}
+                label="历史修复"
               />
               <WorkspaceTabTrigger value="test" icon={Play} label="测试发布" />
               <WorkspaceTabTrigger
@@ -721,6 +728,16 @@ export function CodexRouterWorkspacePage({
               isCodexTakeoverActive={isCodexTakeoverActive}
               activeProviderId={activeProviderId}
               onEditPlan={handleEditPlan}
+              onOpenHistoryRepair={() => setActiveTab("history")}
+            />
+          </TabsContent>
+
+          <TabsContent value="history" className="mt-3">
+            <HistoryRepairTab
+              selectedPlan={selectedPlan}
+              isProxyRunning={isProxyRunning}
+              isCodexTakeoverActive={isCodexTakeoverActive}
+              activeProviderId={activeProviderId}
             />
           </TabsContent>
 
@@ -816,6 +833,14 @@ function HeaderPanel({
               <Activity className="h-4 w-4" />
               查看链路状态
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => onJump("history")}
+              className="gap-2"
+            >
+              <FileClock className="h-4 w-4" />
+              历史修复
+            </Button>
           </div>
         </div>
 
@@ -892,8 +917,8 @@ function WorkspaceTabTrigger({
 }) {
   return (
     <TabsTrigger value={value} className="min-w-0 gap-2">
-      <Icon className="h-4 w-4" />
-      <span className="hidden sm:inline">{label}</span>
+      <Icon className="h-4 w-4 flex-shrink-0" />
+      <span className="hidden truncate sm:inline">{label}</span>
     </TabsTrigger>
   );
 }
@@ -1258,6 +1283,7 @@ function StatusTab({
   isCodexTakeoverActive,
   activeProviderId,
   onEditPlan,
+  onOpenHistoryRepair,
 }: {
   selectedPlan: Provider | null;
   selectedRouting: CodexRouting | null;
@@ -1268,6 +1294,7 @@ function StatusTab({
   isCodexTakeoverActive: boolean;
   activeProviderId?: string;
   onEditPlan: (provider: Provider, detail?: string) => void;
+  onOpenHistoryRepair: () => void;
 }) {
   const range = useMemo(() => ({ preset: "today" as const }), []);
   const { data: requestLogs, isLoading } = useRequestLogs({
@@ -1281,10 +1308,6 @@ function StatusTab({
     useState<CodexMultiRouterDiagnostics | null>(null);
   const [diagnoseError, setDiagnoseError] = useState<string | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
-  const [historySyncResult, setHistorySyncResult] =
-    useState<CodexHistoryVisibilityRepairOutcome | null>(null);
-  const [historySyncError, setHistorySyncError] = useState<string | null>(null);
-  const [isSyncingHistory, setIsSyncingHistory] = useState(false);
   const [modelPickerUnlockResult, setModelPickerUnlockResult] =
     useState<CodexModelPickerUnlockResult | null>(null);
   const [modelPickerUnlockError, setModelPickerUnlockError] = useState<
@@ -1387,59 +1410,6 @@ function StatusTab({
     }
   }
 
-  /// 历史显示修复会改写 Codex 本机索引，因此先 dry-run 预览，再由用户确认写入。
-  /// 它覆盖 active SQLite、provider 桶、has_user_event、session_index、workspace hints 和 rollout mtime。
-  async function syncHistoryToMultiRouter() {
-    const rawProjectPath = window.prompt(
-      "可选：输入要置顶显示的项目根目录。留空时只修复 active SQLite、provider、user-event、session_index 和 workspace hints。",
-      "",
-    );
-    if (rawProjectPath === null) return;
-    const projectPath = rawProjectPath.trim() || null;
-    setIsSyncingHistory(true);
-    setHistorySyncError(null);
-    try {
-      const preview = await proxyApi.repairCodexHistoryVisibility({
-        dryRun: true,
-        projectPath,
-        count: 30,
-        windowLimit: 80,
-      });
-      setHistorySyncResult(preview);
-      const confirmed = window.confirm(
-        [
-          "将修复当前 Codex Desktop 历史显示，并在写入前创建本地备份。",
-          "",
-          `active DB: ${preview.stateDbPath ?? "未找到"}`,
-          `目标 provider: ${preview.targetProvider}`,
-          `provider rows: ${preview.providerRowsToUpdate}`,
-          `has_user_event rows: ${preview.userEventRowsToUpdate}`,
-          `session_index append: ${preview.sessionIndexMissingToAppend}`,
-          `workspace hints: ${preview.workspaceHintsToFix}`,
-          `projectless remove: ${preview.projectlessIdsToRemove}`,
-          `focus rows: ${preview.focusSelectedCount}`,
-          `rollout mtimes: ${preview.rolloutMtimesToTouch}`,
-          "",
-          "继续写入吗？",
-        ].join("\n"),
-      );
-      if (!confirmed) return;
-      const result = await proxyApi.repairCodexHistoryVisibility({
-        dryRun: false,
-        projectPath,
-        count: 30,
-        windowLimit: 80,
-      });
-      setHistorySyncResult(result);
-    } catch (error) {
-      setHistorySyncError(
-        error instanceof Error ? error.message : String(error),
-      );
-    } finally {
-      setIsSyncingHistory(false);
-    }
-  }
-
   /// Codex Desktop 模型菜单还会被 renderer 白名单二次过滤；这里显式触发 CDP 注入/启动修复。
   async function unlockModelPicker() {
     setIsUnlockingModelPicker(true);
@@ -1491,16 +1461,11 @@ function StatusTab({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={syncHistoryToMultiRouter}
-                  disabled={isSyncingHistory}
+                  onClick={onOpenHistoryRepair}
                   className="gap-2 border-sky-500/50 bg-sky-500/10 text-sky-100 hover:bg-sky-500/20"
                 >
-                  {isSyncingHistory ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <FileClock className="h-4 w-4" />
-                  )}
-                  修复历史显示
+                  <FileClock className="h-4 w-4" />
+                  打开历史修复
                 </Button>
                 <Button
                   size="sm"
@@ -1582,55 +1547,6 @@ function StatusTab({
               }
             />
           </div>
-          {historySyncError ? (
-            <div className="mt-3 rounded-lg border border-rose-700/50 bg-rose-950/30 p-3 text-xs text-rose-100">
-              历史修复失败：{historySyncError}
-            </div>
-          ) : null}
-          {historySyncResult ? (
-            <div className="mt-3 rounded-lg border border-sky-700/50 bg-sky-950/25 p-3 text-xs leading-5 text-sky-100">
-              <div className="font-semibold">
-                {historySyncResult.dryRun ? "历史修复预览" : "历史修复完成"}
-              </div>
-              <div className="mt-1">
-                active DB：{historySyncResult.stateDbPath ?? "未找到"}（
-                {historySyncResult.activeDbKind ?? "-"}）
-              </div>
-              <div className="mt-1">
-                provider {historySyncResult.providerRowsUpdated}/
-                {historySyncResult.providerRowsToUpdate}，user-event{" "}
-                {historySyncResult.userEventRowsUpdated}/
-                {historySyncResult.userEventRowsToUpdate}，index append{" "}
-                {historySyncResult.sessionIndexAppended}/
-                {historySyncResult.sessionIndexMissingToAppend}
-              </div>
-              <div>
-                hints {historySyncResult.workspaceHintsFixed}/
-                {historySyncResult.workspaceHintsToFix}，projectless{" "}
-                {historySyncResult.projectlessIdsRemoved}/
-                {historySyncResult.projectlessIdsToRemove}，focus{" "}
-                {historySyncResult.sqliteFocusRowsUpdated}/
-                {historySyncResult.sqliteFocusRowsToUpdate}，mtime{" "}
-                {historySyncResult.rolloutMtimesTouched}/
-                {historySyncResult.rolloutMtimesToTouch}
-              </div>
-              <div>
-                target={historySyncResult.targetProvider} visible=
-                {historySyncResult.visibleCandidateRows} source=
-                {historySyncResult.sourceProviderIds.join(", ") || "无"}
-              </div>
-              {historySyncResult.backupDir ? (
-                <div className="mt-1 font-mono text-[11px] opacity-80">
-                  backup={historySyncResult.backupDir}
-                </div>
-              ) : null}
-              {historySyncResult.skippedReason ? (
-                <div className="mt-1">
-                  跳过原因：{historySyncResult.skippedReason}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
           {modelPickerUnlockError ? (
             <div className="mt-3 rounded-lg border border-rose-700/50 bg-rose-950/30 p-3 text-xs text-rose-100">
               模型菜单解锁失败：{modelPickerUnlockError}
@@ -1797,6 +1713,337 @@ function StatusTab({
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+/// 历史修复页把 dry-run、写入确认和结果证据集中在一个入口，避免状态页按钮用 prompt 隐藏关键参数。
+function HistoryRepairTab({
+  selectedPlan,
+  isProxyRunning,
+  isCodexTakeoverActive,
+  activeProviderId,
+}: {
+  selectedPlan: Provider | null;
+  isProxyRunning: boolean;
+  isCodexTakeoverActive: boolean;
+  activeProviderId?: string;
+}) {
+  const [projectPath, setProjectPath] = useState("");
+  const [lastPreviewProjectPath, setLastPreviewProjectPath] = useState<
+    string | null
+  >(null);
+  const [repairResult, setRepairResult] =
+    useState<CodexHistoryVisibilityRepairOutcome | null>(null);
+  const [repairError, setRepairError] = useState<string | null>(null);
+  const [isPreviewingRepair, setIsPreviewingRepair] = useState(false);
+  const [isApplyingRepair, setIsApplyingRepair] = useState(false);
+  const normalizedProjectPath = projectPath.trim();
+  const canApplyRepair = Boolean(
+    repairResult?.dryRun &&
+      lastPreviewProjectPath === normalizedProjectPath &&
+      !isPreviewingRepair &&
+      !isApplyingRepair,
+  );
+
+  /// 调用后端修复命令时固定使用当前输入框参数；dry-run 和写入共用同一路径，避免两套前端逻辑漂移。
+  async function runHistoryRepair(dryRun: boolean) {
+    if (dryRun) {
+      setIsPreviewingRepair(true);
+    } else {
+      setIsApplyingRepair(true);
+    }
+    setRepairError(null);
+    try {
+      const result = await proxyApi.repairCodexHistoryVisibility({
+        dryRun,
+        projectPath: normalizedProjectPath || null,
+        count: 30,
+        windowLimit: 80,
+      });
+      setRepairResult(result);
+      if (dryRun) {
+        setLastPreviewProjectPath(normalizedProjectPath);
+      }
+    } catch (error) {
+      setRepairError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (dryRun) {
+        setIsPreviewingRepair(false);
+      } else {
+        setIsApplyingRepair(false);
+      }
+    }
+  }
+
+  /// 写入前要求已有同一路径的预览，防止用户改了项目路径后直接把旧预览用于新写入。
+  async function applyHistoryRepair() {
+    if (!canApplyRepair || !repairResult) {
+      setRepairError("请先用当前项目路径执行预览。");
+      return;
+    }
+    const confirmed = window.confirm(
+      [
+        "将修复当前 Codex Desktop 历史显示，并在写入前创建本地备份。",
+        "",
+        `active DB: ${repairResult.stateDbPath ?? "未找到"}`,
+        `目标 provider: ${repairResult.targetProvider}`,
+        `provider rows: ${repairResult.providerRowsToUpdate}`,
+        `has_user_event rows: ${repairResult.userEventRowsToUpdate}`,
+        `session_index append: ${repairResult.sessionIndexMissingToAppend}`,
+        `workspace hints: ${repairResult.workspaceHintsToFix}`,
+        `projectless remove: ${repairResult.projectlessIdsToRemove}`,
+        `focus rows: ${repairResult.focusSelectedCount}`,
+        `rollout mtimes: ${repairResult.rolloutMtimesToTouch}`,
+        "",
+        "继续写入吗？",
+      ].join("\n"),
+    );
+    if (!confirmed) return;
+    await runHistoryRepair(false);
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
+      <section className="rounded-lg border border-sky-700/40 bg-sky-950/10 p-4">
+        <SectionHeader
+          icon={FileClock}
+          title="历史修复"
+          detail="换 provider 后历史列表不可见时，先预览 Codex Desktop 本机索引和 provider 桶，再确认写入。"
+          action={
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => runHistoryRepair(true)}
+                disabled={isPreviewingRepair || isApplyingRepair}
+                className="gap-2 border-sky-500/50 bg-sky-500/10 text-sky-100 hover:bg-sky-500/20"
+              >
+                {isPreviewingRepair ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Database className="h-4 w-4" />
+                )}
+                预览修复
+              </Button>
+              <Button
+                size="sm"
+                onClick={applyHistoryRepair}
+                disabled={!canApplyRepair}
+                className="gap-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50"
+              >
+                {isApplyingRepair ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-4 w-4" />
+                )}
+                确认写入
+              </Button>
+            </div>
+          }
+        />
+
+        <div className="mt-4 space-y-3">
+          <label className="block text-sm font-medium text-slate-200">
+            项目根目录
+            <Input
+              value={projectPath}
+              onChange={(event) => {
+                setProjectPath(event.target.value);
+                setRepairError(null);
+              }}
+              placeholder="可选；例如 C:\\Users\\sunda\\Documents\\LLMservice"
+              className="mt-2 border-slate-700 bg-slate-950/70"
+            />
+          </label>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <StatusCard
+              ok={Boolean(selectedPlan)}
+              label="MultiRouter 方案"
+              value={selectedPlan?.name ?? "未选择"}
+              detail={selectedPlan?.id ?? "当前没有可用路由方案"}
+            />
+            <StatusCard
+              ok={isProxyRunning}
+              label="本地监听"
+              value={isProxyRunning ? "运行中" : "未启动"}
+              detail="Codex takeover 端口由后端状态决定"
+            />
+            <StatusCard
+              ok={isCodexTakeoverActive}
+              label="Codex 接管"
+              value={isCodexTakeoverActive ? "已接管" : "未接管"}
+              detail={activeProviderId || "当前 live provider 未命名"}
+            />
+            <StatusCard
+              ok={Boolean(repairResult?.targetProvider)}
+              label="修复目标"
+              value={repairResult?.targetProvider ?? "预览后显示"}
+              detail="不会把 runtime 改回 built-in openai"
+            />
+          </div>
+
+          {repairError ? (
+            <div className="rounded-lg border border-rose-700/50 bg-rose-950/30 p-3 text-xs text-rose-100">
+              历史修复失败：{repairError}
+            </div>
+          ) : null}
+
+          {repairResult ? (
+            <HistoryRepairResultPanel result={repairResult} />
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-700 bg-slate-950/40 p-5 text-sm text-slate-400">
+              还没有预览结果。
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-700 bg-slate-950/40 p-4">
+        <SectionHeader
+          icon={Info}
+          title="写入范围"
+          detail="后端会读取 active SQLite、rollout 文件、session_index 和 workspace hints，并在写入前备份。"
+        />
+        <div className="mt-4 space-y-3 text-sm">
+          <ChecklistItem
+            ok
+            label="目标 provider 由后端默认稳定 MultiRouter 桶解析"
+          />
+          <ChecklistItem
+            ok
+            label="openai、custom 和旧 router 桶只作为历史来源"
+          />
+          <ChecklistItem ok label="项目路径为空时不强制移动到某个 workspace" />
+          <ChecklistItem
+            ok={Boolean(repairResult?.backupDir)}
+            label="实际写入后显示备份目录"
+          />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/// 修复结果面板按索引来源拆开展示，方便判断“没显示”到底卡在 provider、user-event 还是 session_index。
+function HistoryRepairResultPanel({
+  result,
+}: {
+  result: CodexHistoryVisibilityRepairOutcome;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-lg border p-4 text-xs leading-5",
+        result.dryRun
+          ? "border-sky-700/50 bg-sky-950/25 text-sky-100"
+          : "border-emerald-700/50 bg-emerald-950/25 text-emerald-100",
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-semibold">
+          {result.dryRun ? "历史修复预览" : "历史修复完成"}
+        </div>
+        <Badge className="border border-slate-500/50 bg-slate-900 text-slate-200">
+          target={result.targetProvider}
+        </Badge>
+      </div>
+
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <RepairMetric
+          label="provider"
+          done={result.providerRowsUpdated}
+          total={result.providerRowsToUpdate}
+        />
+        <RepairMetric
+          label="user-event"
+          done={result.userEventRowsUpdated}
+          total={result.userEventRowsToUpdate}
+        />
+        <RepairMetric
+          label="index append"
+          done={result.sessionIndexAppended}
+          total={result.sessionIndexMissingToAppend}
+        />
+        <RepairMetric
+          label="workspace hints"
+          done={result.workspaceHintsFixed}
+          total={result.workspaceHintsToFix}
+        />
+        <RepairMetric
+          label="projectless"
+          done={result.projectlessIdsRemoved}
+          total={result.projectlessIdsToRemove}
+        />
+        <RepairMetric
+          label="focus"
+          done={result.sqliteFocusRowsUpdated}
+          total={result.sqliteFocusRowsToUpdate}
+        />
+        <RepairMetric
+          label="rollout mtime"
+          done={result.rolloutMtimesTouched}
+          total={result.rolloutMtimesToTouch}
+        />
+        <RepairMetric
+          label="saved roots"
+          done={result.savedWorkspaceRootsAdded}
+          total={result.savedWorkspaceRootsToAdd}
+        />
+      </div>
+
+      <div className="mt-3 grid gap-2 md:grid-cols-2">
+        <DetailRow
+          label="active DB"
+          value={`${result.stateDbPath ?? "未找到"}（${result.activeDbKind ?? "-"}）`}
+        />
+        <DetailRow
+          label="live config provider"
+          value={result.liveConfigModelProvider ?? "未读取到"}
+        />
+        <DetailRow
+          label="source buckets"
+          value={result.sourceProviderIds.join(", ") || "无"}
+        />
+        <DetailRow
+          label="visible window"
+          value={`${result.visibleCandidateRows} candidates / ${result.visibleProjectRowsInWindowBefore} project rows`}
+        />
+      </div>
+
+      {result.backupDir ? (
+        <div className="mt-3 rounded-md border border-slate-700 bg-slate-950/50 p-3 font-mono text-[11px] text-slate-200">
+          backup={result.backupDir}
+        </div>
+      ) : null}
+      {result.skippedReason ? (
+        <div className="mt-3 rounded-md border border-amber-700/50 bg-amber-950/30 p-3 text-amber-100">
+          跳过原因：{result.skippedReason}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/// 单项修复计数在 dry-run 时展示待处理量，在写入后展示实际写入量和总量。
+function RepairMetric({
+  label,
+  done,
+  total,
+}: {
+  label: string;
+  done: number;
+  total: number;
+}) {
+  return (
+    <div className="rounded-md border border-slate-700 bg-slate-950/50 p-3">
+      <div className="text-[11px] uppercase tracking-wide text-slate-500">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-semibold text-slate-100">
+        {done} / {total}
+      </div>
     </div>
   );
 }
@@ -2219,7 +2466,9 @@ function DiagnosticsPanel({
                 />
                 <DetailRow
                   label="catalog 修改时间"
-                  value={diagnostics.liveConfig.modelCatalogModifiedAt ?? "未知"}
+                  value={
+                    diagnostics.liveConfig.modelCatalogModifiedAt ?? "未知"
+                  }
                 />
               </div>
             </div>

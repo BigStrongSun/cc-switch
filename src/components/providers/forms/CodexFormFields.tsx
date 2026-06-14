@@ -694,7 +694,7 @@ export function CodexFormFields({
           if (!open) setEditingRouteIndex(null);
         }}
       >
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               {t("codexConfig.editRoute", { defaultValue: "编辑路由" })}
@@ -708,7 +708,7 @@ export function CodexFormFields({
           </DialogHeader>
 
           {editingRoute && editingRouteIndex !== null && (
-            <div className="space-y-4 overflow-y-auto px-6 py-5">
+            <div className="flex-1 min-h-0 space-y-4 overflow-y-auto px-6 py-5">
               <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_auto]">
                 <Input
                   value={editingRoute.id}
