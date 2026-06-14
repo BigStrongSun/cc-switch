@@ -59,6 +59,9 @@ pub struct CodexLiveConfigDiagnostics {
     pub model_catalog_path: Option<String>,
     pub model_catalog_modified_at: Option<String>,
     pub model_catalog_model_count: Option<usize>,
+    pub model_catalog_first_models: Option<Vec<String>>,
+    pub spawn_agent_visible_model_limit: usize,
+    pub spawn_agent_missing_priority_models: Vec<String>,
     pub uses_builtin_openai_with_local_base: bool,
     pub points_to_local_proxy: bool,
 }
@@ -482,6 +485,38 @@ pub async fn diagnose_codex_multirouter(
         ],
     ));
     checks.push(codex_check(
+        "codex_spawn_agent_model_overrides",
+        "Codex spawn_agent model overrides",
+        if live_config.spawn_agent_missing_priority_models.is_empty() {
+            CodexDiagnosticStatus::Pass
+        } else {
+            CodexDiagnosticStatus::Warn
+        },
+        if live_config.spawn_agent_missing_priority_models.is_empty() {
+            "Priority routed models are inside the first five picker-visible models used by Codex spawn_agent tool descriptions.".to_string()
+        } else {
+            format!(
+                "Codex 0.137.0 only describes the first {} picker-visible models in spawn_agent. Regenerate the CCSwitchMulti catalog so these models move into that window: {}.",
+                live_config.spawn_agent_visible_model_limit,
+                live_config.spawn_agent_missing_priority_models.join(", ")
+            )
+        },
+        vec![
+            format!(
+                "spawn_agent_visible_model_limit={}",
+                live_config.spawn_agent_visible_model_limit
+            ),
+            format!(
+                "catalog_first_models={:?}",
+                live_config.model_catalog_first_models
+            ),
+            format!(
+                "missing_priority_models={:?}",
+                live_config.spawn_agent_missing_priority_models
+            ),
+        ],
+    ));
+    checks.push(codex_check(
         "recent_router_error",
         "近期路由错误",
         if router_log.latest_error.is_some() {
@@ -730,6 +765,9 @@ fn codex_live_config_diagnostics(proxy_port: u16) -> CodexLiveConfigDiagnostics 
                 model_catalog_path: None,
                 model_catalog_modified_at: None,
                 model_catalog_model_count: None,
+                model_catalog_first_models: None,
+                spawn_agent_visible_model_limit: CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT,
+                spawn_agent_missing_priority_models: Vec::new(),
                 uses_builtin_openai_with_local_base: false,
                 points_to_local_proxy: false,
             };
@@ -754,6 +792,9 @@ fn codex_live_config_diagnostics(proxy_port: u16) -> CodexLiveConfigDiagnostics 
                 model_catalog_path: None,
                 model_catalog_modified_at: None,
                 model_catalog_model_count: None,
+                model_catalog_first_models: None,
+                spawn_agent_visible_model_limit: CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT,
+                spawn_agent_missing_priority_models: Vec::new(),
                 uses_builtin_openai_with_local_base: false,
                 points_to_local_proxy: false,
             };
@@ -809,9 +850,19 @@ fn codex_live_config_diagnostics(proxy_port: u16) -> CodexLiveConfigDiagnostics 
         .as_deref()
         .map(|catalog| resolve_codex_catalog_path(&path, catalog));
     let model_catalog_modified_at = model_catalog_path.as_deref().and_then(file_modified_at);
-    let model_catalog_model_count = model_catalog_path
+    let model_catalog_models = model_catalog_path
         .as_deref()
-        .and_then(count_codex_catalog_models);
+        .and_then(read_codex_catalog_model_slugs);
+    let model_catalog_model_count = model_catalog_models.as_ref().map(Vec::len);
+    let model_catalog_first_models = model_catalog_models.as_ref().map(|models| {
+        models
+            .iter()
+            .take(CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT)
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    let spawn_agent_missing_priority_models =
+        missing_spawn_agent_priority_models(model_catalog_models.as_deref());
     let uses_builtin_openai_with_local_base = model_provider
         .as_deref()
         .is_none_or(|provider| provider.eq_ignore_ascii_case("openai"))
@@ -837,6 +888,9 @@ fn codex_live_config_diagnostics(proxy_port: u16) -> CodexLiveConfigDiagnostics 
         model_catalog_path: model_catalog_path.map(|path| path.display().to_string()),
         model_catalog_modified_at,
         model_catalog_model_count,
+        model_catalog_first_models,
+        spawn_agent_visible_model_limit: CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT,
+        spawn_agent_missing_priority_models,
         uses_builtin_openai_with_local_base,
         points_to_local_proxy,
     }
@@ -869,14 +923,45 @@ fn resolve_codex_catalog_path(config_path: &Path, catalog: &str) -> PathBuf {
     }
 }
 
-/// 统计生成的模型目录数量，避免只看到路径却不知道 catalog 是否为空。
-fn count_codex_catalog_models(path: &Path) -> Option<usize> {
+const CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT: usize = 5;
+const CODEX_SPAWN_AGENT_PRIORITY_MODELS: &[&str] =
+    &["qwen3.6", "deepseek-v4-flash", "deepseek-v4-pro"];
+
+/// 读取生成 catalog 的模型顺序；Codex spawn_agent 工具说明会按该顺序截取前 5 个。
+fn read_codex_catalog_model_slugs(path: &Path) -> Option<Vec<String>> {
     let text = std::fs::read_to_string(path).ok()?;
     let value = serde_json::from_str::<Value>(&text).ok()?;
     value
         .get("models")
         .and_then(|models| models.as_array())
-        .map(|models| models.len())
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| model.get("slug").and_then(|slug| slug.as_str()))
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+}
+
+/// 找出已经写入 catalog、但会被 Codex spawn_agent 前 5 展示限制截掉的重点路由模型。
+fn missing_spawn_agent_priority_models(models: Option<&[String]>) -> Vec<String> {
+    let Some(models) = models else {
+        return Vec::new();
+    };
+    let visible_models = models
+        .iter()
+        .take(CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT)
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+
+    CODEX_SPAWN_AGENT_PRIORITY_MODELS
+        .iter()
+        .filter(|model| {
+            models.iter().any(|candidate| candidate == **model)
+                && !visible_models.iter().any(|candidate| candidate == *model)
+        })
+        .map(|model| (*model).to_string())
+        .collect()
 }
 
 /// 查询 Codex Desktop/app-server 运行态，并与 catalog 写入时间做保守对比。
@@ -1498,6 +1583,39 @@ mod codex_router_log_diagnostics_tests {
     }
 
     #[test]
+    fn spawn_agent_priority_diagnostics_warn_when_deepseek_is_after_first_five() {
+        let models = vec![
+            "gpt-5.5".to_string(),
+            "gpt-5.4".to_string(),
+            "gpt-5.4-mini".to_string(),
+            "gpt-5.3-codex-spark".to_string(),
+            "qwen3.6".to_string(),
+            "deepseek-v4-flash".to_string(),
+            "deepseek-v4-pro".to_string(),
+        ];
+
+        assert_eq!(
+            missing_spawn_agent_priority_models(Some(&models)),
+            vec!["deepseek-v4-flash", "deepseek-v4-pro"]
+        );
+    }
+
+    #[test]
+    fn spawn_agent_priority_diagnostics_pass_when_routed_models_are_first_five() {
+        let models = vec![
+            "gpt-5.5".to_string(),
+            "qwen3.6".to_string(),
+            "deepseek-v4-flash".to_string(),
+            "deepseek-v4-pro".to_string(),
+            "gpt-5.3-codex-spark".to_string(),
+            "gpt-5.4".to_string(),
+            "gpt-5.4-mini".to_string(),
+        ];
+
+        assert!(missing_spawn_agent_priority_models(Some(&models)).is_empty());
+    }
+
+    #[test]
     fn live_model_provider_diagnostics_classify_stable_and_legacy_router_buckets() {
         let stable = test_live_config_for_provider(Some(
             crate::codex_config::CC_SWITCH_CODEX_ROUTER_MODEL_PROVIDER_ID,
@@ -1550,6 +1668,15 @@ mod codex_router_log_diagnostics_tests {
             model_catalog_path: None,
             model_catalog_modified_at: None,
             model_catalog_model_count: Some(7),
+            model_catalog_first_models: Some(vec![
+                "gpt-5.5".to_string(),
+                "qwen3.6".to_string(),
+                "deepseek-v4-flash".to_string(),
+                "deepseek-v4-pro".to_string(),
+                "gpt-5.3-codex-spark".to_string(),
+            ]),
+            spawn_agent_visible_model_limit: CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT,
+            spawn_agent_missing_priority_models: Vec::new(),
             uses_builtin_openai_with_local_base: false,
             points_to_local_proxy: true,
         }
