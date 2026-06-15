@@ -137,7 +137,10 @@ pub struct CodexHistoryProviderBucketMigrationOutcome {
 #[serde(rename_all = "camelCase")]
 pub struct CodexHistoryVisibilityRepairOptions {
     pub dry_run: bool,
+    pub codex_home: Option<String>,
+    pub state_db_path: Option<String>,
     pub project_path: Option<String>,
+    pub session_ids: Option<Vec<String>>,
     pub target_provider: Option<String>,
     pub count: Option<usize>,
     pub window_limit: Option<usize>,
@@ -205,7 +208,10 @@ impl Default for CodexHistoryVisibilityRepairOptions {
     fn default() -> Self {
         Self {
             dry_run: true,
+            codex_home: None,
+            state_db_path: None,
             project_path: None,
+            session_ids: None,
             target_provider: Some(CC_SWITCH_CODEX_ROUTER_MODEL_PROVIDER_ID.to_string()),
             count: Some(30),
             window_limit: Some(80),
@@ -267,6 +273,70 @@ pub struct CodexHistoryVisibilityRepairOutcome {
     pub rollout_mtimes_touched: usize,
     pub visible_project_rows_in_window_before: usize,
     pub backup_dir: Option<String>,
+    pub skipped_reason: Option<String>,
+}
+
+/// Codex 历史列表的查询参数。
+///
+/// 该查询只读 active SQLite，用于 UI 选择需要定向恢复的 session。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexHistorySessionListOptions {
+    pub codex_home: Option<String>,
+    pub state_db_path: Option<String>,
+    pub project_path: Option<String>,
+    pub provider: Option<String>,
+    pub source_filter: Option<String>,
+    pub query: Option<String>,
+    pub limit: Option<usize>,
+    pub include_archived: Option<bool>,
+    pub include_subagents: Option<bool>,
+}
+
+impl Default for CodexHistorySessionListOptions {
+    /// 默认只列出 Codex Desktop 常规交互来源，避免把 subagent 和归档记录混入首屏。
+    fn default() -> Self {
+        Self {
+            codex_home: None,
+            state_db_path: None,
+            project_path: None,
+            provider: None,
+            source_filter: None,
+            query: None,
+            limit: Some(80),
+            include_archived: Some(false),
+            include_subagents: Some(false),
+        }
+    }
+}
+
+/// UI 历史列表中的单条会话摘要。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexHistorySessionSummary {
+    pub id: String,
+    pub title: String,
+    pub cwd: Option<String>,
+    pub model_provider: Option<String>,
+    pub source: Option<String>,
+    pub thread_source: Option<String>,
+    pub archived: bool,
+    pub has_user_event: bool,
+    pub updated_at_ms: i64,
+    pub updated_at: Option<String>,
+    pub rollout_path: Option<String>,
+}
+
+/// Codex 历史列表查询结果。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexHistorySessionListOutcome {
+    pub codex_home: String,
+    pub state_db_path: Option<String>,
+    pub active_db_kind: Option<String>,
+    pub live_config_model_provider: Option<String>,
+    pub total_matched: usize,
+    pub items: Vec<CodexHistorySessionSummary>,
     pub skipped_reason: Option<String>,
 }
 
@@ -434,8 +504,17 @@ pub fn repair_codex_history_visibility_for_multirouter(
     db: &Database,
     options: CodexHistoryVisibilityRepairOptions,
 ) -> Result<CodexHistoryVisibilityRepairOutcome, AppError> {
-    let codex_dir = get_codex_config_dir();
-    let config_text = read_codex_config_text().unwrap_or_default();
+    let codex_dir = options
+        .codex_home
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(resolve_user_path)
+        .unwrap_or_else(get_codex_config_dir);
+    let config_path = codex_dir.join("config.toml");
+    let config_text = fs::read_to_string(&config_path)
+        .or_else(|_| read_codex_config_text())
+        .unwrap_or_default();
     let live_config_model_provider = current_codex_model_provider_from_config_text(&config_text);
     let target_provider = options
         .target_provider
@@ -463,8 +542,20 @@ pub fn repair_codex_history_visibility_for_multirouter(
         .project_path
         .as_deref()
         .and_then(normalize_history_path);
+    let selected_session_ids = options
+        .session_ids
+        .unwrap_or_default()
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<BTreeSet<_>>();
 
-    let Some(active_db) = resolve_active_codex_state_db(&codex_dir, &config_text) else {
+    let Some(active_db) = resolve_active_codex_state_db_with_override(
+        &codex_dir,
+        &config_text,
+        options.state_db_path.as_deref(),
+    )?
+    else {
         return Ok(CodexHistoryVisibilityRepairOutcome {
             dry_run,
             codex_home: codex_dir.to_string_lossy().to_string(),
@@ -498,9 +589,152 @@ pub fn repair_codex_history_visibility_for_multirouter(
             source_filter,
             include_archived,
             include_subagents,
+            selected_session_ids,
             backup_root_override: None,
         },
     )
+}
+
+/// 列出 Codex Desktop active SQLite 中的历史摘要，供前端定向选择 session。
+///
+/// 该函数不读取完整 rollout 内容，只返回侧边栏级别的元数据。
+pub fn list_codex_history_sessions(
+    options: CodexHistorySessionListOptions,
+) -> Result<CodexHistorySessionListOutcome, AppError> {
+    let codex_dir = options
+        .codex_home
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(resolve_user_path)
+        .unwrap_or_else(get_codex_config_dir);
+    let config_path = codex_dir.join("config.toml");
+    let config_text = fs::read_to_string(&config_path)
+        .or_else(|_| read_codex_config_text())
+        .unwrap_or_default();
+    let live_config_model_provider = current_codex_model_provider_from_config_text(&config_text);
+    let Some(active_db) = resolve_active_codex_state_db_with_override(
+        &codex_dir,
+        &config_text,
+        options.state_db_path.as_deref(),
+    )?
+    else {
+        return Ok(CodexHistorySessionListOutcome {
+            codex_home: codex_dir.to_string_lossy().to_string(),
+            live_config_model_provider,
+            skipped_reason: Some("state_db_not_found".to_string()),
+            ..Default::default()
+        });
+    };
+    let conn = Connection::open(&active_db.path)
+        .map_err(|e| AppError::Database(format!("open Codex active state DB failed: {e}")))?;
+    let rows = load_codex_thread_history_rows(&conn)?;
+    let project_path = options
+        .project_path
+        .as_deref()
+        .and_then(normalize_history_path);
+    let provider = options
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let source_filter = options
+        .source_filter
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let query = options
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase());
+    let include_archived = options.include_archived.unwrap_or(false);
+    let include_subagents = options.include_subagents.unwrap_or(false);
+    let limit = options.limit.unwrap_or(80).max(1);
+    let mut matched = rows
+        .into_iter()
+        .filter(|row| include_archived || row.archived.unwrap_or(0) == 0)
+        .filter(|row| include_subagents || is_user_thread_source(row.thread_source.as_deref()))
+        .filter(|row| {
+            source_matches_history_filter(row.source.as_deref(), source_filter.as_deref())
+        })
+        .filter(|row| {
+            provider
+                .as_deref()
+                .map(|provider| row.model_provider.as_deref() == Some(provider))
+                .unwrap_or(true)
+        })
+        .filter(|row| {
+            project_path
+                .as_deref()
+                .map(|project_path| {
+                    row.cwd
+                        .as_deref()
+                        .and_then(normalize_history_path)
+                        .as_deref()
+                        == Some(project_path)
+                })
+                .unwrap_or(true)
+        })
+        .filter(|row| {
+            query
+                .as_deref()
+                .map(|query| {
+                    [
+                        row.id.as_str(),
+                        row.title.as_deref().unwrap_or_default(),
+                        row.preview.as_deref().unwrap_or_default(),
+                        row.cwd.as_deref().unwrap_or_default(),
+                        row.model_provider.as_deref().unwrap_or_default(),
+                    ]
+                    .join(" ")
+                    .to_ascii_lowercase()
+                    .contains(query)
+                })
+                .unwrap_or(true)
+        })
+        .collect::<Vec<_>>();
+    matched.sort_by(|left, right| {
+        row_updated_ms(right)
+            .cmp(&row_updated_ms(left))
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    let total_matched = matched.len();
+    let items = matched
+        .into_iter()
+        .take(limit)
+        .map(|row| {
+            let updated_at_ms = row_updated_ms(&row);
+            let title = row_title(&row);
+            let cwd = row.cwd.as_deref().and_then(normalize_history_path);
+            let rollout_path = row.rollout_path.as_deref().map(strip_long_path_prefix);
+            CodexHistorySessionSummary {
+                id: row.id,
+                title,
+                cwd,
+                model_provider: row.model_provider,
+                source: row.source,
+                thread_source: row.thread_source,
+                archived: row.archived.unwrap_or(0) != 0,
+                has_user_event: row.has_user_event.unwrap_or(0) == 1,
+                updated_at_ms,
+                updated_at: Some(iso_from_epoch_millis(updated_at_ms)),
+                rollout_path,
+            }
+        })
+        .collect();
+    Ok(CodexHistorySessionListOutcome {
+        codex_home: codex_dir.to_string_lossy().to_string(),
+        state_db_path: Some(active_db.path.to_string_lossy().to_string()),
+        active_db_kind: Some(active_db.kind),
+        live_config_model_provider,
+        total_matched,
+        items,
+        skipped_reason: None,
+    })
 }
 
 /// 执行不依赖 CC Switch 数据库的 Codex Desktop 历史可见性修复。
@@ -594,6 +828,7 @@ pub fn repair_codex_history_visibility_standalone(
                 .map(str::to_string),
             include_archived: options.include_archived.unwrap_or(false),
             include_subagents: options.include_subagents.unwrap_or(false),
+            selected_session_ids: BTreeSet::new(),
             backup_root_override: None,
         },
     )
@@ -618,6 +853,7 @@ struct HistoryVisibilityRepairRuntimeOptions {
     source_filter: Option<String>,
     include_archived: bool,
     include_subagents: bool,
+    selected_session_ids: BTreeSet<String>,
     backup_root_override: Option<PathBuf>,
 }
 
@@ -780,7 +1016,13 @@ fn repair_codex_history_visibility_at(
                 .then_with(|| right.id.cmp(&left.id))
         });
     }
-    let mut selected_focus_rows: Vec<FocusThreadRow> = if runtime.balance_recent_window {
+    let mut selected_focus_rows: Vec<FocusThreadRow> = if !runtime.selected_session_ids.is_empty() {
+        visible_rows
+            .iter()
+            .filter(|row| runtime.selected_session_ids.contains(&row.id))
+            .map(focus_row_from_thread)
+            .collect()
+    } else if runtime.balance_recent_window {
         select_balanced_recent_window_rows(
             &visible_rows,
             normalized_project_path.as_deref(),
@@ -796,15 +1038,16 @@ fn repair_codex_history_visibility_at(
             .collect()
     };
     assign_focus_times(&mut selected_focus_rows);
-    let balanced_recent_window_projects = if runtime.balance_recent_window {
-        selected_focus_rows
-            .iter()
-            .filter_map(|row| row.project_path.as_deref())
-            .collect::<BTreeSet<_>>()
-            .len()
-    } else {
-        0
-    };
+    let balanced_recent_window_projects =
+        if runtime.balance_recent_window && runtime.selected_session_ids.is_empty() {
+            selected_focus_rows
+                .iter()
+                .filter_map(|row| row.project_path.as_deref())
+                .collect::<BTreeSet<_>>()
+                .len()
+        } else {
+            0
+        };
 
     let visible_project_rows_in_window_before =
         if let Some(project_path) = normalized_project_path.as_deref() {
@@ -861,8 +1104,11 @@ fn repair_codex_history_visibility_at(
         session_index_missing_to_append: missing_index_rows.len(),
         project_rows: project_rows.len(),
         focus_selected_count: selected_focus_rows.len(),
-        balanced_recent_window_enabled: runtime.balance_recent_window,
-        balanced_recent_window_rows: if runtime.balance_recent_window {
+        balanced_recent_window_enabled: runtime.balance_recent_window
+            && runtime.selected_session_ids.is_empty(),
+        balanced_recent_window_rows: if runtime.balance_recent_window
+            && runtime.selected_session_ids.is_empty()
+        {
             selected_focus_rows.len()
         } else {
             0
@@ -3348,6 +3594,7 @@ mod tests {
                 source_filter: None,
                 include_archived: false,
                 include_subagents: false,
+                selected_session_ids: BTreeSet::new(),
                 backup_root_override: Some(dir.path().join("dry-run-backup")),
             },
         )
@@ -3382,6 +3629,7 @@ mod tests {
                 source_filter: None,
                 include_archived: false,
                 include_subagents: false,
+                selected_session_ids: BTreeSet::new(),
                 backup_root_override: Some(backup_root.clone()),
             },
         )
@@ -3457,6 +3705,117 @@ mod tests {
             .join("state/sqlite")
             .join(CODEX_STATE_DB_FILENAME)
             .exists());
+    }
+
+    #[test]
+    fn selected_session_ids_focus_only_requested_rows() {
+        let dir = tempdir().expect("tempdir");
+        let codex_dir = dir.path().join(".codex");
+        let sqlite_dir = codex_dir.join("sqlite");
+        let session_dir = codex_dir.join("sessions/2026/06/15");
+        fs::create_dir_all(&sqlite_dir).expect("create sqlite dir");
+        fs::create_dir_all(&session_dir).expect("create session dir");
+
+        let rollout_one = session_dir.join("rollout-selected-one.jsonl");
+        let rollout_two = session_dir.join("rollout-selected-two.jsonl");
+        fs::write(
+            &rollout_one,
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"selected-one\",\"model_provider\":\"openai\"}}\n",
+                "{\"type\":\"user_message\",\"message\":\"one\"}\n"
+            ),
+        )
+        .expect("write rollout one");
+        fs::write(
+            &rollout_two,
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"selected-two\",\"model_provider\":\"openai\"}}\n",
+                "{\"role\":\"user\",\"content\":\"two\"}\n"
+            ),
+        )
+        .expect("write rollout two");
+
+        let db_path = sqlite_dir.join(CODEX_STATE_DB_FILENAME);
+        let conn = Connection::open(&db_path).expect("open active db");
+        conn.execute_batch(
+            "CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                rollout_path TEXT,
+                model_provider TEXT,
+                cwd TEXT,
+                has_user_event INTEGER,
+                archived INTEGER,
+                source TEXT,
+                thread_source TEXT,
+                title TEXT,
+                preview TEXT,
+                first_user_message TEXT,
+                updated_at INTEGER,
+                updated_at_ms INTEGER
+            );",
+        )
+        .expect("create threads table");
+        let project_path = r"C:\Users\sunda\Documents\LLMservice".to_string();
+        conn.execute(
+            "INSERT INTO threads VALUES (?1, ?2, 'openai', ?3, 0, 0, 'vscode', 'user', 'One', 'One', NULL, 1000, 1000000)",
+            (&"selected-one", &rollout_one.to_string_lossy().to_string(), &project_path),
+        )
+        .expect("insert selected-one");
+        conn.execute(
+            "INSERT INTO threads VALUES (?1, ?2, 'openai', ?3, 0, 0, 'vscode', 'user', 'Two', 'Two', NULL, 900, 900000)",
+            (&"selected-two", &rollout_two.to_string_lossy().to_string(), &project_path),
+        )
+        .expect("insert selected-two");
+        drop(conn);
+
+        fs::write(codex_dir.join("session_index.jsonl"), "").expect("write session index");
+        fs::write(
+            codex_dir.join(".codex-global-state.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "thread-workspace-root-hints": {},
+                "projectless-thread-ids": [],
+                "electron-saved-workspace-roots": []
+            }))
+            .expect("global json"),
+        )
+        .expect("write global state");
+
+        let active = ActiveCodexStateDb {
+            path: db_path,
+            kind: "sqlite_subdir".to_string(),
+        };
+        let selected = source_ids(&["selected-two"]);
+        let dry_run = repair_codex_history_visibility_at(
+            &codex_dir,
+            active,
+            CC_SWITCH_CODEX_ROUTER_MODEL_PROVIDER_ID,
+            Some(CC_SWITCH_CODEX_ROUTER_MODEL_PROVIDER_ID.to_string()),
+            source_ids(&["openai"]),
+            Some(project_path),
+            HistoryVisibilityRepairRuntimeOptions {
+                dry_run: true,
+                count: 20,
+                window_limit: 50,
+                balance_recent_window: true,
+                max_per_project: 10,
+                max_total: 300,
+                source_filter: Some("vscode".to_string()),
+                include_archived: false,
+                include_subagents: false,
+                selected_session_ids: selected,
+                backup_root_override: Some(dir.path().join("dry-run-backup")),
+            },
+        )
+        .expect("dry run selected repair");
+
+        assert_eq!(dry_run.visible_candidate_rows, 2);
+        assert_eq!(dry_run.project_rows, 2);
+        assert_eq!(dry_run.focus_selected_count, 1);
+        assert!(!dry_run.balanced_recent_window_enabled);
+        assert_eq!(dry_run.balanced_recent_window_rows, 0);
+        assert_eq!(dry_run.sqlite_focus_rows_to_update, 1);
+        assert_eq!(dry_run.session_index_rows_to_move, 1);
+        assert_eq!(dry_run.rollout_mtimes_to_touch, 1);
     }
 
     #[test]
@@ -3578,6 +3937,7 @@ mod tests {
                 source_filter: Some("vscode".to_string()),
                 include_archived: false,
                 include_subagents: false,
+                selected_session_ids: BTreeSet::new(),
                 backup_root_override: Some(dir.path().join("dry-run-backup")),
             },
         )
@@ -3610,6 +3970,7 @@ mod tests {
                 source_filter: Some("vscode".to_string()),
                 include_archived: false,
                 include_subagents: false,
+                selected_session_ids: BTreeSet::new(),
                 backup_root_override: Some(backup_root),
             },
         )

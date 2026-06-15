@@ -90,37 +90,27 @@ function Copy-RawExe {
     }
 }
 
-# Copy the standalone Codex history repair GUI.
-function Copy-HistoryRepairerExe {
+# Copy the standalone Codex history repair Python tool.
+function Copy-HistoryRepairPythonTool {
     param(
-        [string]$SourceExe,
-        [string]$Destination,
-        [string]$Version
+        [string]$SourceDir,
+        [string]$Destination
     )
 
-    if (-not (Test-Path -LiteralPath $SourceExe)) {
-        Write-Warning "Codex history repairer exe was not found: $SourceExe"
+    if (-not (Test-Path -LiteralPath (Join-Path $SourceDir "codex_history_tool.py"))) {
+        Write-Warning "Codex history Python tool was not found: $SourceDir"
         return
     }
 
-    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
-    $versionedName = "CodexHistoryRepairer_$Version`_x64.exe"
-    Copy-Item -LiteralPath $SourceExe -Destination (Join-Path $Destination $versionedName) -Force
-
-    $stablePath = Join-Path $Destination "CodexHistoryRepairer.exe"
-    try {
-        Copy-Item -LiteralPath $SourceExe -Destination $stablePath -Force -ErrorAction Stop
-        Remove-Item -LiteralPath (Join-Path $Destination "HISTORY_REPAIRER_ALIAS_LOCKED.txt") -Force -ErrorAction SilentlyContinue
-    } catch {
-        $note = @(
-            "CodexHistoryRepairer.exe could not be replaced because it is probably running.",
-            "The fresh executable was still exported as $versionedName.",
-            "Close the running repairer and rerun the export if you need the stable alias updated.",
-            "Error: $($_.Exception.Message)"
-        ) -join "`r`n"
-        Set-Content -LiteralPath (Join-Path $Destination "HISTORY_REPAIRER_ALIAS_LOCKED.txt") -Value $note -Encoding UTF8
-        Write-Warning $note
+    if (Test-Path -LiteralPath $Destination) {
+        Remove-Item -LiteralPath $Destination -Recurse -Force
     }
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    Get-ChildItem -LiteralPath $SourceDir -Force |
+        Where-Object { $_.Name -ne "__pycache__" -and $_.Extension -ne ".pyc" } |
+        ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $Destination -Recurse -Force
+        }
 }
 
 # Detect a local Tauri signing key when one is available outside the repository.
@@ -237,7 +227,7 @@ function Write-ReleaseReadme {
         "- windows/installer: Windows installers, including NSIS setup and MSI when available.",
         "- windows/portable: Windows portable zip. Unzip and run the executable.",
         "- windows/raw-exe: Raw Tauri release executable for quick local verification.",
-        "- tools/codex-history-repairer: Standalone GUI for repairing Codex Desktop history visibility.",
+        "- tools/codex-history-tool: Standalone Python script for listing and repairing Codex Desktop history visibility.",
         "- linux and macos: Build notes when this Windows host cannot produce native artifacts.",
         "- latest.json: Tauri updater index when updater signatures are available.",
         "- SHA256SUMS.txt: SHA256 checksums for exported files.",
@@ -314,10 +304,6 @@ if (-not $SkipBuild) {
         if ($LASTEXITCODE -ne 0) {
             throw "tauri build failed with exit code $LASTEXITCODE"
         }
-        cargo build --manifest-path (Join-Path $tauriDir "Cargo.toml") --bin codex-history-repairer --features history-repairer --release
-        if ($LASTEXITCODE -ne 0) {
-            throw "codex-history-repairer build failed with exit code $LASTEXITCODE"
-        }
     } finally {
         Remove-Item -LiteralPath $buildConfig.FullName -Force -ErrorAction SilentlyContinue
         Pop-Location
@@ -329,7 +315,7 @@ Clear-ExportRoot -Root $exportRoot
 $windowsInstaller = Join-Path $exportRoot "windows\installer"
 $windowsPortable = Join-Path $exportRoot "windows\portable"
 $windowsRawExe = Join-Path $exportRoot "windows\raw-exe"
-$historyRepairer = Join-Path $exportRoot "tools\codex-history-repairer"
+$historyTool = Join-Path $exportRoot "tools\codex-history-tool"
 
 $currentSetupPattern = Join-Path $bundleDir "nsis\CCSwitchMulti_$version`_x64-setup.exe"
 Copy-Artifacts -Pattern $currentSetupPattern -Destination $windowsInstaller | Out-Null
@@ -349,8 +335,7 @@ if (Test-Path -LiteralPath $sourceExe) {
 }
 
 Copy-RawExe -SourceExe $sourceExe -Destination $windowsRawExe -Version $version
-$repairerExe = Join-Path $releaseDir "codex-history-repairer.exe"
-Copy-HistoryRepairerExe -SourceExe $repairerExe -Destination $historyRepairer -Version $version
+Copy-HistoryRepairPythonTool -SourceDir (Join-Path $repoRoot "scripts\codex-history-tool") -Destination $historyTool
 
 Write-PlatformNote -Path (Join-Path $exportRoot "linux") -Platform "Linux" -Reason "Run pnpm tauri build on a Linux host with Rust, Node/pnpm, and Tauri WebKit/GTK dependencies installed, then run this export script."
 Write-PlatformNote -Path (Join-Path $exportRoot "macos") -Platform "macOS" -Reason "Run pnpm tauri build on a macOS host with Xcode Command Line Tools, Rust, and Node/pnpm installed, then run this export script."

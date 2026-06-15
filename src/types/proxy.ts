@@ -193,7 +193,10 @@ export interface CodexHistoryProviderBucketSyncOutcome {
 
 export interface CodexHistoryVisibilityRepairOptions {
   dryRun: boolean;
+  codexHome?: string | null;
+  stateDbPath?: string | null;
   projectPath?: string | null;
+  sessionIds?: string[] | null;
   targetProvider?: string | null;
   count?: number | null;
   windowLimit?: number | null;
@@ -248,6 +251,42 @@ export interface CodexHistoryVisibilityRepairOutcome {
   rolloutMtimesTouched: number;
   visibleProjectRowsInWindowBefore: number;
   backupDir: string | null;
+  skippedReason: string | null;
+}
+
+export interface CodexHistorySessionListOptions {
+  codexHome?: string | null;
+  stateDbPath?: string | null;
+  projectPath?: string | null;
+  provider?: string | null;
+  sourceFilter?: string | null;
+  query?: string | null;
+  limit?: number | null;
+  includeArchived?: boolean | null;
+  includeSubagents?: boolean | null;
+}
+
+export interface CodexHistorySessionSummary {
+  id: string;
+  title: string;
+  cwd: string | null;
+  modelProvider: string | null;
+  source: string | null;
+  threadSource: string | null;
+  archived: boolean;
+  hasUserEvent: boolean;
+  updatedAtMs: number;
+  updatedAt: string | null;
+  rolloutPath: string | null;
+}
+
+export interface CodexHistorySessionListOutcome {
+  codexHome: string;
+  stateDbPath: string | null;
+  activeDbKind: string | null;
+  liveConfigModelProvider: string | null;
+  totalMatched: number;
+  items: CodexHistorySessionSummary[];
   skippedReason: string | null;
 }
 

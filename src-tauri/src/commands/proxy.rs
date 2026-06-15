@@ -597,7 +597,16 @@ pub async fn repair_codex_history_visibility(
     .map_err(|error| error.to_string())
 }
 
-/// 构造一个诊断检查项，统一字符串转换和证据字段。
+/// 列出当前 Codex active SQLite 中的历史会话摘要，供前端勾选定向修复。
+#[tauri::command]
+pub async fn list_codex_history_sessions(
+    options: Option<crate::codex_history_migration::CodexHistorySessionListOptions>,
+) -> Result<crate::codex_history_migration::CodexHistorySessionListOutcome, String> {
+    crate::codex_history_migration::list_codex_history_sessions(options.unwrap_or_default())
+        .map_err(|error| error.to_string())
+}
+
+/// 构造诊断检查项，统一字符串转换和证据字段。
 fn codex_check(
     id: &str,
     label: &str,

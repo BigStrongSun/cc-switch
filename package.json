@@ -1,6 +1,6 @@
 {
   "name": "cc-switch-multi",
-  "version": "3.16.2-19",
+  "version": "3.16.2-20",
   "description": "All-in-One Assistant for Claude Code, Codex & Gemini CLI",
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,css,json}\"",
     "release:export": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/export-latest-ccswitchmulti.ps1",
-    "history:repairer:build": "cargo build --manifest-path src-tauri/Cargo.toml --bin codex-history-repairer --features history-repairer --release",
+    "history:tool:check": "python -m py_compile scripts/codex-history-tool/codex_history_tool.py",
     "release:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-release-pipeline.ps1",
     "release:local:skip-build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-release-pipeline.ps1 -SkipBuild",
     "release:hook:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-local-release-hook.ps1",

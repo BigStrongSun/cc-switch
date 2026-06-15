@@ -1332,6 +1332,7 @@ pub fn run() {
             commands::unlock_codex_model_picker,
             commands::sync_codex_history_to_multirouter,
             commands::repair_codex_history_visibility,
+            commands::list_codex_history_sessions,
             commands::start_external_openai_api_server,
             commands::get_external_openai_api_server_status,
             commands::get_proxy_config,

@@ -66,6 +66,8 @@ import type { RequestLog } from "@/types/usage";
 import type {
   CodexDiagnosticCheck,
   CodexDiagnosticStatus,
+  CodexHistorySessionListOutcome,
+  CodexHistorySessionSummary,
   CodexHistoryVisibilityRepairOutcome,
   CodexModelPickerUnlockResult,
   CodexMultiRouterDiagnostics,
@@ -2264,22 +2266,83 @@ function HistoryRepairTab({
   isCodexTakeoverActive: boolean;
   activeProviderId?: string;
 }) {
+  const [codexHome, setCodexHome] = useState("");
   const [projectPath, setProjectPath] = useState("");
-  const [lastPreviewProjectPath, setLastPreviewProjectPath] = useState<
-    string | null
-  >(null);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyList, setHistoryList] =
+    useState<CodexHistorySessionListOutcome | null>(null);
+  const [historyListError, setHistoryListError] = useState<string | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+  const [lastPreviewKey, setLastPreviewKey] = useState<string | null>(null);
   const [repairResult, setRepairResult] =
     useState<CodexHistoryVisibilityRepairOutcome | null>(null);
   const [repairError, setRepairError] = useState<string | null>(null);
   const [isPreviewingRepair, setIsPreviewingRepair] = useState(false);
   const [isApplyingRepair, setIsApplyingRepair] = useState(false);
+  const normalizedCodexHome = codexHome.trim();
   const normalizedProjectPath = projectPath.trim();
+  const selectedSessionKey = useMemo(
+    () => [...selectedSessionIds].sort().join("|"),
+    [selectedSessionIds],
+  );
+  const currentRepairKey = useMemo(
+    () =>
+      JSON.stringify({
+        codexHome: normalizedCodexHome,
+        projectPath: normalizedProjectPath,
+        sessions: selectedSessionKey,
+      }),
+    [normalizedCodexHome, normalizedProjectPath, selectedSessionKey],
+  );
   const canApplyRepair = Boolean(
     repairResult?.dryRun &&
-      lastPreviewProjectPath === normalizedProjectPath &&
+      lastPreviewKey === currentRepairKey &&
       !isPreviewingRepair &&
       !isApplyingRepair,
   );
+
+  /// 从 active Codex SQLite 读取侧边栏级会话摘要，供用户挑选需要定向拉回的历史记录。
+  async function loadHistorySessions() {
+    setIsLoadingHistory(true);
+    setHistoryListError(null);
+    try {
+      const result = await proxyApi.listCodexHistorySessions({
+        codexHome: normalizedCodexHome || null,
+        projectPath: normalizedProjectPath || null,
+        sourceFilter: "vscode",
+        query: historyQuery.trim() || null,
+        limit: 80,
+        includeArchived: false,
+        includeSubagents: false,
+      });
+      setHistoryList(result);
+      setSelectedSessionIds((current) => {
+        const visibleIds = new Set(result.items.map((item) => item.id));
+        return current.filter((id) => visibleIds.has(id));
+      });
+    } catch (error) {
+      setHistoryListError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }
+
+  /// 切换定向修复 session；一旦选择变化，旧 dry-run 不能继续用于写入确认。
+  function toggleHistorySession(sessionId: string) {
+    setSelectedSessionIds((current) =>
+      current.includes(sessionId)
+        ? current.filter((id) => id !== sessionId)
+        : [...current, sessionId],
+    );
+    setRepairError(null);
+  }
+
+  /// 选择当前列表页全部 session，便于把可见但不在侧边栏窗口内的记录批量拉回。
+  function selectAllLoadedSessions() {
+    setSelectedSessionIds(historyList?.items.map((item) => item.id) ?? []);
+    setRepairError(null);
+  }
 
   /// 调用后端修复命令时固定使用当前输入框参数；dry-run 和写入共用同一路径，避免两套前端逻辑漂移。
   async function runHistoryRepair(dryRun: boolean) {
@@ -2292,7 +2355,9 @@ function HistoryRepairTab({
     try {
       const result = await proxyApi.repairCodexHistoryVisibility({
         dryRun,
+        codexHome: normalizedCodexHome || null,
         projectPath: normalizedProjectPath || null,
+        sessionIds: selectedSessionIds.length > 0 ? selectedSessionIds : null,
         count: 30,
         windowLimit: 80,
         balanceRecentWindow: true,
@@ -2302,7 +2367,7 @@ function HistoryRepairTab({
       });
       setRepairResult(result);
       if (dryRun) {
-        setLastPreviewProjectPath(normalizedProjectPath);
+        setLastPreviewKey(currentRepairKey);
       }
     } catch (error) {
       setRepairError(error instanceof Error ? error.message : String(error));
@@ -2318,7 +2383,7 @@ function HistoryRepairTab({
   /// 写入前要求已有同一路径的预览，防止用户改了项目路径后直接把旧预览用于新写入。
   async function applyHistoryRepair() {
     if (!canApplyRepair || !repairResult) {
-      setRepairError("请先用当前项目路径执行预览。");
+      setRepairError("请先用当前 Codex 目录、项目路径和 session 选择执行预览。");
       return;
     }
     const confirmed = window.confirm(
@@ -2327,6 +2392,8 @@ function HistoryRepairTab({
         "",
         `active DB: ${repairResult.stateDbPath ?? "未找到"}`,
         `目标 provider: ${repairResult.targetProvider}`,
+        `codex home: ${repairResult.codexHome}`,
+        `selected sessions: ${selectedSessionIds.length}`,
         `provider rows: ${repairResult.providerRowsToUpdate}`,
         `has_user_event rows: ${repairResult.userEventRowsToUpdate}`,
         `session_index append: ${repairResult.sessionIndexMissingToAppend}`,
@@ -2386,6 +2453,19 @@ function HistoryRepairTab({
 
         <div className="mt-4 space-y-3">
           <label className="block text-sm font-medium text-slate-200">
+            Codex 目录
+            <Input
+              value={codexHome}
+              onChange={(event) => {
+                setCodexHome(event.target.value);
+                setRepairError(null);
+                setHistoryListError(null);
+              }}
+              placeholder="可选；为空时使用默认 ~/.codex"
+              className="mt-2 border-slate-700 bg-slate-950/70"
+            />
+          </label>
+          <label className="block text-sm font-medium text-slate-200">
             项目根目录
             <Input
               value={projectPath}
@@ -2424,6 +2504,25 @@ function HistoryRepairTab({
               detail="不会把 runtime 改回 built-in openai"
             />
           </div>
+
+          <HistorySessionPicker
+            historyQuery={historyQuery}
+            historyList={historyList}
+            historyListError={historyListError}
+            isLoading={isLoadingHistory}
+            selectedSessionIds={selectedSessionIds}
+            onHistoryQueryChange={(value) => {
+              setHistoryQuery(value);
+              setHistoryListError(null);
+            }}
+            onLoad={loadHistorySessions}
+            onToggleSession={toggleHistorySession}
+            onSelectAll={selectAllLoadedSessions}
+            onClearSelection={() => {
+              setSelectedSessionIds([]);
+              setRepairError(null);
+            }}
+          />
 
           {repairError ? (
             <div className="rounded-lg border border-rose-700/50 bg-rose-950/30 p-3 text-xs text-rose-100">
@@ -2465,6 +2564,209 @@ function HistoryRepairTab({
       </section>
     </div>
   );
+}
+
+/// 历史会话选择器只展示 active SQLite 摘要，不读取完整对话，避免在修复页泄露或拖慢大体量记录。
+function HistorySessionPicker({
+  historyQuery,
+  historyList,
+  historyListError,
+  isLoading,
+  selectedSessionIds,
+  onHistoryQueryChange,
+  onLoad,
+  onToggleSession,
+  onSelectAll,
+  onClearSelection,
+}: {
+  historyQuery: string;
+  historyList: CodexHistorySessionListOutcome | null;
+  historyListError: string | null;
+  isLoading: boolean;
+  selectedSessionIds: string[];
+  onHistoryQueryChange: (value: string) => void;
+  onLoad: () => void;
+  onToggleSession: (sessionId: string) => void;
+  onSelectAll: () => void;
+  onClearSelection: () => void;
+}) {
+  const selectedSet = useMemo(
+    () => new Set(selectedSessionIds),
+    [selectedSessionIds],
+  );
+
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-950/40 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold text-slate-100">历史记录</div>
+          <div className="mt-1 text-xs text-slate-400">
+            勾选后只修复这些 session；不勾选时使用项目 top 10 + 全局最近窗口。
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onLoad}
+            disabled={isLoading}
+            className="gap-2 border-slate-600 bg-slate-900/70 text-slate-100 hover:bg-slate-800"
+          >
+            {isLoading ? (
+              <RefreshCw className="h-4 w-4 animate-spin" />
+            ) : (
+              <Database className="h-4 w-4" />
+            )}
+            加载历史
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onSelectAll}
+            disabled={!historyList?.items.length}
+            className="border-slate-600 bg-slate-900/70 text-slate-100 hover:bg-slate-800"
+          >
+            全选本页
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onClearSelection}
+            disabled={selectedSessionIds.length === 0}
+            className="border-slate-600 bg-slate-900/70 text-slate-100 hover:bg-slate-800"
+          >
+            清空选择
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+        <Input
+          value={historyQuery}
+          onChange={(event) => onHistoryQueryChange(event.target.value)}
+          placeholder="按标题、路径、provider 或 session id 搜索"
+          className="border-slate-700 bg-slate-950/70"
+        />
+        <div className="flex items-center rounded-md border border-slate-700 bg-slate-950/60 px-3 text-xs text-slate-300">
+          已选 {selectedSessionIds.length}
+        </div>
+      </div>
+
+      {historyListError ? (
+        <div className="mt-3 rounded-md border border-rose-700/50 bg-rose-950/30 p-3 text-xs text-rose-100">
+          加载历史失败：{historyListError}
+        </div>
+      ) : null}
+
+      {historyList ? (
+        <div className="mt-3 space-y-2">
+          <div className="grid gap-2 text-[11px] text-slate-400 md:grid-cols-3">
+            <div>active DB: {historyList.stateDbPath ?? "未找到"}</div>
+            <div>provider: {historyList.liveConfigModelProvider ?? "未读取"}</div>
+            <div>
+              matched: {historyList.totalMatched} / shown {historyList.items.length}
+            </div>
+          </div>
+          {historyList.skippedReason ? (
+            <div className="rounded-md border border-amber-700/50 bg-amber-950/30 p-3 text-xs text-amber-100">
+              跳过原因：{historyList.skippedReason}
+            </div>
+          ) : null}
+          <div className="max-h-80 overflow-y-auto rounded-md border border-slate-800">
+            {historyList.items.length > 0 ? (
+              historyList.items.map((session) => (
+                <HistorySessionRow
+                  key={session.id}
+                  session={session}
+                  selected={selectedSet.has(session.id)}
+                  onToggle={() => onToggleSession(session.id)}
+                />
+              ))
+            ) : (
+              <div className="p-4 text-sm text-slate-400">没有匹配的历史记录。</div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 rounded-md border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-400">
+          先加载 active DB 中的历史摘要，再选择需要定向修复的记录。
+        </div>
+      )}
+    </div>
+  );
+}
+
+/// 单条历史记录行固定高度和字段顺序，避免长路径或长标题撑乱修复页布局。
+function HistorySessionRow({
+  session,
+  selected,
+  onToggle,
+}: {
+  session: CodexHistorySessionSummary;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={cn(
+        "grid w-full gap-2 border-b border-slate-800 px-3 py-2 text-left text-xs transition last:border-b-0 md:grid-cols-[24px_1fr_180px]",
+        selected
+          ? "bg-sky-500/15 text-sky-100"
+          : "bg-slate-950/30 text-slate-300 hover:bg-slate-900/80",
+      )}
+    >
+      <span
+        className={cn(
+          "mt-1 grid h-4 w-4 place-items-center rounded border",
+          selected
+            ? "border-sky-300 bg-sky-500 text-white"
+            : "border-slate-600 bg-slate-950",
+        )}
+      >
+        {selected ? <CheckCircle2 className="h-3 w-3" /> : null}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-semibold" title={session.title}>
+          {session.title || session.id}
+        </span>
+        <span
+          className="mt-1 block truncate font-mono text-[11px] text-slate-400"
+          title={session.cwd ?? ""}
+        >
+          {session.cwd ?? "no cwd"}
+        </span>
+        <span className="mt-1 block truncate font-mono text-[11px] text-slate-500" title={session.id}>
+          {session.id}
+        </span>
+      </span>
+      <span className="flex min-w-0 flex-col gap-1 text-[11px] text-slate-400">
+        <span className="truncate" title={session.modelProvider ?? ""}>
+          provider={session.modelProvider ?? "-"}
+        </span>
+        <span className="truncate" title={session.source ?? ""}>
+          source={session.source ?? "-"} / user={session.hasUserEvent ? "yes" : "no"}
+        </span>
+        <span className="truncate" title={session.updatedAt ?? ""}>
+          {formatHistorySessionTime(session.updatedAt)}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/// 格式化列表时间时保留原始字符串兜底，避免异常时间戳阻断整个历史列表渲染。
+function formatHistorySessionTime(value: string | null): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /// 修复结果面板按索引来源拆开展示，方便判断“没显示”到底卡在 provider、user-event 还是 session_index。

@@ -13,6 +13,8 @@ import type {
   CodexMultiRouterDiagnostics,
   CodexModelPickerUnlockResult,
   CodexHistoryProviderBucketSyncOutcome,
+  CodexHistorySessionListOptions,
+  CodexHistorySessionListOutcome,
   CodexHistoryVisibilityRepairOptions,
   CodexHistoryVisibilityRepairOutcome,
 } from "@/types/proxy";
@@ -53,6 +55,12 @@ export const proxyApi = {
     options: CodexHistoryVisibilityRepairOptions,
   ): Promise<CodexHistoryVisibilityRepairOutcome> {
     return invoke("repair_codex_history_visibility", { options });
+  },
+
+  async listCodexHistorySessions(
+    options: CodexHistorySessionListOptions,
+  ): Promise<CodexHistorySessionListOutcome> {
+    return invoke("list_codex_history_sessions", { options });
   },
 
   async startExternalOpenAIAPIServer(): Promise<ProxyServerInfo> {
