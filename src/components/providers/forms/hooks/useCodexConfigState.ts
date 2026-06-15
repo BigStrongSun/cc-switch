@@ -120,26 +120,122 @@ function extractCodexRoutingConfig(
     : { enabled: false, defaultRouteId: "", routes: [] };
 }
 
+interface CodexConfigInitialState {
+  authString: string;
+  configString: string;
+  apiKey: string;
+  baseUrl: string;
+  catalogModels: CodexCatalogModel[];
+  spawnAgentModels: string[];
+  routing: CodexRoutingConfig;
+}
+
+// 归一化 modelCatalog.models，保证编辑页首帧就能拿到可渲染的模型行。
+function extractCodexCatalogModels(modelCatalog: any): CodexCatalogModel[] {
+  const rawCatalogModels = Array.isArray(modelCatalog?.models)
+    ? modelCatalog.models
+    : [];
+
+  return rawCatalogModels
+    .map((item: any) => ({
+      model: typeof item?.model === "string" ? item.model : "",
+      displayName:
+        typeof item?.displayName === "string"
+          ? item.displayName
+          : typeof item?.display_name === "string"
+            ? item.display_name
+            : "",
+      contextWindow:
+        typeof item?.contextWindow === "string" ||
+        typeof item?.contextWindow === "number"
+          ? item.contextWindow
+          : typeof item?.context_window === "string" ||
+              typeof item?.context_window === "number"
+            ? item.context_window
+            : "",
+    }))
+    .filter((item: CodexCatalogModel) => item.model.trim());
+}
+
+// 归一化 spawn agent 候选，最多保留 5 个，和保存逻辑保持一致。
+function extractCodexSpawnAgentModels(modelCatalog: any): string[] {
+  const rawSpawnAgentModels = Array.isArray(modelCatalog?.spawnAgentModels)
+    ? modelCatalog.spawnAgentModels
+    : Array.isArray(modelCatalog?.spawn_agent_models)
+      ? modelCatalog.spawn_agent_models
+      : [];
+
+  return rawSpawnAgentModels
+    .filter((item: unknown): item is string => typeof item === "string")
+    .map((item: string) => item.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+// 从 initialData 同步提取初始状态，避免编辑页先渲染空路由再由 effect 填充导致抖动。
+function readInitialCodexState(
+  initialData?: UseCodexConfigStateProps["initialData"],
+): CodexConfigInitialState {
+  const emptyRouting = { enabled: false, defaultRouteId: "", routes: [] };
+  const emptyState: CodexConfigInitialState = {
+    authString: "",
+    configString: "",
+    apiKey: "",
+    baseUrl: "",
+    catalogModels: [],
+    spawnAgentModels: [],
+    routing: emptyRouting,
+  };
+
+  const settingsConfig = initialData?.settingsConfig;
+  if (!settingsConfig || typeof settingsConfig !== "object") {
+    return emptyState;
+  }
+
+  const auth =
+    settingsConfig.auth &&
+    typeof settingsConfig.auth === "object" &&
+    !Array.isArray(settingsConfig.auth)
+      ? (settingsConfig.auth as Record<string, unknown>)
+      : {};
+  const configString =
+    typeof settingsConfig.config === "string" ? settingsConfig.config : "";
+  const modelCatalog = settingsConfig.modelCatalog;
+
+  return {
+    authString: JSON.stringify(auth, null, 2),
+    configString,
+    apiKey: pickCodexApiKey(auth, configString),
+    baseUrl: extractCodexBaseUrl(configString) || "",
+    catalogModels: extractCodexCatalogModels(modelCatalog),
+    spawnAgentModels: extractCodexSpawnAgentModels(modelCatalog),
+    routing: extractCodexRoutingConfig(settingsConfig as Record<string, any>),
+  };
+}
+
 /**
  * 管理 Codex 配置状态
  * Codex 配置包含两部分：auth.json (JSON) 和 config.toml (TOML 字符串)
  */
 export function useCodexConfigState({ initialData }: UseCodexConfigStateProps) {
-  const [codexAuth, setCodexAuthState] = useState("");
-  const [codexConfig, setCodexConfigState] = useState("");
-  const [codexApiKey, setCodexApiKey] = useState("");
-  const [codexBaseUrl, setCodexBaseUrl] = useState("");
+  const initialState = readInitialCodexState(initialData);
+  const [codexAuth, setCodexAuthState] = useState(
+    () => initialState.authString,
+  );
+  const [codexConfig, setCodexConfigState] = useState(
+    () => initialState.configString,
+  );
+  const [codexApiKey, setCodexApiKey] = useState(() => initialState.apiKey);
+  const [codexBaseUrl, setCodexBaseUrl] = useState(() => initialState.baseUrl);
   const [codexCatalogModels, setCodexCatalogModels] = useState<
     CodexCatalogModel[]
-  >([]);
+  >(() => initialState.catalogModels);
   const [codexSpawnAgentModels, setCodexSpawnAgentModels] = useState<string[]>(
-    [],
+    () => initialState.spawnAgentModels,
   );
-  const [codexRouting, setCodexRouting] = useState<CodexRoutingConfig>({
-    enabled: false,
-    defaultRouteId: "",
-    routes: [],
-  });
+  const [codexRouting, setCodexRouting] = useState<CodexRoutingConfig>(
+    () => initialState.routing,
+  );
   const [codexAuthError, setCodexAuthError] = useState("");
 
   const isUpdatingCodexBaseUrlRef = useRef(false);
@@ -148,66 +244,14 @@ export function useCodexConfigState({ initialData }: UseCodexConfigStateProps) {
   useEffect(() => {
     if (!initialData) return;
 
-    const config = initialData.settingsConfig;
-    if (typeof config === "object" && config !== null) {
-      // 设置 auth.json
-      const auth = (config as any).auth || {};
-      setCodexAuthState(JSON.stringify(auth, null, 2));
-
-      // 设置 config.toml
-      const configStr =
-        typeof (config as any).config === "string"
-          ? (config as any).config
-          : "";
-      setCodexConfigState(configStr);
-
-      const modelCatalog = (config as any).modelCatalog;
-      const rawCatalogModels = Array.isArray(modelCatalog?.models)
-        ? modelCatalog.models
-        : [];
-      const rawSpawnAgentModels = Array.isArray(modelCatalog?.spawnAgentModels)
-        ? modelCatalog.spawnAgentModels
-        : Array.isArray(modelCatalog?.spawn_agent_models)
-          ? modelCatalog.spawn_agent_models
-          : [];
-      setCodexCatalogModels(
-        rawCatalogModels
-          .map((item: any) => ({
-            model: typeof item?.model === "string" ? item.model : "",
-            displayName:
-              typeof item?.displayName === "string"
-                ? item.displayName
-                : typeof item?.display_name === "string"
-                  ? item.display_name
-                  : "",
-            contextWindow:
-              typeof item?.contextWindow === "string" ||
-              typeof item?.contextWindow === "number"
-                ? item.contextWindow
-                : typeof item?.context_window === "string" ||
-                    typeof item?.context_window === "number"
-                  ? item.context_window
-                  : "",
-          }))
-          .filter((item: CodexCatalogModel) => item.model.trim()),
-      );
-      setCodexSpawnAgentModels(
-        rawSpawnAgentModels
-          .filter((item: unknown): item is string => typeof item === "string")
-          .map((item: string) => item.trim())
-          .filter(Boolean)
-          .slice(0, 5),
-      );
-      setCodexRouting(extractCodexRoutingConfig(config as Record<string, any>));
-
-      // 提取 Base URL
-      const initialBaseUrl = extractCodexBaseUrl(configStr);
-      if (initialBaseUrl) {
-        setCodexBaseUrl(initialBaseUrl);
-      }
-
-      setCodexApiKey(pickCodexApiKey(auth, configStr));
-    }
+    const nextState = readInitialCodexState(initialData);
+    setCodexAuthState(nextState.authString);
+    setCodexConfigState(nextState.configString);
+    setCodexCatalogModels(nextState.catalogModels);
+    setCodexSpawnAgentModels(nextState.spawnAgentModels);
+    setCodexRouting(nextState.routing);
+    setCodexBaseUrl(nextState.baseUrl);
+    setCodexApiKey(nextState.apiKey);
   }, [initialData]);
 
   // 与 TOML 配置保持基础 URL 同步

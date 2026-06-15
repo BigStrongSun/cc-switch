@@ -267,12 +267,24 @@ export function CodexFormFields({
   // 记录上次发送给父组件的数据，避免重复触发
   const lastSentModelsRef = useRef<CodexCatalogModel[]>(catalogModels);
   const lastSentRoutingRef = useRef<CodexRoutingConfig>(codexRouting);
+  const catalogPropKeyRef = useRef(JSON.stringify(catalogModels));
+  const routingPropKeyRef = useRef(JSON.stringify(codexRouting));
+  const skipCatalogEchoRef = useRef(false);
+  const skipRoutingEchoRef = useRef(false);
 
   // 父 → 子：仅当 prop 数据真的变化（预设切换 / 编辑加载）时才重建 rowId；
   // 同 shape 时保留现有 rowId，避免编辑过程中焦点丢失。
   useEffect(() => {
+    const incomingCatalogKey = JSON.stringify(catalogModels);
+    const isExternalCatalogChange =
+      incomingCatalogKey !== catalogPropKeyRef.current;
+    catalogPropKeyRef.current = incomingCatalogKey;
+
     setCatalogRows((current) => {
       if (catalogRowsMatchModels(current, catalogModels)) return current;
+      if (isExternalCatalogChange) {
+        skipCatalogEchoRef.current = true;
+      }
       return catalogModels.map((m) => createCatalogRow(m));
     });
     // 同步更新 ref，避免父组件传入新数据时子→父 effect 误判为本地修改
@@ -281,8 +293,16 @@ export function CodexFormFields({
 
   // 父 → 子：外部加载或 preset 切换时同步 route 列表，保留编辑过程中的 rowId 稳定性。
   useEffect(() => {
+    const incomingRoutingKey = JSON.stringify(codexRouting);
+    const isExternalRoutingChange =
+      incomingRoutingKey !== routingPropKeyRef.current;
+    routingPropKeyRef.current = incomingRoutingKey;
+
     setRoutingRows((current) => {
       if (routingRowsMatchConfig(current, codexRouting)) return current;
+      if (isExternalRoutingChange) {
+        skipRoutingEchoRef.current = true;
+      }
       return (codexRouting.routes ?? []).map((route) =>
         createRoutingRow(route),
       );
@@ -293,6 +313,12 @@ export function CodexFormFields({
   // 子 → 父：route rowId 不进入持久化，只把真正配置写回父组件。
   useEffect(() => {
     if (!onCodexRoutingChange) return;
+    // 外部 provider 刚加载时，本地 routingRows 仍可能是上一帧的空数组；
+    // 这一帧必须跳过反向回写，避免把刚加载出的路由覆盖为空。
+    if (skipRoutingEchoRef.current) {
+      if (!routingRowsMatchConfig(routingRows, codexRouting)) return;
+      skipRoutingEchoRef.current = false;
+    }
     const next: CodexRoutingConfig = {
       enabled: codexRouting.enabled ?? false,
       defaultRouteId: codexRouting.defaultRouteId ?? "",
@@ -306,6 +332,7 @@ export function CodexFormFields({
     routingRows,
     codexRouting.enabled,
     codexRouting.defaultRouteId,
+    codexRouting,
     onCodexRoutingChange,
   ]);
 
@@ -313,6 +340,11 @@ export function CodexFormFields({
   // 注意：依赖数组不包含 catalogModels，避免父→子更新触发子→父回调形成循环。
   useEffect(() => {
     if (!onCatalogModelsChange) return;
+    // 外部 catalog 同步进来时先等本地 rowId 重建完成，再允许子组件回写。
+    if (skipCatalogEchoRef.current) {
+      if (!catalogRowsMatchModels(catalogRows, catalogModels)) return;
+      skipCatalogEchoRef.current = false;
+    }
     const next: CodexCatalogModel[] = catalogRows.map(
       ({ rowId: _rowId, ...rest }) => rest,
     );
@@ -320,7 +352,7 @@ export function CodexFormFields({
     if (catalogRowsMatchModels(catalogRows, lastSentModelsRef.current)) return;
     lastSentModelsRef.current = next;
     onCatalogModelsChange(next);
-  }, [catalogRows, onCatalogModelsChange]);
+  }, [catalogRows, catalogModels, onCatalogModelsChange]);
 
   const handleLocalRoutingChange = useCallback(
     (checked: boolean) => {
@@ -656,88 +688,99 @@ export function CodexFormFields({
             </Button>
           </div>
 
-          {routingRows.map((route, index) => {
-            const matchedModels = route.match.models?.join(", ") || "-";
-            const matchedPrefixes = route.match.prefixes?.join(", ") || "-";
-            const capabilityLabels = [
-              route.capabilities?.textOnly ? "仅文本" : "图文",
-              route.capabilities?.supportsReasoning ? "推理" : null,
-            ].filter(Boolean);
-
-            return (
-              <div
-                key={route.rowId}
-                className="flex items-center justify-between gap-3 rounded-md border border-border-default bg-muted/10 p-3"
-              >
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-sm">
-                      {route.label || route.id || "路由"}
-                    </span>
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                      {route.targetProviderId
-                        ? `目标: ${route.targetProviderId}`
-                        : route.upstream.apiFormat}
-                    </span>
-                    {route.enabled === false && (
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                        已停用
-                      </span>
-                    )}
-                    {capabilityLabels.map((label) => (
-                      <span
-                        key={label}
-                        className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                      >
-                        {label}
-                      </span>
-                    ))}
-                  </div>
-                  <p className="truncate text-xs text-muted-foreground">
-                    匹配模型：{matchedModels}；匹配前缀：{matchedPrefixes}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {route.targetProviderId
-                      ? `复用供应商配置：${route.targetProviderId}`
-                      : route.upstream.baseUrl || "尚未填写上游 Base URL"}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Switch
-                    checked={route.enabled !== false}
-                    onCheckedChange={(checked) =>
-                      handleUpdateRoute(index, { enabled: checked })
-                    }
-                    aria-label={t("codexConfig.routeEnabled", {
-                      defaultValue: "启用路由",
-                    })}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 text-muted-foreground"
-                    onClick={() => setEditingRouteIndex(index)}
-                    title={t("codexConfig.editRoute", {
-                      defaultValue: "编辑路由",
-                    })}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 text-muted-foreground hover:text-destructive"
-                    onClick={() => handleRemoveRoute(index)}
-                    title={t("common.delete", { defaultValue: "删除" })}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+          <div className="min-h-[72px] space-y-3">
+            {routingRows.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border-default bg-muted/10 px-3 py-4 text-xs text-muted-foreground">
+                {t("codexConfig.noRoutesConfigured", {
+                  defaultValue:
+                    "还没有路由。添加 route 后，Codex 会按模型名分流到对应上游。",
+                })}
               </div>
-            );
-          })}
+            ) : (
+              routingRows.map((route, index) => {
+                const matchedModels = route.match.models?.join(", ") || "-";
+                const matchedPrefixes = route.match.prefixes?.join(", ") || "-";
+                const capabilityLabels = [
+                  route.capabilities?.textOnly ? "仅文本" : "图文",
+                  route.capabilities?.supportsReasoning ? "推理" : null,
+                ].filter(Boolean);
+
+                return (
+                  <div
+                    key={route.rowId}
+                    className="flex items-center justify-between gap-3 rounded-md border border-border-default bg-muted/10 p-3"
+                  >
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-sm">
+                          {route.label || route.id || "路由"}
+                        </span>
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                          {route.targetProviderId
+                            ? `目标: ${route.targetProviderId}`
+                            : route.upstream.apiFormat}
+                        </span>
+                        {route.enabled === false && (
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                            已停用
+                          </span>
+                        )}
+                        {capabilityLabels.map((label) => (
+                          <span
+                            key={label}
+                            className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                          >
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="truncate text-xs text-muted-foreground">
+                        匹配模型：{matchedModels}；匹配前缀：{matchedPrefixes}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {route.targetProviderId
+                          ? `复用供应商配置：${route.targetProviderId}`
+                          : route.upstream.baseUrl || "尚未填写上游 Base URL"}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Switch
+                        checked={route.enabled !== false}
+                        onCheckedChange={(checked) =>
+                          handleUpdateRoute(index, { enabled: checked })
+                        }
+                        aria-label={t("codexConfig.routeEnabled", {
+                          defaultValue: "启用路由",
+                        })}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-muted-foreground"
+                        onClick={() => setEditingRouteIndex(index)}
+                        title={t("codexConfig.editRoute", {
+                          defaultValue: "编辑路由",
+                        })}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleRemoveRoute(index)}
+                        title={t("common.delete", { defaultValue: "删除" })}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       )}
 
@@ -1073,49 +1116,13 @@ export function CodexFormFields({
             <p className="mt-1 ml-1 text-xs text-muted-foreground">
               {t("codexConfig.advancedSectionHint", {
                 defaultValue:
-                  "包含本地路由映射、模型映射、思考能力与自定义 User-Agent。供应商使用 Chat Completions 协议或非 GPT 模型时，需在此开启本地路由映射。",
+                  "包含模型映射、思考能力与自定义 User-Agent。供应商使用 Chat Completions 协议或非 GPT 模型时，请在上方开启本地路由映射。",
               })}
             </p>
           )}
           <CollapsibleContent className="space-y-3 pt-3">
-            {/* 本地路由映射开关 —— 沿用 shouldShowSpeedTest 门控，cloud_provider 保持不可切换 */}
-            {shouldShowSpeedTest && (
-              <div className="flex items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <FormLabel>
-                    {t("codexConfig.localRoutingToggle", {
-                      defaultValue: "需要本地路由映射",
-                    })}
-                  </FormLabel>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    {needsLocalRouting
-                      ? t("codexConfig.localRoutingOnHint", {
-                          defaultValue:
-                            "Codex 目前仅原生支持 OpenAI Responses API 与 GPT 系列模型；如果您的供应商使用 Chat Completions 协议或非 GPT 模型（如 DeepSeek、Kimi），则需要打开本开关，并在使用过程中保持本地路由开启。",
-                        })
-                      : t("codexConfig.localRoutingOffHint", {
-                          defaultValue:
-                            "如果您的供应商不是原生 OpenAI Responses API，或者模型名不是 Codex 默认的 GPT 系列，请打开此开关。",
-                        })}
-                  </p>
-                </div>
-                <Switch
-                  checked={needsLocalRouting}
-                  onCheckedChange={handleLocalRoutingChange}
-                  aria-label={t("codexConfig.localRoutingToggle", {
-                    defaultValue: "需要本地路由映射",
-                  })}
-                />
-              </div>
-            )}
-
             {needsLocalRouting && canEditReasoning && (
-              <div
-                className={cn(
-                  "space-y-3",
-                  shouldShowSpeedTest && "border-t border-border-default pt-3",
-                )}
-              >
+              <div className="space-y-3">
                 <div className="space-y-1">
                   <FormLabel>
                     {t("codexConfig.reasoningGroupTitle", {
@@ -1180,8 +1187,8 @@ export function CodexFormFields({
 
             <div
               className={cn(
-                (shouldShowSpeedTest ||
-                  (needsLocalRouting && canEditReasoning)) &&
+                needsLocalRouting &&
+                  canEditReasoning &&
                   "border-t border-border-default pt-3",
               )}
             >

@@ -319,7 +319,8 @@ $historyTool = Join-Path $exportRoot "tools\codex-history-tool"
 
 $currentSetupPattern = Join-Path $bundleDir "nsis\CCSwitchMulti_$version`_x64-setup.exe"
 Copy-Artifacts -Pattern $currentSetupPattern -Destination $windowsInstaller | Out-Null
-Copy-Artifacts -Pattern (Join-Path $bundleDir "nsis\*.sig") -Destination $windowsInstaller | Out-Null
+# bundle 目录里可能残留旧版本签名；这里只复制当前安装包匹配的签名。
+Copy-Artifacts -Pattern "$currentSetupPattern.sig" -Destination $windowsInstaller | Out-Null
 if ($hasUpdaterSigningKey) {
     $exportedSetup = Join-Path $windowsInstaller "CCSwitchMulti_$version`_x64-setup.exe"
     Write-TauriSetupSignature -RepoRoot $repoRoot -SetupPath $exportedSetup -SigningKeyPath $defaultSigningKeyPath | Out-Null
