@@ -128,6 +128,22 @@ function Initialize-TauriSigningKey {
     return $true
 }
 
+# Build the feature-gated history repair sidecar before Tauri bundles the app.
+function Build-HistoryRepairSidecar {
+    param([string]$TauriDir)
+
+    $manifestPath = Join-Path $TauriDir "Cargo.toml"
+    cargo build --manifest-path $manifestPath --bin codex-history-repairer --features history-repairer --release
+    if ($LASTEXITCODE -ne 0) {
+        throw "codex-history-repairer sidecar build failed with exit code $LASTEXITCODE"
+    }
+
+    $sidecarPath = Join-Path $TauriDir "target\release\codex-history-repairer.exe"
+    if (-not (Test-Path -LiteralPath $sidecarPath)) {
+        throw "codex-history-repairer sidecar was not produced: $sidecarPath"
+    }
+}
+
 # Sign exported Windows setup manually. This avoids the Tauri build-time updater
 # signer path hanging while still producing the .sig required by latest.json.
 function Write-TauriSetupSignature {
@@ -300,6 +316,7 @@ if (-not $SkipBuild) {
             }
         } | ConvertTo-Json -Depth 8
         Set-Content -LiteralPath $buildConfig.FullName -Value $override -Encoding UTF8
+        Build-HistoryRepairSidecar -TauriDir $tauriDir
         pnpm tauri build --bundles nsis --config $buildConfig.FullName
         if ($LASTEXITCODE -ne 0) {
             throw "tauri build failed with exit code $LASTEXITCODE"
