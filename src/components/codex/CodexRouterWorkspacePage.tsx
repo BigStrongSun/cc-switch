@@ -2303,6 +2303,10 @@ function DiagnosticsPanel({
     diagnostics?.checks.filter((check) => check.status === "fail") ?? [];
   const warningChecks =
     diagnostics?.checks.filter((check) => check.status === "warn") ?? [];
+  const visibleCheckCards =
+    diagnostics?.checks.filter(
+      (check) => check.status !== "fail" && check.status !== "warn",
+    ) ?? [];
 
   return (
     <div className="rounded-lg border border-amber-600/40 bg-amber-950/10 p-4">
@@ -2392,15 +2396,8 @@ function DiagnosticsPanel({
             </div>
           )}
 
-          {diagnostics.desktopRuntime?.mayHaveStaleModelCatalog && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
-              {diagnostics.desktopRuntime.staleReason ??
-                "Codex app-server may still be using an older in-memory model catalog. Fully quit Codex Desktop/app-server, reopen Codex, and then check the model picker again."}
-            </div>
-          )}
-
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {diagnostics.checks.map((check) => (
+            {visibleCheckCards.map((check) => (
               <DiagnosticCheckCard key={check.id} check={check} />
             ))}
           </div>
