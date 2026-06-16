@@ -1,4 +1,4 @@
-//! Deep link import functionality for CC Switch
+//! Deep link import functionality for CCSwitchMulti
 //!
 //! This module implements the ccswitch:// protocol for importing configurations
 //! via deep links. Supports importing:

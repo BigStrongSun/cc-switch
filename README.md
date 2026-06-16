@@ -60,7 +60,7 @@ Codex MultiRouter 不是简单地把 Codex 切到某一个第三方 Provider。C
 
 ### 构建与发布说明
 
-- 当前分支的包名/产品名是 `cc-switch-multi` / `CCSwitchMulti`。
+- 当前分支的包名/产品名是 `ccswitchmulti` / `CCSwitchMulti`。
 - Windows 发布导出使用 `pnpm release:export`；本地打包在没有签名私钥时会显式关闭 updater artifact 签名。
 - 免安装版仍使用系统默认用户数据和配置目录，因此除非明确要共享状态，否则不要同时运行上游官方 CC Switch 和 CCSwitchMulti。
 - macOS 产物需要 macOS 构建、签名和 notarization 环境；Windows/WSL 构建不会产出已签名公证的 macOS 包。
@@ -353,7 +353,7 @@ For detailed guides on every feature, check out the **[User Manual](docs/user-ma
 
 ### Windows Users
 
-Download the latest `CC-Switch-v{version}-Windows.msi` installer or `CC-Switch-v{version}-Windows-Portable.zip` portable version from the [Releases](../../releases) page.
+Download the latest `CCSwitchMulti-v{version}-Windows.msi` installer or `CCSwitchMulti-v{version}-Windows-Portable.zip` portable version from the [Releases](../../releases) page.
 
 ### macOS Users
 
@@ -371,7 +371,7 @@ brew upgrade --cask cc-switch
 
 **Method 2: Manual Download**
 
-Download `CC-Switch-v{version}-macOS.dmg` (recommended) or `.zip` from the [Releases](../../releases) page.
+Download `CCSwitchMulti-v{version}-macOS.dmg` (recommended) or `.zip` from the [Releases](../../releases) page.
 
 > **Note**: CC Switch for macOS is code-signed and notarized by Apple. You can install and open it directly.
 
@@ -387,9 +387,9 @@ paru -S cc-switch-bin
 
 Download the latest Linux build from the [Releases](../../releases) page:
 
-- `CC-Switch-v{version}-Linux.deb` (Debian/Ubuntu)
-- `CC-Switch-v{version}-Linux.rpm` (Fedora/RHEL/openSUSE)
-- `CC-Switch-v{version}-Linux.AppImage` (Universal)
+- `CCSwitchMulti-v{version}-Linux.deb` (Debian/Ubuntu)
+- `CCSwitchMulti-v{version}-Linux.rpm` (Fedora/RHEL/openSUSE)
+- `CCSwitchMulti-v{version}-Linux.AppImage` (Universal)
 
 > **Flatpak**: Not included in official releases. You can build it yourself from the `.deb` — see [`flatpak/README.md`](flatpak/README.md) for instructions.
 

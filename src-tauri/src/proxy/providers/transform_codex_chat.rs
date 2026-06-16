@@ -1,6 +1,6 @@
 //! Codex Responses ↔ OpenAI Chat Completions conversion.
 //!
-//! This module is used when the Codex client talks to CC Switch through the
+//! This module is used when the Codex client talks to CCSwitchMulti through the
 //! Responses API, while the selected upstream provider only exposes an
 //! OpenAI-compatible Chat Completions endpoint.
 

@@ -857,7 +857,7 @@ base_url = "https://aihubmix.example/v1"
             ),
             Provider::with_id(
                 "legacy-ccswitch".to_string(),
-                "Legacy CC Switch".to_string(),
+                "Legacy CCSwitchMulti".to_string(),
                 serde_json::json!({
                     "auth": {},
                     "config": r#"model_provider = "ccswitch"
@@ -1484,7 +1484,7 @@ model = "gpt-5.4"
         let db = Database::memory().expect("memory db");
         let provider = Provider::with_id(
             "legacy-ccswitch".to_string(),
-            "Legacy CC Switch".to_string(),
+            "Legacy CCSwitchMulti".to_string(),
             serde_json::json!({
                 "auth": {},
                 "config": r#"model_provider = "ccswitch"

@@ -350,7 +350,7 @@ pub enum ClaudeDesktopMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeDesktopModelRoute {
-    /// 真实上游模型名，只保存在 CC Switch 内部，不写入 Claude Desktop profile。
+    /// 真实上游模型名，只保存在 CCSwitchMulti 内部，不写入 Claude Desktop profile。
     pub model: String,
     /// Claude Desktop 模型菜单显示名；写入 profile 的 `labelOverride`。
     #[serde(rename = "labelOverride", skip_serializing_if = "Option::is_none")]
