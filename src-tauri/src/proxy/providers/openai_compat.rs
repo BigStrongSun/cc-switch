@@ -712,7 +712,7 @@ fn chat_content_to_responses_content(content: Option<&Value>, text_type: &str) -
 /// 将单个 Chat content part 转换为 Responses content part。
 fn chat_content_part_to_response_part(part: &Value, text_type: &str) -> Option<Value> {
     match part.get("type").and_then(|value| value.as_str()) {
-        Some("text") => Some(json!({
+        Some("text" | "input_text" | "output_text") => Some(json!({
             "type": text_type,
             "text": part.get("text").and_then(|value| value.as_str()).unwrap_or("")
         })),
@@ -1068,6 +1068,69 @@ mod tests {
         assert!(result.get("temperature").is_none());
         assert_eq!(result["tools"][0]["name"], "lookup");
         assert_eq!(result["include"][0], "reasoning.encrypted_content");
+    }
+
+    #[test]
+    fn chat_request_preserves_chinese_through_codex_responses_conversion() {
+        // 第三方 OpenAI-compatible API 会先解析 Chat JSON，再转换为 Codex Responses；
+        // 这里同时覆盖原始 UTF-8 中文和 ensure_ascii 风格的 Unicode 转义输入。
+        let user_text = "当前页是教材与参考资料页，请用两句话说明应该学什么。Bondy-Murty、West";
+        let input = json!({
+            "model": "gpt-5.5",
+            "messages": [
+                {"role": "system", "content": "你是一个中文教学助手。"},
+                {"role": "user", "content": user_text}
+            ],
+            "stream": false
+        });
+
+        let result = chat_completions_request_to_codex_responses(input).unwrap();
+        let outbound_bytes = serde_json::to_vec(&result).expect("serialize outbound body");
+        let reparsed: Value = serde_json::from_slice(&outbound_bytes).expect("reparse body");
+
+        assert_eq!(reparsed["instructions"], "你是一个中文教学助手。");
+        assert_eq!(reparsed["input"][0]["content"][0]["text"], user_text);
+        assert!(!reparsed["input"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains('?'));
+
+        let escaped_input: Value = serde_json::from_slice(
+            br#"{"model":"gpt-5.5","messages":[{"role":"user","content":"\u4f60\u597d\uff0c\u4e16\u754c\uff01"}]}"#,
+        )
+        .expect("parse escaped unicode body");
+        let escaped_result = chat_completions_request_to_codex_responses(escaped_input).unwrap();
+
+        assert_eq!(
+            escaped_result["input"][0]["content"][0]["text"],
+            "你好，世界！"
+        );
+    }
+
+    #[test]
+    fn chat_request_preserves_responses_style_text_parts() {
+        // 部分 Agent SDK 会把 Chat message content 发成 Responses 风格的 input_text；
+        // 外部 API 必须保留这些文本，否则上游只能看到剩余的英文引用或空消息。
+        let input = json!({
+            "model": "gpt-5.5",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "请总结教材页：Bondy-Murty 与 West 应该怎么学？"
+                    }
+                ]
+            }]
+        });
+
+        let result = chat_completions_request_to_codex_responses(input).unwrap();
+
+        assert_eq!(
+            result["input"][0]["content"][0]["text"],
+            "请总结教材页：Bondy-Murty 与 West 应该怎么学？"
+        );
+        assert_eq!(result["input"][0]["content"][0]["type"], "input_text");
     }
 
     #[test]

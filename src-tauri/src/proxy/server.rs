@@ -470,6 +470,7 @@ mod tests {
     use http_body_util::BodyExt;
     use serde_json::{json, Value};
     use serial_test::serial;
+    use std::sync::{Arc, Mutex};
     use tower::ServiceExt;
 
     /// 测试专用 home，用于隔离 Codex live config/catalog 文件。
@@ -788,6 +789,82 @@ base_url = "http://127.0.0.1:15721/v1"
     }
 
     #[tokio::test]
+    async fn v1_chat_completions_preserves_chinese_for_profile_backend() {
+        let captured_body = Arc::new(Mutex::new(None));
+        let (upstream_base_url, _upstream_task) =
+            spawn_openai_chat_mock_with_capture(captured_body.clone()).await;
+        let (server, db) = build_test_server();
+        db.save_provider(
+            "hermes",
+            &Provider::with_id(
+                "selected".to_string(),
+                "Selected".to_string(),
+                json!({
+                    "base_url": upstream_base_url,
+                    "api_key": "sk-selected",
+                    "models": ["visible-model"]
+                }),
+                None,
+            ),
+        )
+        .expect("save provider");
+        let generated = external_openai_api::regenerate_api_key(&db).expect("generate key");
+        external_openai_api::update_profile(
+            &db,
+            ExternalOpenAiApiProfileUpdate {
+                enabled: true,
+                backend_type: ExternalOpenAiApiBackendType::Provider,
+                app_type: Some("hermes".to_string()),
+                provider_id: Some("selected".to_string()),
+                route_id: None,
+                default_model: Some("visible-model".to_string()),
+                listen_address: None,
+                listen_port: None,
+            },
+        )
+        .expect("enable profile");
+
+        let user_text = "当前页是教材与参考资料页，请用两句话说明应该学什么。Bondy-Murty、West";
+        let response = server
+            .build_router()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/v1/chat/completions")
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", generated.api_key),
+                    )
+                    .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({
+                            "model": "visible-model",
+                            "messages": [{ "role": "user", "content": user_text }]
+                        }))
+                        .expect("serialize request"),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        let captured = captured_body
+            .lock()
+            .expect("captured body lock")
+            .clone()
+            .expect("mock upstream body");
+        assert_eq!(captured["messages"][0]["content"], user_text);
+        assert!(!captured["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains('?'));
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["choices"][0]["message"]["content"], "pong");
+    }
+
+    #[tokio::test]
     async fn v1_chat_completions_stream_forwards_sse_chunks() {
         let (upstream_base_url, _upstream_task) = spawn_openai_chat_mock().await;
         let (server, db) = build_test_server();
@@ -981,34 +1058,45 @@ base_url = "http://127.0.0.1:15721/v1"
 
     /// 启动一个只服务 OpenAI Chat Completions 的本地 mock upstream。
     async fn spawn_openai_chat_mock() -> (String, tokio::task::JoinHandle<()>) {
+        spawn_openai_chat_mock_with_capture(Arc::new(Mutex::new(None))).await
+    }
+
+    /// 启动一个会保存最近一次请求体的 OpenAI Chat mock，用于断言代理转发前后文本不变。
+    async fn spawn_openai_chat_mock_with_capture(
+        captured_body: Arc<Mutex<Option<Value>>>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
         let app = Router::new().route(
             "/v1/chat/completions",
-            post(|Json(body): Json<Value>| async move {
-                if body.get("stream").and_then(|value| value.as_bool()) == Some(true) {
-                    return (
-                        [(header::CONTENT_TYPE, "text/event-stream")],
-                        "data: {\"id\":\"chatcmpl_mock\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"visible-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"pong\"},\"finish_reason\":null}]}\n\n\
-                         data: [DONE]\n\n",
-                    )
-                        .into_response();
-                }
-                Json(json!({
-                    "id": "chatcmpl_mock",
-                    "object": "chat.completion",
-                    "created": 0,
-                    "model": "visible-model",
-                    "choices": [{
-                        "index": 0,
-                        "message": { "role": "assistant", "content": "pong" },
-                        "finish_reason": "stop"
-                    }],
-                    "usage": {
-                        "prompt_tokens": 1,
-                        "completion_tokens": 1,
-                        "total_tokens": 2
+            post(move |Json(body): Json<Value>| {
+                let captured_body = captured_body.clone();
+                async move {
+                    *captured_body.lock().expect("capture upstream body") = Some(body.clone());
+                    if body.get("stream").and_then(|value| value.as_bool()) == Some(true) {
+                        return (
+                            [(header::CONTENT_TYPE, "text/event-stream")],
+                            "data: {\"id\":\"chatcmpl_mock\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"visible-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"pong\"},\"finish_reason\":null}]}\n\n\
+                             data: [DONE]\n\n",
+                        )
+                            .into_response();
                     }
-                }))
-                .into_response()
+                    Json(json!({
+                        "id": "chatcmpl_mock",
+                        "object": "chat.completion",
+                        "created": 0,
+                        "model": "visible-model",
+                        "choices": [{
+                            "index": 0,
+                            "message": { "role": "assistant", "content": "pong" },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": 1,
+                            "completion_tokens": 1,
+                            "total_tokens": 2
+                        }
+                    }))
+                    .into_response()
+                }
             }),
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

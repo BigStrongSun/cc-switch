@@ -40,6 +40,7 @@ use super::{
 };
 use crate::app_config::AppType;
 use crate::database::PRICING_SOURCE_REQUEST;
+use crate::proxy::json_canonical::short_sha256_hex;
 use axum::{
     extract::{ws::WebSocketUpgrade, State},
     http::{HeaderMap, HeaderValue, StatusCode},
@@ -776,6 +777,9 @@ pub async fn handle_chat_completions(
     } else {
         body
     };
+    if is_external_openai_client && codex_chat_to_responses {
+        log_external_codex_unicode_probe(&ctx, &outbound_body);
+    }
 
     let forwarder = ctx.create_forwarder(&state);
     let mut result = match forwarder
@@ -836,6 +840,105 @@ pub async fn handle_external_chat_completions(
 ) -> Result<axum::response::Response, ProxyError> {
     mark_external_openai_headers(request.headers_mut());
     handle_chat_completions(State(state), request).await
+}
+
+/// 记录第三方 Agent API 转发到 Codex OAuth 前的 Unicode 摘要，避免把用户 prompt 原文写入日志。
+///
+/// 该诊断只在 `/v1/chat/completions` 转 Codex Responses 时触发，用于区分“本地出站前已是问号”
+/// 和“上游返回后才表现为乱码”。字段只包含长度、非 ASCII 数、问号数和哈希，不包含正文。
+fn log_external_codex_unicode_probe(ctx: &RequestContext, outbound_body: &Value) {
+    let stats = collect_external_codex_unicode_stats(outbound_body);
+    super::codex_router_log::append_event(
+        "external_chat_unicode_probe",
+        &[
+            ("session", ctx.session_id.clone()),
+            ("model", ctx.request_model.clone()),
+            ("provider", ctx.provider.id.clone()),
+            ("text_parts", stats.text_parts.to_string()),
+            ("chars", stats.char_count.to_string()),
+            ("non_ascii", stats.non_ascii_count.to_string()),
+            ("question_marks", stats.question_mark_count.to_string()),
+            (
+                "replacement_chars",
+                stats.replacement_char_count.to_string(),
+            ),
+            ("text_hash", stats.text_hash),
+        ],
+    );
+}
+
+/// 第三方 Agent API Unicode 诊断统计；只保存不可逆摘要，避免泄漏 prompt 内容。
+struct ExternalCodexUnicodeStats {
+    text_parts: usize,
+    char_count: usize,
+    non_ascii_count: usize,
+    question_mark_count: usize,
+    replacement_char_count: usize,
+    text_hash: String,
+}
+
+/// 从 Codex Responses 请求体中提取文本统计，用于判断中文是否在本地转换阶段损坏。
+fn collect_external_codex_unicode_stats(body: &Value) -> ExternalCodexUnicodeStats {
+    let mut texts = Vec::new();
+    if let Some(instructions) = body.get("instructions").and_then(Value::as_str) {
+        texts.push(instructions);
+    }
+    collect_external_codex_input_texts(body.get("input"), &mut texts);
+
+    let mut char_count = 0;
+    let mut non_ascii_count = 0;
+    let mut question_mark_count = 0;
+    let mut replacement_char_count = 0;
+    for text in &texts {
+        for ch in text.chars() {
+            char_count += 1;
+            if !ch.is_ascii() {
+                non_ascii_count += 1;
+            }
+            if ch == '?' {
+                question_mark_count += 1;
+            }
+            if ch == '\u{FFFD}' {
+                replacement_char_count += 1;
+            }
+        }
+    }
+
+    let joined = texts.join("\n");
+    ExternalCodexUnicodeStats {
+        text_parts: texts.len(),
+        char_count,
+        non_ascii_count,
+        question_mark_count,
+        replacement_char_count,
+        text_hash: if joined.is_empty() {
+            "empty".to_string()
+        } else {
+            short_sha256_hex(joined.as_bytes())
+        },
+    }
+}
+
+/// 遍历 Codex Responses 的 `input[].content[].text`，只收集用户可见文本字段。
+fn collect_external_codex_input_texts<'a>(value: Option<&'a Value>, texts: &mut Vec<&'a str>) {
+    let Some(Value::Array(items)) = value else {
+        return;
+    };
+    for item in items {
+        let Some(content_parts) = item.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        for part in content_parts {
+            if matches!(
+                part.get("type").and_then(Value::as_str),
+                Some("input_text" | "output_text")
+            ) {
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    texts.push(text);
+                }
+            }
+        }
+    }
 }
 
 fn resolve_external_openai_compatible_provider(
@@ -3509,6 +3612,29 @@ data: [DONE]\n\n";
         );
 
         assert!(!should_handle_as_codex_client(&headers));
+    }
+
+    #[test]
+    fn external_codex_unicode_stats_detects_chinese_without_prompt_leak() {
+        let body = json!({
+            "instructions": "你是一个中文教学助手。",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "当前页是教材与参考资料页，请用两句话说明应该学什么。Bondy-Murty、West"
+                }]
+            }]
+        });
+
+        let stats = super::collect_external_codex_unicode_stats(&body);
+
+        assert_eq!(stats.text_parts, 2);
+        assert!(stats.non_ascii_count > 0);
+        assert_eq!(stats.question_mark_count, 0);
+        assert_eq!(stats.replacement_char_count, 0);
+        assert_ne!(stats.text_hash, "empty");
     }
 
     #[test]
