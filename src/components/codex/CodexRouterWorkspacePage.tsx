@@ -770,13 +770,13 @@ function HeaderPanel({
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950/30">
-      <div className="grid gap-4 border-b border-slate-700/70 bg-gradient-to-r from-blue-950/60 via-slate-900 to-emerald-950/40 p-5 xl:grid-cols-[1.3fr_1fr]">
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 text-xl font-semibold">
-            <GitBranch className="h-5 w-5 text-blue-300" />
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/70 bg-gradient-to-r from-blue-950/45 via-slate-900 to-emerald-950/30 px-4 py-3">
+        <div className="min-w-0 space-y-2">
+          <div className="flex items-center gap-2 text-base font-semibold">
+            <GitBranch className="h-4 w-4 text-blue-300" />
             Codex 多模型路由工作台
           </div>
-          <p className="max-w-4xl text-sm leading-6 text-slate-300">
+          <p className="max-w-4xl text-xs leading-5 text-slate-400">
             这里配置的是“Codex 自己怎么按 model 选择多个上游模型”。Codex
             仍然只连接一个 CC Switch 本地代理；路由规则负责把
             gpt、qwen、deepseek 等模型名分流到不同上游。
@@ -784,6 +784,7 @@ function HeaderPanel({
           <div className="flex flex-wrap gap-2">
             <Button
               onClick={onCreatePlan}
+              size="sm"
               className="gap-2 bg-blue-600 hover:bg-blue-500"
             >
               <Plus className="h-4 w-4" />
@@ -791,6 +792,7 @@ function HeaderPanel({
             </Button>
             <Button
               variant="outline"
+              size="sm"
               onClick={() => onJump("routes")}
               className="gap-2"
             >
@@ -799,6 +801,7 @@ function HeaderPanel({
             </Button>
             <Button
               variant="outline"
+              size="sm"
               onClick={() => onJump("status")}
               className="gap-2"
             >
@@ -808,7 +811,7 @@ function HeaderPanel({
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="hidden">
           <MetricCard
             color="blue"
             icon={Layers3}
@@ -847,7 +850,7 @@ function HeaderPanel({
         </div>
       </div>
 
-      <div className="grid gap-3 p-4 md:grid-cols-4">
+      <div className="hidden">
         <FlowStep
           index="1"
           title="模型源"
@@ -1138,145 +1141,121 @@ function RoutesTab({
     : routeEntries;
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
-      <section className="rounded-lg border border-blue-700/40 bg-blue-950/15 p-4">
-        <SectionHeader
-          icon={Layers3}
-          title="选择多路路由"
-          detail="每个多路路由可包含多条分流规则。"
-          action={
-            <Button
-              size="sm"
-              onClick={onCreatePlan}
-              className="gap-2 bg-blue-600 hover:bg-blue-500"
-            >
-              <Plus className="h-4 w-4" />
-              创建多路路由
-            </Button>
-          }
-        />
-        <div className="mt-3 grid gap-2">
-          {routingPlans.map((provider) => {
-            const active = selectedPlan?.id === provider.id;
-            return (
-              <button
-                key={provider.id}
-                type="button"
-                onClick={() => onSelectPlan(provider)}
-                className={cn(
-                  "rounded-lg border p-3 text-left transition",
-                  active
-                    ? "border-blue-400 bg-blue-600/20 shadow-[0_0_0_1px_rgba(96,165,250,0.35)]"
-                    : "border-slate-700 bg-slate-950/40 hover:border-blue-500 hover:bg-blue-950/20",
-                )}
-              >
-                <PlanCardContent provider={provider} compact />
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-[1fr_360px]">
-        <div className="rounded-lg border border-emerald-700/40 bg-emerald-950/10 p-4">
+    <div className="space-y-4">
+      <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
+        <section className="rounded-lg border border-blue-700/40 bg-blue-950/15 p-4">
           <SectionHeader
-            icon={Route}
-            title="规则列表"
-            detail="点击规则查看详情；每条规则的“启用”只表示参与匹配，不是启动服务。"
+            icon={Layers3}
+            title="选择多路路由"
+            detail="每个多路路由可包含多条分流规则。"
             action={
-              selectedPlan ? (
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    onEditPlan(selectedPlan, "添加、修改或删除路由规则")
-                  }
-                  className="gap-2 bg-emerald-600 hover:bg-emerald-500"
-                >
-                  <Pencil className="h-4 w-4" />
-                  编辑匹配规则
-                </Button>
-              ) : null
+              <Button
+                size="sm"
+                onClick={onCreatePlan}
+                className="gap-2 bg-blue-600 hover:bg-blue-500"
+              >
+                <Plus className="h-4 w-4" />
+                创建多路路由
+              </Button>
             }
           />
           <div className="mt-3 grid gap-2">
-            {selectedPlanRoutes.map((entry) => (
-              <RouteListButton
-                key={`${entry.provider.id}-${entry.route.id ?? entry.index}`}
-                entry={entry}
-                providersById={providersById}
-                active={
-                  selectedRoute?.provider.id === entry.provider.id &&
-                  selectedRoute.index === entry.index
-                }
-                onClick={() => onSelectRoute(entry)}
-              />
-            ))}
-            {selectedPlanRoutes.length === 0 && (
-              <EmptyState
-                icon={Route}
-                title="这个方案还没有规则"
-                detail="点击编辑规则，在配置表单里添加精确模型或前缀匹配。"
-                actionLabel="编辑多路路由"
-                onAction={() =>
-                  selectedPlan ? onEditPlan(selectedPlan) : onCreatePlan()
-                }
-              />
-            )}
+            {routingPlans.map((provider) => {
+              const active = selectedPlan?.id === provider.id;
+              return (
+                <button
+                  key={provider.id}
+                  type="button"
+                  onClick={() => onSelectPlan(provider)}
+                  className={cn(
+                    "rounded-lg border p-3 text-left transition",
+                    active
+                      ? "border-blue-400 bg-blue-600/20 shadow-[0_0_0_1px_rgba(96,165,250,0.35)]"
+                      : "border-slate-700 bg-slate-950/40 hover:border-blue-500 hover:bg-blue-950/20",
+                  )}
+                >
+                  <PlanCardContent provider={provider} compact />
+                </button>
+              );
+            })}
           </div>
-        </div>
+        </section>
 
-        <RouteDetailPanel
-          selectedRoute={selectedRoute}
-          selectedPlan={selectedPlan}
-          providersById={providersById}
-          onEditPlan={onEditPlan}
-        />
-      </section>
+        <section className="grid gap-4 lg:grid-cols-[1fr_360px]">
+          <div className="rounded-lg border border-emerald-700/40 bg-emerald-950/10 p-4">
+            <SectionHeader
+              icon={Route}
+              title="规则列表"
+              detail="点击规则查看详情；每条规则的“启用”只表示参与匹配，不是启动服务。"
+              action={
+                selectedPlan ? (
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      onEditPlan(selectedPlan, "添加、修改或删除路由规则")
+                    }
+                    className="gap-2 bg-emerald-600 hover:bg-emerald-500"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    编辑匹配规则
+                  </Button>
+                ) : null
+              }
+            />
+            <div className="mt-3 grid gap-2">
+              {selectedPlanRoutes.map((entry) => (
+                <RouteListButton
+                  key={`${entry.provider.id}-${entry.route.id ?? entry.index}`}
+                  entry={entry}
+                  providersById={providersById}
+                  active={
+                    selectedRoute?.provider.id === entry.provider.id &&
+                    selectedRoute.index === entry.index
+                  }
+                  onClick={() => onSelectRoute(entry)}
+                />
+              ))}
+              {selectedPlanRoutes.length === 0 && (
+                <EmptyState
+                  icon={Route}
+                  title="这个方案还没有规则"
+                  detail="点击编辑规则，在配置表单里添加精确模型或前缀匹配。"
+                  actionLabel="编辑多路路由"
+                  onAction={() =>
+                    selectedPlan ? onEditPlan(selectedPlan) : onCreatePlan()
+                  }
+                />
+              )}
+            </div>
+          </div>
+
+          <RouteDetailPanel
+            selectedRoute={selectedRoute}
+            selectedPlan={selectedPlan}
+            providersById={providersById}
+            onEditPlan={onEditPlan}
+          />
+        </section>
+      </div>
+
+      <SpawnAgentCandidatesPanel
+        selectedPlan={selectedPlan}
+        selectedRoutes={selectedPlanRoutes}
+      />
     </div>
   );
 }
 
-/// 状态页把代理运行态、Codex 接管态、路由配置态和最近流量放在同一视图里。
-function StatusTab({
+/// 子 Agent 候选模型属于路由规则配置：前五个会进入 Codex spawn_agent 的可用模型窗口。
+function SpawnAgentCandidatesPanel({
   selectedPlan,
-  selectedRouting,
-  routeEntries,
-  providersById,
-  proxyStatus,
-  isProxyRunning,
-  isCodexTakeoverActive,
-  activeProviderId,
-  onEditPlan,
+  selectedRoutes,
 }: {
   selectedPlan: Provider | null;
-  selectedRouting: CodexRouting | null;
-  routeEntries: RouteEntry[];
-  providersById: Map<string, Provider>;
-  proxyStatus?: ProxyStatus;
-  isProxyRunning: boolean;
-  isCodexTakeoverActive: boolean;
-  activeProviderId?: string;
-  onEditPlan: (provider: Provider, detail?: string) => void;
+  selectedRoutes: RouteEntry[];
 }) {
-  const range = useMemo(() => ({ preset: "today" as const }), []);
-  const { data: requestLogs, isLoading } = useRequestLogs({
-    filters: { appType: "codex" },
-    range,
-    page: 0,
-    pageSize: 500,
-    options: { refetchInterval: 5000 },
-  });
   const [diagnostics, setDiagnostics] =
     useState<CodexMultiRouterDiagnostics | null>(null);
-  const [diagnoseError, setDiagnoseError] = useState<string | null>(null);
-  const [isDiagnosing, setIsDiagnosing] = useState(false);
-  const [modelPickerUnlockResult, setModelPickerUnlockResult] =
-    useState<CodexModelPickerUnlockResult | null>(null);
-  const [modelPickerUnlockError, setModelPickerUnlockError] = useState<
-    string | null
-  >(null);
-  const [isUnlockingModelPicker, setIsUnlockingModelPicker] = useState(false);
-  const [statusView, setStatusView] = useState<StatusView>("link");
   const [candidateView, setCandidateView] =
     useState<SpawnAgentCandidateView>("selected");
   const [draftSpawnAgentModels, setDraftSpawnAgentModels] = useState<string[]>(
@@ -1300,16 +1279,6 @@ function StatusTab({
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
-  const logs = requestLogs?.data ?? [];
-  const proxyLogs = logs.filter(
-    (log) => (log.dataSource ?? "proxy") === "proxy",
-  );
-  const sessionLogs = logs.filter(
-    (log) => (log.dataSource ?? "proxy") !== "proxy",
-  );
-  const selectedRoutes = selectedPlan
-    ? routeEntries.filter(({ provider }) => provider.id === selectedPlan.id)
-    : routeEntries;
   const selectedCatalog = readCodexModelCatalog(selectedPlan);
   const selectedCatalogModelKey = selectedCatalog.models
     .map((model) => model.model?.trim() ?? "")
@@ -1321,30 +1290,6 @@ function StatusTab({
       .filter((model) => model.model?.trim())
       .map((model) => [model.model!.trim(), model]),
   );
-  const routerEvents = diagnostics?.routerLog.recentEvents ?? [];
-  const routerRequestEvents = routerEvents.filter((event) =>
-    [
-      "route_resolved",
-      "request_prepared",
-      "upstream_send",
-      "upstream_status",
-      "upstream_error",
-      "upstream_send_error",
-    ].includes(event.event),
-  );
-  const routeTargetCount = new Set(
-    selectedRoutes.map(
-      (entry) => routeTrafficTarget(entry, providersById).providerId,
-    ),
-  ).size;
-  const trafficRows = buildRouteTrafficRows({
-    logs: proxyLogs,
-    routerEvents,
-    routes: routeEntries,
-    selectedPlan,
-    providersById,
-  });
-  const routerLogs = routerEvents;
   const spawnAgentVisibleLimit =
     diagnostics?.liveConfig.spawnAgentVisibleModelLimit ?? 5;
   const configuredSpawnAgentModels = selectedCatalog.spawnAgentModels
@@ -1404,49 +1349,6 @@ function StatusTab({
     selectedCatalog.spawnAgentModels.join("\n");
   const spawnAgentMissingPriorityModels =
     diagnostics?.liveConfig.spawnAgentMissingPriorityModels ?? [];
-  const routedLogs = proxyLogs.filter((log) =>
-    trafficRows.some(
-      (row) =>
-        row.providerId === log.providerId ||
-        row.model === (log.requestModel || log.model),
-    ),
-  );
-  const latestLog = proxyLogs[0];
-  const latestForwardOk = latestLog
-    ? latestLog.statusCode >= 200 && latestLog.statusCode < 400
-    : false;
-  const listenAddress = proxyStatus
-    ? `${proxyStatus.address}:${proxyStatus.port}`
-    : "未启动";
-  const activeTargetLabel =
-    activeProviderId && providersById.get(activeProviderId)
-      ? `${providersById.get(activeProviderId)?.name} (${activeProviderId})`
-      : activeProviderId || "未命中";
-  const routeEnabled = selectedRouting?.enabled !== false;
-  const hasEnabledRoutes = selectedRoutes.some(
-    ({ route }) => route.enabled !== false,
-  );
-  const configReady = Boolean(
-    isProxyRunning &&
-      isCodexTakeoverActive &&
-      selectedPlan &&
-      routeEnabled &&
-      hasEnabledRoutes,
-  );
-  const trafficVerified =
-    proxyLogs.length > 0 ||
-    routerRequestEvents.length > 0 ||
-    (proxyStatus?.total_requests ?? 0) > 0;
-  const linkOnline = Boolean(configReady && trafficVerified);
-  const readinessIssues = [
-    !isProxyRunning ? "本地代理未监听" : "",
-    !isCodexTakeoverActive ? "Codex live 配置未接管" : "",
-    !selectedPlan ? "未选择 MultiRouter provider" : "",
-    selectedPlan && !routeEnabled ? "MultiRouter 入口已关闭" : "",
-    selectedPlan && routeEnabled && !hasEnabledRoutes
-      ? "没有启用的匹配规则"
-      : "",
-  ].filter(Boolean);
 
   useEffect(() => {
     setDraftSpawnAgentModels(
@@ -1574,6 +1476,382 @@ function StatusTab({
       setIsValidatingCandidates(false);
     }
   }
+
+  return (
+    <section className="rounded-lg border border-violet-700/40 bg-violet-950/15 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-violet-100">
+            <GitBranch className="h-4 w-4" />子 Agent 候选模型
+          </div>
+          <p className="mt-1 text-xs leading-5 text-violet-200/80">
+            前 {spawnAgentVisibleLimit} 个是 Codex 的 spawn_agent 里可用的模型，
+            会按这里的顺序进入子 Agent
+            选择窗口；可以拖拽调整顺序。这里不改变实际路由、历史和统计。
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={validateSpawnAgentCandidateWindow}
+            disabled={isValidatingCandidates || !selectedPlan}
+            className="gap-2 border-emerald-500/50 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
+          >
+            {isValidatingCandidates ? (
+              <RefreshCw className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            校验候选
+          </Button>
+          <Button
+            size="sm"
+            onClick={saveSpawnAgentCandidates}
+            disabled={
+              isSavingCandidates || !selectedPlan || !hasCandidateChanges
+            }
+            className="gap-2 bg-violet-600 hover:bg-violet-500"
+          >
+            {isSavingCandidates ? (
+              <RefreshCw className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            保存排序
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
+        <div className="space-y-3">
+          <div>
+            <div className="mb-2 text-xs font-semibold text-violet-100">
+              Codex spawn_agent 前五可用模型
+            </div>
+            <div className="grid gap-2 md:grid-cols-5">
+              {previewVisibleModels.length > 0 ? (
+                previewVisibleModels.map((model, index) => (
+                  <div
+                    key={`${model.model ?? index}-${index}`}
+                    className="min-w-0 rounded-md border border-amber-400/70 bg-amber-500/15 px-2 py-2 shadow-[0_0_0_1px_rgba(251,191,36,0.18)]"
+                  >
+                    <div className="flex items-center justify-between gap-2 text-[11px] text-amber-200">
+                      <span>#{index + 1}</span>
+                      <span>spawn</span>
+                    </div>
+                    <div
+                      className="mt-1 truncate font-mono text-xs text-slate-50"
+                      title={catalogModelLabel(model)}
+                    >
+                      {catalogModelLabel(model)}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-md border border-violet-800/60 bg-slate-950/45 px-3 py-2 text-xs text-violet-100 md:col-span-5">
+                  当前 MultiRouter provider 还没有
+                  modelCatalog；请先在模型映射里添加 OpenAI / Qwen / DeepSeek
+                  等候选模型。
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-violet-100">
+                可拖拽排序的前五候选
+              </div>
+              <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
+                {draftSpawnAgentModels.length} / {spawnAgentVisibleLimit}
+              </Badge>
+            </div>
+            <DndContext
+              sensors={candidateSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleSpawnAgentDragEnd}
+            >
+              <SortableContext
+                items={draftSpawnAgentModels}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="grid gap-2">
+                  {draftVisibleModels.length > 0 ? (
+                    draftVisibleModels.map((model, index) => (
+                      <SortableSpawnAgentCandidate
+                        key={model.model}
+                        model={model}
+                        index={index}
+                        onRemove={toggleSpawnAgentCandidate}
+                      />
+                    ))
+                  ) : (
+                    <div className="rounded-md border border-dashed border-violet-700/60 bg-slate-950/30 px-3 py-2 text-xs text-violet-100">
+                      还没有选择子 Agent 候选；从右侧候选池添加，最多{" "}
+                      {spawnAgentVisibleLimit} 个。
+                    </div>
+                  )}
+                </div>
+              </SortableContext>
+            </DndContext>
+          </div>
+        </div>
+
+        <div className="rounded-md border border-violet-800/50 bg-slate-950/35 p-3">
+          <Tabs
+            value={candidateView}
+            onValueChange={(value) =>
+              setCandidateView(value as SpawnAgentCandidateView)
+            }
+          >
+            <TabsList className="grid w-full grid-cols-4 bg-slate-950/60 p-1">
+              <TabsTrigger value="selected">已选</TabsTrigger>
+              <TabsTrigger value="routed">路由</TabsTrigger>
+              <TabsTrigger value="priority">重点</TabsTrigger>
+              <TabsTrigger value="all">全部</TabsTrigger>
+            </TabsList>
+            {(["selected", "routed", "priority", "all"] as const).map(
+              (view) => (
+                <TabsContent key={view} value={view} className="mt-3">
+                  <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                    {candidateSourceModels[view].length > 0 ? (
+                      candidateSourceModels[view].map((model) => {
+                        const catalogModel = selectedCatalogByModel.get(
+                          model,
+                        ) ?? { model };
+                        const isSelected = selectedCandidateSet.has(model);
+                        const selectedIndex =
+                          draftSpawnAgentModels.indexOf(model);
+                        return (
+                          <button
+                            key={`${view}-${model}`}
+                            type="button"
+                            onClick={() => toggleSpawnAgentCandidate(model)}
+                            disabled={
+                              !isSelected &&
+                              draftSpawnAgentModels.length >=
+                                spawnAgentVisibleLimit
+                            }
+                            className={cn(
+                              "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-2 text-left text-xs transition",
+                              isSelected
+                                ? "border-amber-400/70 bg-amber-500/15 text-amber-50"
+                                : "border-slate-700 bg-slate-950/45 text-slate-200 hover:border-violet-500/60 hover:bg-violet-500/10",
+                              !isSelected &&
+                                draftSpawnAgentModels.length >=
+                                  spawnAgentVisibleLimit
+                                ? "cursor-not-allowed opacity-45"
+                                : "",
+                            )}
+                          >
+                            <span className="min-w-0 truncate font-mono">
+                              {catalogModelLabel(catalogModel)}
+                            </span>
+                            <Badge
+                              className={cn(
+                                "shrink-0 border text-[10px]",
+                                isSelected
+                                  ? "border-amber-300/70 bg-amber-200/10 text-amber-50"
+                                  : "border-slate-600 bg-slate-800 text-slate-300",
+                              )}
+                            >
+                              {isSelected
+                                ? `前五 #${selectedIndex + 1}`
+                                : "添加"}
+                            </Badge>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="rounded-md border border-dashed border-slate-700 px-3 py-2 text-xs text-slate-400">
+                        这个来源暂时没有可用模型。
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              ),
+            )}
+          </Tabs>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-violet-200/80">
+        <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
+          catalog: {selectedCatalog.models.length}
+        </Badge>
+        <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
+          路由命中: {routedCatalogModelIds.length}
+        </Badge>
+        <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
+          来源: {generatedVisibleModels.length > 0 ? "诊断实测" : "配置预览"}
+        </Badge>
+        <Badge
+          className={cn(
+            "border",
+            localCandidateValidation.missingPriorityModels.length === 0
+              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
+              : "border-amber-500/40 bg-amber-500/10 text-amber-100",
+          )}
+        >
+          本地检查:{" "}
+          {localCandidateValidation.missingPriorityModels.length === 0
+            ? "重点已覆盖"
+            : `缺 ${localCandidateValidation.missingPriorityModels.length} 个重点`}
+        </Badge>
+      </div>
+
+      {candidateSaveError ? (
+        <div className="mt-3 rounded-md border border-rose-700/50 bg-rose-950/30 px-3 py-2 text-xs leading-5 text-rose-100">
+          保存失败：{candidateSaveError}
+        </div>
+      ) : null}
+      {candidateSaveMessage ? (
+        <div className="mt-3 rounded-md border border-emerald-700/50 bg-emerald-950/30 px-3 py-2 text-xs leading-5 text-emerald-100">
+          {candidateSaveMessage}
+        </div>
+      ) : null}
+      {candidateValidationMessage ? (
+        <div className="mt-3 rounded-md border border-sky-700/50 bg-sky-950/30 px-3 py-2 text-xs leading-5 text-sky-100">
+          {candidateValidationMessage}
+        </div>
+      ) : null}
+      {actualCandidateValidation.missingSelectedModels.length > 0 ? (
+        <div className="mt-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs leading-5 text-amber-100">
+          live 可见窗口还没覆盖已选模型：
+          {actualCandidateValidation.missingSelectedModels.join(", ")}
+          。保存后请重启 Codex Desktop/app-server 再校验。
+        </div>
+      ) : null}
+      {spawnAgentMissingPriorityModels.length > 0 ? (
+        <div className="mt-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs leading-5 text-amber-100">
+          仍有重点模型不在前 {spawnAgentVisibleLimit} 个可见候选中：
+          {spawnAgentMissingPriorityModels.join(", ")}
+          。请把它们加入子 Agent 候选列表并重启 Codex Desktop/app-server。
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/// 状态页把代理运行态、Codex 接管态、路由配置态和最近流量放在同一视图里。
+function StatusTab({
+  selectedPlan,
+  selectedRouting,
+  routeEntries,
+  providersById,
+  proxyStatus,
+  isProxyRunning,
+  isCodexTakeoverActive,
+  activeProviderId,
+  onEditPlan,
+}: {
+  selectedPlan: Provider | null;
+  selectedRouting: CodexRouting | null;
+  routeEntries: RouteEntry[];
+  providersById: Map<string, Provider>;
+  proxyStatus?: ProxyStatus;
+  isProxyRunning: boolean;
+  isCodexTakeoverActive: boolean;
+  activeProviderId?: string;
+  onEditPlan: (provider: Provider, detail?: string) => void;
+}) {
+  const range = useMemo(() => ({ preset: "today" as const }), []);
+  const { data: requestLogs, isLoading } = useRequestLogs({
+    filters: { appType: "codex" },
+    range,
+    page: 0,
+    pageSize: 500,
+    options: { refetchInterval: 5000 },
+  });
+  const [diagnostics, setDiagnostics] =
+    useState<CodexMultiRouterDiagnostics | null>(null);
+  const [diagnoseError, setDiagnoseError] = useState<string | null>(null);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [modelPickerUnlockResult, setModelPickerUnlockResult] =
+    useState<CodexModelPickerUnlockResult | null>(null);
+  const [modelPickerUnlockError, setModelPickerUnlockError] = useState<
+    string | null
+  >(null);
+  const [isUnlockingModelPicker, setIsUnlockingModelPicker] = useState(false);
+  const [statusView, setStatusView] = useState<StatusView>("link");
+  const logs = requestLogs?.data ?? [];
+  const proxyLogs = logs.filter(
+    (log) => (log.dataSource ?? "proxy") === "proxy",
+  );
+  const sessionLogs = logs.filter(
+    (log) => (log.dataSource ?? "proxy") !== "proxy",
+  );
+  const selectedRoutes = selectedPlan
+    ? routeEntries.filter(({ provider }) => provider.id === selectedPlan.id)
+    : routeEntries;
+  const routerEvents = diagnostics?.routerLog.recentEvents ?? [];
+  const routerRequestEvents = routerEvents.filter((event) =>
+    [
+      "route_resolved",
+      "request_prepared",
+      "upstream_send",
+      "upstream_status",
+      "upstream_error",
+      "upstream_send_error",
+    ].includes(event.event),
+  );
+  const routeTargetCount = new Set(
+    selectedRoutes.map(
+      (entry) => routeTrafficTarget(entry, providersById).providerId,
+    ),
+  ).size;
+  const trafficRows = buildRouteTrafficRows({
+    logs: proxyLogs,
+    routerEvents,
+    routes: routeEntries,
+    selectedPlan,
+    providersById,
+  });
+  const routerLogs = routerEvents;
+  const routedLogs = proxyLogs.filter((log) =>
+    trafficRows.some(
+      (row) =>
+        row.providerId === log.providerId ||
+        row.model === (log.requestModel || log.model),
+    ),
+  );
+  const latestLog = proxyLogs[0];
+  const latestForwardOk = latestLog
+    ? latestLog.statusCode >= 200 && latestLog.statusCode < 400
+    : false;
+  const listenAddress = proxyStatus
+    ? `${proxyStatus.address}:${proxyStatus.port}`
+    : "未启动";
+  const activeTargetLabel =
+    activeProviderId && providersById.get(activeProviderId)
+      ? `${providersById.get(activeProviderId)?.name} (${activeProviderId})`
+      : activeProviderId || "未命中";
+  const routeEnabled = selectedRouting?.enabled !== false;
+  const hasEnabledRoutes = selectedRoutes.some(
+    ({ route }) => route.enabled !== false,
+  );
+  const configReady = Boolean(
+    isProxyRunning &&
+      isCodexTakeoverActive &&
+      selectedPlan &&
+      routeEnabled &&
+      hasEnabledRoutes,
+  );
+  const trafficVerified =
+    proxyLogs.length > 0 ||
+    routerRequestEvents.length > 0 ||
+    (proxyStatus?.total_requests ?? 0) > 0;
+  const linkOnline = Boolean(configReady && trafficVerified);
+  const readinessIssues = [
+    !isProxyRunning ? "本地代理未监听" : "",
+    !isCodexTakeoverActive ? "Codex live 配置未接管" : "",
+    !selectedPlan ? "未选择 MultiRouter provider" : "",
+    selectedPlan && !routeEnabled ? "MultiRouter 入口已关闭" : "",
+    selectedPlan && routeEnabled && !hasEnabledRoutes
+      ? "没有启用的匹配规则"
+      : "",
+  ].filter(Boolean);
 
   /// 一键诊断只读取本地现场和 router 日志，不向真实上游发起模型请求。
   async function runDiagnostics() {
@@ -1719,259 +1997,6 @@ function StatusTab({
                 "等待 Codex 请求"
               }
             />
-          </div>
-          <div className="mt-4 rounded-lg border border-violet-700/40 bg-violet-950/15 p-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-semibold text-violet-100">
-                  <GitBranch className="h-4 w-4" />子 Agent 候选模型
-                </div>
-                <p className="mt-1 text-xs leading-5 text-violet-200/80">
-                  Codex upstream 的 spawn_agent 工具说明只读取前{" "}
-                  {spawnAgentVisibleLimit} 个 picker-visible 模型；这里直接控制
-                  MultiRouter
-                  推入这个可见窗口的顺序，不改变实际路由、历史和统计。
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={validateSpawnAgentCandidateWindow}
-                  disabled={isValidatingCandidates || !selectedPlan}
-                  className="gap-2 border-emerald-500/50 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
-                >
-                  {isValidatingCandidates ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  校验候选
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={saveSpawnAgentCandidates}
-                  disabled={
-                    isSavingCandidates || !selectedPlan || !hasCandidateChanges
-                  }
-                  className="gap-2 bg-violet-600 hover:bg-violet-500"
-                >
-                  {isSavingCandidates ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  保存排序
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
-              <div className="space-y-3">
-                <div>
-                  <div className="mb-2 text-xs font-semibold text-violet-100">
-                    Codex 实际可见窗口
-                  </div>
-                  <div className="grid gap-2 md:grid-cols-5">
-                    {previewVisibleModels.length > 0 ? (
-                      previewVisibleModels.map((model, index) => (
-                        <div
-                          key={`${model.model ?? index}-${index}`}
-                          className="min-w-0 rounded-md border border-violet-800/60 bg-slate-950/45 px-2 py-2"
-                        >
-                          <div className="text-[11px] text-violet-300">
-                            #{index + 1}
-                          </div>
-                          <div
-                            className="mt-1 truncate font-mono text-xs text-slate-100"
-                            title={catalogModelLabel(model)}
-                          >
-                            {catalogModelLabel(model)}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="rounded-md border border-violet-800/60 bg-slate-950/45 px-3 py-2 text-xs text-violet-100 md:col-span-5">
-                        当前 MultiRouter provider 还没有
-                        modelCatalog；请先在模型映射里添加 OpenAI / Qwen /
-                        DeepSeek 等候选模型。
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold text-violet-100">
-                      可拖动的子 Agent 前五候选
-                    </div>
-                    <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
-                      {draftSpawnAgentModels.length} / {spawnAgentVisibleLimit}
-                    </Badge>
-                  </div>
-                  <DndContext
-                    sensors={candidateSensors}
-                    collisionDetection={closestCenter}
-                    onDragEnd={handleSpawnAgentDragEnd}
-                  >
-                    <SortableContext
-                      items={draftSpawnAgentModels}
-                      strategy={verticalListSortingStrategy}
-                    >
-                      <div className="grid gap-2">
-                        {draftVisibleModels.length > 0 ? (
-                          draftVisibleModels.map((model, index) => (
-                            <SortableSpawnAgentCandidate
-                              key={model.model}
-                              model={model}
-                              index={index}
-                              onRemove={toggleSpawnAgentCandidate}
-                            />
-                          ))
-                        ) : (
-                          <div className="rounded-md border border-dashed border-violet-700/60 bg-slate-950/30 px-3 py-2 text-xs text-violet-100">
-                            还没有选择子 Agent 候选；从右侧候选池添加，最多{" "}
-                            {spawnAgentVisibleLimit} 个。
-                          </div>
-                        )}
-                      </div>
-                    </SortableContext>
-                  </DndContext>
-                </div>
-              </div>
-
-              <div className="rounded-md border border-violet-800/50 bg-slate-950/35 p-3">
-                <Tabs
-                  value={candidateView}
-                  onValueChange={(value) =>
-                    setCandidateView(value as SpawnAgentCandidateView)
-                  }
-                >
-                  <TabsList className="grid w-full grid-cols-4 bg-slate-950/60 p-1">
-                    <TabsTrigger value="selected">已选</TabsTrigger>
-                    <TabsTrigger value="routed">路由</TabsTrigger>
-                    <TabsTrigger value="priority">重点</TabsTrigger>
-                    <TabsTrigger value="all">全部</TabsTrigger>
-                  </TabsList>
-                  {(["selected", "routed", "priority", "all"] as const).map(
-                    (view) => (
-                      <TabsContent key={view} value={view} className="mt-3">
-                        <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
-                          {candidateSourceModels[view].length > 0 ? (
-                            candidateSourceModels[view].map((model) => {
-                              const catalogModel = selectedCatalogByModel.get(
-                                model,
-                              ) ?? { model };
-                              const isSelected =
-                                selectedCandidateSet.has(model);
-                              return (
-                                <button
-                                  key={`${view}-${model}`}
-                                  type="button"
-                                  onClick={() =>
-                                    toggleSpawnAgentCandidate(model)
-                                  }
-                                  disabled={
-                                    !isSelected &&
-                                    draftSpawnAgentModels.length >=
-                                      spawnAgentVisibleLimit
-                                  }
-                                  className={cn(
-                                    "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-2 text-left text-xs transition",
-                                    isSelected
-                                      ? "border-violet-400/70 bg-violet-500/20 text-violet-50"
-                                      : "border-slate-700 bg-slate-950/45 text-slate-200 hover:border-violet-500/60 hover:bg-violet-500/10",
-                                    !isSelected &&
-                                      draftSpawnAgentModels.length >=
-                                        spawnAgentVisibleLimit
-                                      ? "cursor-not-allowed opacity-45"
-                                      : "",
-                                  )}
-                                >
-                                  <span className="min-w-0 truncate font-mono">
-                                    {catalogModelLabel(catalogModel)}
-                                  </span>
-                                  <Badge
-                                    className={cn(
-                                      "shrink-0 border text-[10px]",
-                                      isSelected
-                                        ? "border-violet-300/60 bg-violet-200/10 text-violet-50"
-                                        : "border-slate-600 bg-slate-800 text-slate-300",
-                                    )}
-                                  >
-                                    {isSelected ? "已选" : "添加"}
-                                  </Badge>
-                                </button>
-                              );
-                            })
-                          ) : (
-                            <div className="rounded-md border border-dashed border-slate-700 px-3 py-2 text-xs text-slate-400">
-                              这个来源暂时没有可用模型。
-                            </div>
-                          )}
-                        </div>
-                      </TabsContent>
-                    ),
-                  )}
-                </Tabs>
-              </div>
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-violet-200/80">
-              <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
-                catalog: {selectedCatalog.models.length}
-              </Badge>
-              <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
-                路由命中: {routedCatalogModelIds.length}
-              </Badge>
-              <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
-                来源:{" "}
-                {generatedVisibleModels.length > 0 ? "诊断实测" : "配置预览"}
-              </Badge>
-              <Badge
-                className={cn(
-                  "border",
-                  localCandidateValidation.missingPriorityModels.length === 0
-                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
-                    : "border-amber-500/40 bg-amber-500/10 text-amber-100",
-                )}
-              >
-                本地检查:{" "}
-                {localCandidateValidation.missingPriorityModels.length === 0
-                  ? "重点已覆盖"
-                  : `缺 ${localCandidateValidation.missingPriorityModels.length} 个重点`}
-              </Badge>
-            </div>
-
-            {candidateSaveError ? (
-              <div className="mt-3 rounded-md border border-rose-700/50 bg-rose-950/30 px-3 py-2 text-xs leading-5 text-rose-100">
-                保存失败：{candidateSaveError}
-              </div>
-            ) : null}
-            {candidateSaveMessage ? (
-              <div className="mt-3 rounded-md border border-emerald-700/50 bg-emerald-950/30 px-3 py-2 text-xs leading-5 text-emerald-100">
-                {candidateSaveMessage}
-              </div>
-            ) : null}
-            {candidateValidationMessage ? (
-              <div className="mt-3 rounded-md border border-sky-700/50 bg-sky-950/30 px-3 py-2 text-xs leading-5 text-sky-100">
-                {candidateValidationMessage}
-              </div>
-            ) : null}
-            {actualCandidateValidation.missingSelectedModels.length > 0 ? (
-              <div className="mt-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs leading-5 text-amber-100">
-                live 可见窗口还没覆盖已选模型：
-                {actualCandidateValidation.missingSelectedModels.join(", ")}
-                。保存后请重启 Codex Desktop/app-server 再校验。
-              </div>
-            ) : null}
-            {spawnAgentMissingPriorityModels.length > 0 ? (
-              <div className="mt-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs leading-5 text-amber-100">
-                仍有重点模型不在前 {spawnAgentVisibleLimit} 个可见候选中：
-                {spawnAgentMissingPriorityModels.join(", ")}
-                。请把它们加入子 Agent 候选列表并重启 Codex Desktop/app-server。
-              </div>
-            ) : null}
           </div>
           {modelPickerUnlockError ? (
             <div className="mt-3 rounded-lg border border-rose-700/50 bg-rose-950/30 p-3 text-xs text-rose-100">
