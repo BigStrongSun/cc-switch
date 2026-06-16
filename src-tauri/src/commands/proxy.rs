@@ -1487,10 +1487,7 @@ fn latest_unresolved_router_error(
         }
 
         let key = codex_router_log_recovery_key(event);
-        if key
-            .as_ref()
-            .is_some_and(|key| recovered_keys.contains(key))
-        {
+        if key.as_ref().is_some_and(|key| recovered_keys.contains(key)) {
             continue;
         }
 
@@ -1657,7 +1654,10 @@ mod codex_router_log_diagnostics_tests {
             now,
         );
 
-        assert_eq!(diagnostics.latest_error.as_deref(), Some("qwen_gateway_error"));
+        assert_eq!(
+            diagnostics.latest_error.as_deref(),
+            Some("qwen_gateway_error")
+        );
     }
 
     #[test]
