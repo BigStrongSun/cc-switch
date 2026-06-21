@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import {
   closestCenter,
   DndContext,
@@ -143,6 +149,15 @@ type RouteTrafficTarget = {
   providerName: string;
 };
 
+type RouteCandidate = {
+  id: string;
+  route: CodexRoute;
+  provider?: Provider;
+  isExisting: boolean;
+  matchModels: string[];
+  matchPrefixes: string[];
+};
+
 /// 从 Provider 私有配置里读取 Codex 多模型路由配置；没有配置时返回 null，避免把普通模型源误判成路由方案。
 function readCodexRouting(provider: Provider): CodexRouting | null {
   const routing = provider.settingsConfig?.codexRouting;
@@ -197,6 +212,155 @@ function routeTargetProvider(
 ): Provider | undefined {
   const targetProviderId = routeTargetProviderId(route);
   return targetProviderId ? providersById.get(targetProviderId) : undefined;
+}
+
+/// 把 provider 或 route 标识清理成稳定的路由 ID 片段；空值回退到 fallback，避免保存后出现不可选规则。
+function safeRouteIdPart(value: string | undefined, fallback: string): string {
+  const normalized = (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || fallback;
+}
+
+/// 在候选路由集合内生成不冲突的 ID；已有配置优先保留，新增 provider 才追加序号。
+function uniqueRouteId(preferredId: string, usedIds: Set<string>): string {
+  const base = safeRouteIdPart(preferredId, "route");
+  if (!usedIds.has(base)) {
+    usedIds.add(base);
+    return base;
+  }
+
+  let index = 2;
+  while (usedIds.has(`${base}-${index}`)) index += 1;
+  const nextId = `${base}-${index}`;
+  usedIds.add(nextId);
+  return nextId;
+}
+
+/// 从模型目录里推断精确模型名；没有目录时再读取常见单模型字段，保证新候选也有可解释的匹配条件。
+function collectProviderModelIds(provider: Provider): string[] {
+  const catalogModels = readCodexModelCatalog(provider)
+    .models.map((model) => model.model?.trim())
+    .filter((model): model is string => Boolean(model));
+  const singleModelFields = [
+    provider.settingsConfig?.model,
+    provider.settingsConfig?.defaultModel,
+    provider.settingsConfig?.default_model,
+  ].filter(
+    (model): model is string => typeof model === "string" && !!model.trim(),
+  );
+  return Array.from(new Set([...catalogModels, ...singleModelFields]));
+}
+
+/// 根据 provider 名称和模型名推断少量前缀；只作为无精确模型目录时的兜底，避免把路由规则做成空匹配。
+function inferProviderPrefixes(
+  provider: Provider,
+  modelIds: string[],
+): string[] {
+  const text = `${provider.id} ${provider.name}`.toLowerCase();
+  const prefixes = new Set<string>();
+  const knownPrefixes = [
+    "gpt",
+    "o1",
+    "o3",
+    "o4",
+    "qwen",
+    "deepseek",
+    "glm",
+    "gemini",
+    "claude",
+  ];
+  for (const prefix of knownPrefixes) {
+    if (
+      text.includes(prefix) ||
+      modelIds.some((model) => model.toLowerCase().startsWith(prefix))
+    ) {
+      prefixes.add(prefix);
+    }
+  }
+  return Array.from(prefixes);
+}
+
+/// 为普通模型源创建一条引用 provider 配置的路由；不复制 API Key/Base URL，避免工作台把来源配置写散。
+function createRouteFromProvider(
+  provider: Provider,
+  usedIds: Set<string>,
+): CodexRoute {
+  const modelIds = collectProviderModelIds(provider);
+  const prefixes = inferProviderPrefixes(provider, modelIds);
+  return {
+    id: uniqueRouteId(`router-${provider.id}`, usedIds),
+    label: provider.name,
+    enabled: true,
+    targetProviderId: provider.id,
+    match: {
+      models: modelIds,
+      prefixes,
+    },
+    upstream: {
+      apiFormat: provider.meta?.apiFormat ?? "openai_chat",
+      auth: { source: "provider_config" },
+    },
+    capabilities: {
+      inputModalities: ["text", "image"],
+      textOnly: false,
+      supportsReasoning: true,
+    },
+  };
+}
+
+/// 合并现有 route 和所有普通模型源，给规则页提供“直接勾选候选 router”的完整候选列表。
+function buildRouteCandidates(
+  selectedPlan: Provider | null,
+  modelSources: Provider[],
+): RouteCandidate[] {
+  const usedIds = new Set<string>();
+  const candidates: RouteCandidate[] = [];
+  const existingRoutes = selectedPlan
+    ? (readCodexRouting(selectedPlan)?.routes ?? [])
+    : [];
+
+  for (const route of existingRoutes) {
+    const targetProviderId = routeTargetProviderId(route);
+    const id = uniqueRouteId(
+      route.id ?? targetProviderId ?? route.label ?? "route",
+      usedIds,
+    );
+    const normalizedRoute: CodexRoute = { ...route, id };
+    const provider = targetProviderId
+      ? modelSources.find((source) => source.id === targetProviderId)
+      : undefined;
+    candidates.push({
+      id,
+      route: normalizedRoute,
+      provider,
+      isExisting: true,
+      matchModels: normalizedRoute.match?.models ?? [],
+      matchPrefixes: normalizedRoute.match?.prefixes ?? [],
+    });
+  }
+
+  const existingProviderIds = new Set(
+    candidates
+      .map((candidate) => routeTargetProviderId(candidate.route))
+      .filter((id): id is string => Boolean(id)),
+  );
+  for (const provider of modelSources) {
+    if (existingProviderIds.has(provider.id)) continue;
+    const route = createRouteFromProvider(provider, usedIds);
+    candidates.push({
+      id: route.id!,
+      route,
+      provider,
+      isExisting: false,
+      matchModels: route.match?.models ?? [],
+      matchPrefixes: route.match?.prefixes ?? [],
+    });
+  }
+
+  return candidates;
 }
 
 /// 提取 route 的上游地址；引用真实 Provider 时展示目标 Provider 的配置。
@@ -543,6 +707,13 @@ export function CodexRouterWorkspacePage({
   const [selectedRouteKey, setSelectedRouteKey] = useState<string | null>(null);
   const [testModel, setTestModel] = useState("");
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [isRoutePickerOpen, setIsRoutePickerOpen] = useState(false);
+  const [routePickerMessage, setRoutePickerMessage] = useState<string | null>(
+    null,
+  );
+  const [routePickerError, setRoutePickerError] = useState<string | null>(null);
+  const [isSavingRoutes, setIsSavingRoutes] = useState(false);
+  const queryClient = useQueryClient();
 
   const routingPlans = providers.filter(isRoutingPlan);
   const modelSources = providers.filter((provider) => !isRoutingPlan(provider));
@@ -582,6 +753,52 @@ export function CodexRouterWorkspacePage({
     onEditProvider(provider);
   }
 
+  /// 路由规则编辑只更新 codexRouting.routes，不再进入通用 Provider 表单，避免“添加 router”卡死路径。
+  async function handleSaveRoutingRoutes(plan: Provider, routes: CodexRoute[]) {
+    const currentRouting = readCodexRouting(plan) ?? {};
+    const enabledRouteIds = routes
+      .filter((route) => route.enabled !== false)
+      .map((route) => route.id)
+      .filter((id): id is string => Boolean(id));
+    const defaultRouteId = routes.some(
+      (route) => route.id && route.id === currentRouting.defaultRouteId,
+    )
+      ? currentRouting.defaultRouteId
+      : (enabledRouteIds[0] ?? routes[0]?.id);
+    const nextProvider: Provider = {
+      ...plan,
+      settingsConfig: {
+        ...plan.settingsConfig,
+        codexRouting: {
+          ...currentRouting,
+          enabled: currentRouting.enabled ?? true,
+          defaultRouteId,
+          routes,
+        },
+      },
+    };
+
+    setIsSavingRoutes(true);
+    setRoutePickerError(null);
+    setRoutePickerMessage(null);
+    try {
+      await providersApi.update(nextProvider, "codex");
+      await queryClient.invalidateQueries({ queryKey: ["providers", "codex"] });
+      setSelectedPlanId(plan.id);
+      setSelectedRouteKey(routes[0]?.id ? `${plan.id}:${routes[0].id}` : null);
+      setRoutePickerMessage(
+        "路由规则已保存，候选 router 选择已写入当前多路路由方案。",
+      );
+      setIsRoutePickerOpen(false);
+    } catch (error) {
+      setRoutePickerError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setIsSavingRoutes(false);
+    }
+  }
+
   /// 选择方案只改变工作台焦点，不修改数据库。
   function handleSelectPlan(provider: Provider) {
     setSelectedPlanId(provider.id);
@@ -595,6 +812,15 @@ export function CodexRouterWorkspacePage({
       `${entry.provider.id}:${entry.route.id ?? entry.index}`,
     );
     setActiveTab("routes");
+  }
+
+  /// 从任何规则入口打开候选选择器时，先切到规则页并清理上一次保存提示。
+  function handleOpenRoutePicker(provider?: Provider | null) {
+    if (provider) setSelectedPlanId(provider.id);
+    setActiveTab("routes");
+    setRoutePickerError(null);
+    setRoutePickerMessage(null);
+    setIsRoutePickerOpen(true);
   }
 
   /// 页面内测试只做规则匹配预览，不发真实上游请求，避免误触发计费或账号请求。
@@ -695,11 +921,18 @@ export function CodexRouterWorkspacePage({
               routeEntries={routeEntries}
               selectedPlan={selectedPlan}
               selectedRoute={selectedRoute}
+              modelSources={modelSources}
               onCreatePlan={handleCreatePlan}
-              onEditPlan={handleEditPlan}
+              onOpenRoutePicker={handleOpenRoutePicker}
+              onSaveRoutes={handleSaveRoutingRoutes}
               onSelectPlan={handleSelectPlan}
               onSelectRoute={handleSelectRoute}
               providersById={providersById}
+              isRoutePickerOpen={isRoutePickerOpen}
+              isSavingRoutes={isSavingRoutes}
+              routePickerMessage={routePickerMessage}
+              routePickerError={routePickerError}
+              onRoutePickerOpenChange={setIsRoutePickerOpen}
             />
           </TabsContent>
 
@@ -1038,21 +1271,35 @@ function RoutesTab({
   routeEntries,
   selectedPlan,
   selectedRoute,
+  modelSources,
   providersById,
   onCreatePlan,
-  onEditPlan,
+  onOpenRoutePicker,
+  onSaveRoutes,
   onSelectPlan,
   onSelectRoute,
+  isRoutePickerOpen,
+  isSavingRoutes,
+  routePickerMessage,
+  routePickerError,
+  onRoutePickerOpenChange,
 }: {
   routingPlans: Provider[];
   routeEntries: RouteEntry[];
   selectedPlan: Provider | null;
   selectedRoute?: RouteEntry;
+  modelSources: Provider[];
   providersById: Map<string, Provider>;
   onCreatePlan: () => void;
-  onEditPlan: (provider: Provider, detail?: string) => void;
+  onOpenRoutePicker: (provider?: Provider | null) => void;
+  onSaveRoutes: (plan: Provider, routes: CodexRoute[]) => Promise<void>;
   onSelectPlan: (provider: Provider) => void;
   onSelectRoute: (entry: RouteEntry) => void;
+  isRoutePickerOpen: boolean;
+  isSavingRoutes: boolean;
+  routePickerMessage: string | null;
+  routePickerError: string | null;
+  onRoutePickerOpenChange: (open: boolean) => void;
 }) {
   const selectedPlanRoutes = selectedPlan
     ? routeEntries.filter(({ provider }) => provider.id === selectedPlan.id)
@@ -1109,9 +1356,7 @@ function RoutesTab({
                 selectedPlan ? (
                   <Button
                     size="sm"
-                    onClick={() =>
-                      onEditPlan(selectedPlan, "添加、修改或删除路由规则")
-                    }
+                    onClick={() => onOpenRoutePicker(selectedPlan)}
                     className="gap-2 bg-emerald-600 hover:bg-emerald-500"
                   >
                     <Pencil className="h-4 w-4" />
@@ -1137,10 +1382,12 @@ function RoutesTab({
                 <EmptyState
                   icon={Route}
                   title="这个方案还没有规则"
-                  detail="点击编辑规则，在配置表单里添加精确模型或前缀匹配。"
+                  detail="点击编辑规则，直接勾选要接入的候选 router。"
                   actionLabel="编辑多路路由"
                   onAction={() =>
-                    selectedPlan ? onEditPlan(selectedPlan) : onCreatePlan()
+                    selectedPlan
+                      ? onOpenRoutePicker(selectedPlan)
+                      : onCreatePlan()
                   }
                 />
               )}
@@ -1151,10 +1398,33 @@ function RoutesTab({
             selectedRoute={selectedRoute}
             selectedPlan={selectedPlan}
             providersById={providersById}
-            onEditPlan={onEditPlan}
+            onOpenRoutePicker={onOpenRoutePicker}
           />
         </section>
       </div>
+
+      {selectedPlan && isRoutePickerOpen ? (
+        <RouteCandidatePicker
+          selectedPlan={selectedPlan}
+          modelSources={modelSources}
+          onSaveRoutes={onSaveRoutes}
+          onClose={() => onRoutePickerOpenChange(false)}
+          isSaving={isSavingRoutes}
+        />
+      ) : null}
+
+      {(routePickerMessage || routePickerError) && (
+        <div
+          className={cn(
+            "rounded-lg border p-3 text-sm",
+            routePickerError
+              ? "border-rose-500/40 bg-rose-500/10 text-rose-100"
+              : "border-emerald-500/40 bg-emerald-500/10 text-emerald-100",
+          )}
+        >
+          {routePickerError ?? routePickerMessage}
+        </div>
+      )}
 
       <SpawnAgentCandidatesPanel
         selectedPlan={selectedPlan}
@@ -1165,6 +1435,242 @@ function RoutesTab({
 }
 
 /// 子 Agent 候选模型属于路由规则配置：前五个会进入 Codex spawn_agent 的可用模型窗口。
+/// 规则选择器是工作台专用编辑界面：用户只勾选候选 router，保存时统一写回 codexRouting.routes。
+function RouteCandidatePicker({
+  selectedPlan,
+  modelSources,
+  onSaveRoutes,
+  onClose,
+  isSaving,
+}: {
+  selectedPlan: Provider;
+  modelSources: Provider[];
+  onSaveRoutes: (plan: Provider, routes: CodexRoute[]) => Promise<void>;
+  onClose: () => void;
+  isSaving: boolean;
+}) {
+  const candidates = useMemo(
+    () => buildRouteCandidates(selectedPlan, modelSources),
+    [selectedPlan, modelSources],
+  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () =>
+      new Set(
+        candidates
+          .filter((candidate) => candidate.isExisting)
+          .map((candidate) => candidate.id),
+      ),
+  );
+  const [enabledIds, setEnabledIds] = useState<Set<string>>(
+    () =>
+      new Set(
+        candidates
+          .filter((candidate) => candidate.route.enabled !== false)
+          .map((candidate) => candidate.id),
+      ),
+  );
+
+  useEffect(() => {
+    setSelectedIds(
+      new Set(
+        candidates
+          .filter((candidate) => candidate.isExisting)
+          .map((candidate) => candidate.id),
+      ),
+    );
+    setEnabledIds(
+      new Set(
+        candidates
+          .filter((candidate) => candidate.route.enabled !== false)
+          .map((candidate) => candidate.id),
+      ),
+    );
+  }, [candidates]);
+
+  /// 切换 Set 状态时始终返回新实例，避免 React 因引用未变而跳过刷新。
+  function toggleSetValue(
+    setter: Dispatch<SetStateAction<Set<string>>>,
+    id: string,
+  ) {
+    setter((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /// 保存前只保留勾选项，并把启用状态同步到 route.enabled；取消勾选即删除该 route。
+  async function handleSave() {
+    const routes = candidates
+      .filter((candidate) => selectedIds.has(candidate.id))
+      .map((candidate) => ({
+        ...candidate.route,
+        enabled: enabledIds.has(candidate.id),
+      }));
+    await onSaveRoutes(selectedPlan, routes);
+  }
+
+  return (
+    <section className="rounded-lg border border-emerald-700/50 bg-slate-950/70 p-4 shadow-[0_0_0_1px_rgba(16,185,129,0.15)]">
+      <SectionHeader
+        icon={Route}
+        title="选择候选 router"
+        detail="这里直接选择哪些模型源进入当前多路路由；取消勾选会从规则中移除，不再打开普通供应商编辑表单。"
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setSelectedIds(
+                  new Set(candidates.map((candidate) => candidate.id)),
+                )
+              }
+              disabled={candidates.length === 0 || isSaving}
+            >
+              全选
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setSelectedIds(
+                  new Set(
+                    candidates
+                      .filter((candidate) => candidate.isExisting)
+                      .map((candidate) => candidate.id),
+                  ),
+                )
+              }
+              disabled={isSaving}
+            >
+              只保留当前
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onClose}
+              disabled={isSaving}
+            >
+              关闭
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={isSaving}
+              className="gap-2 bg-emerald-600 hover:bg-emerald-500"
+            >
+              <Save className="h-4 w-4" />
+              {isSaving ? "保存中" : "保存规则"}
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="mt-3 grid gap-2">
+        {candidates.map((candidate) => {
+          const checked = selectedIds.has(candidate.id);
+          const enabled = enabledIds.has(candidate.id);
+          const targetLabel =
+            candidate.provider?.name ??
+            routeTargetProviderId(candidate.route) ??
+            "自定义 route";
+          return (
+            <div
+              key={candidate.id}
+              className={cn(
+                "rounded-lg border p-3 transition",
+                checked
+                  ? "border-emerald-500/60 bg-emerald-500/10"
+                  : "border-slate-700 bg-slate-950/40",
+              )}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => toggleSetValue(setSelectedIds, candidate.id)}
+                  className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                >
+                  <span
+                    className={cn(
+                      "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border",
+                      checked
+                        ? "border-emerald-300 bg-emerald-500 text-slate-950"
+                        : "border-slate-600 bg-slate-900",
+                    )}
+                  >
+                    {checked ? <CheckCircle2 className="h-3.5 w-3.5" /> : null}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-slate-100">
+                      {candidate.route.label || targetLabel}
+                    </span>
+                    <span className="mt-1 block truncate text-xs text-slate-400">
+                      {targetLabel} ·{" "}
+                      {candidate.isExisting ? "已在规则中" : "候选模型源"}
+                    </span>
+                  </span>
+                </button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => toggleSetValue(setEnabledIds, candidate.id)}
+                  disabled={!checked || isSaving}
+                  className={cn(
+                    "h-8",
+                    enabled ? "text-emerald-100" : "text-slate-400",
+                  )}
+                >
+                  {enabled ? "启用" : "停用"}
+                </Button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                {candidate.matchModels.slice(0, 6).map((model) => (
+                  <span
+                    key={model}
+                    className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-slate-300"
+                  >
+                    {model}
+                  </span>
+                ))}
+                {candidate.matchModels.length > 6 ? (
+                  <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-slate-400">
+                    +{candidate.matchModels.length - 6}
+                  </span>
+                ) : null}
+                {candidate.matchPrefixes.map((prefix) => (
+                  <span
+                    key={prefix}
+                    className="rounded-full border border-blue-700/60 bg-blue-950/40 px-2 py-0.5 text-blue-100"
+                  >
+                    {prefix}*
+                  </span>
+                ))}
+                {candidate.matchModels.length === 0 &&
+                candidate.matchPrefixes.length === 0 ? (
+                  <span className="rounded-full border border-amber-600/60 bg-amber-950/30 px-2 py-0.5 text-amber-100">
+                    未发现模型目录，保存后可在模型源补充目录
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+        {candidates.length === 0 ? (
+          <EmptyState
+            icon={Server}
+            title="没有可选 router"
+            detail="先添加至少一个 Codex 模型源，再回到这里选择候选 router。"
+            actionLabel="关闭"
+            onAction={onClose}
+          />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function SpawnAgentCandidatesPanel({
   selectedPlan,
   selectedRoutes,
@@ -2949,12 +3455,12 @@ function RouteDetailPanel({
   selectedRoute,
   selectedPlan,
   providersById,
-  onEditPlan,
+  onOpenRoutePicker,
 }: {
   selectedRoute?: RouteEntry;
   selectedPlan: Provider | null;
   providersById: Map<string, Provider>;
-  onEditPlan: (provider: Provider, detail?: string) => void;
+  onOpenRoutePicker: (provider?: Provider | null) => void;
 }) {
   if (!selectedRoute) {
     return (
@@ -2964,7 +3470,7 @@ function RouteDetailPanel({
           title="请选择一条规则"
           detail="左侧点击规则后，这里会展示上游、匹配条件和操作入口。"
           actionLabel={selectedPlan ? "编辑多路路由" : "创建多路路由"}
-          onAction={() => selectedPlan && onEditPlan(selectedPlan)}
+          onAction={() => selectedPlan && onOpenRoutePicker(selectedPlan)}
         />
       </section>
     );
@@ -2980,13 +3486,11 @@ function RouteDetailPanel({
       <SectionHeader
         icon={Database}
         title={route.label || route.id || "规则详情"}
-        detail="这里是当前规则的只读摘要；修改和删除会进入配置表单。"
+        detail="这里是当前规则的只读摘要；修改接入范围请打开候选 router 选择器。"
         action={
           <Button
             size="sm"
-            onClick={() =>
-              onEditPlan(selectedRoute.provider, "编辑或删除当前路由规则")
-            }
+            onClick={() => onOpenRoutePicker(selectedRoute.provider)}
             className="gap-2 bg-emerald-600 hover:bg-emerald-500"
           >
             <Pencil className="h-4 w-4" />
@@ -3051,12 +3555,10 @@ function RouteDetailPanel({
         <Button
           variant="outline"
           className="justify-start gap-2 text-rose-200 hover:text-rose-100"
-          onClick={() =>
-            onEditPlan(selectedRoute.provider, "打开表单后可删除当前规则")
-          }
+          onClick={() => onOpenRoutePicker(selectedRoute.provider)}
         >
           <Trash2 className="h-4 w-4" />
-          删除入口在编辑表单中
+          到候选列表取消勾选
         </Button>
       </div>
     </section>
