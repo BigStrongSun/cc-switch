@@ -4,6 +4,17 @@ Standalone Python tool for listing and repairing Codex Desktop history visibilit
 
 It uses only the Python standard library. No helper executable is required.
 
+This tool complements the official **Unified Codex Session History** setting:
+
+- Official unified history merges the `openai` and `custom` resume buckets and uses a backup ledger for exact restore.
+- This tool repairs Desktop visibility when the data still exists but the local `state_5.sqlite`, `session_index.jsonl`, workspace hints, or rollout metadata keep sessions out of the sidebar.
+
+For the official bucket-unification behavior and safety model, see:
+
+- `docs/guides/codex-unified-session-history-guide-zh.md`
+- `docs/guides/codex-unified-session-history-guide-en.md`
+- `docs/guides/codex-unified-session-history-guide-ja.md`
+
 ## List Sessions
 
 ```powershell
@@ -44,6 +55,6 @@ python .\codex_history_tool.py repair --session-id "<session-id>" --apply
 Useful overrides:
 
 - `--codex-home <path>`: choose another Codex directory.
-- `--state-db <path>`: force a specific state SQLite file.
+- `--state-db <path>`: force a specific state SQLite file. Without this, the tool probes `~/.codex/sqlite/state_5.sqlite`, `sqlite_home` from `config.toml`, `CODEX_SQLITE_HOME`, then the legacy root `state_5.sqlite`.
 - `--target-provider <id>`: default is the live `config.toml` provider, falling back to `codex_model_router_v2`.
 - `--max-per-project 10 --max-total 300`: balanced recent-window caps.

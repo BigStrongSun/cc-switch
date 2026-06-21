@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Clock,
   FileClock,
+  FileText,
   FolderOpen,
   X,
   CheckSquare,
@@ -944,6 +945,40 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                                 >
                                   <p className="font-mono text-xs break-all">
                                     {selectedSession.projectDir}
+                                  </p>
+                                  <p className="text-muted-foreground mt-1">
+                                    {t("sessionManager.clickToCopyPath")}
+                                  </p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                            {selectedSession.sourcePath && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleCopy(
+                                        selectedSession.sourcePath!,
+                                        t("sessionManager.sourceFileCopied", {
+                                          defaultValue: "源文件路径已复制",
+                                        }),
+                                      )
+                                    }
+                                    className="flex items-center gap-1 hover:text-foreground transition-colors"
+                                  >
+                                    <FileText className="size-3" />
+                                    <span className="truncate max-w-[220px] font-mono">
+                                      {getBaseName(selectedSession.sourcePath)}
+                                    </span>
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent
+                                  side="bottom"
+                                  className="max-w-xs"
+                                >
+                                  <p className="font-mono text-xs break-all">
+                                    {selectedSession.sourcePath}
                                   </p>
                                   <p className="text-muted-foreground mt-1">
                                     {t("sessionManager.clickToCopyPath")}

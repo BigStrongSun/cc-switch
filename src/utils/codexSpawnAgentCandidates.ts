@@ -115,7 +115,7 @@ export function reorderSpawnAgentCandidates(
 export function validateSpawnAgentCandidates(
   catalog: CodexModelCatalog,
   visibleModels: string[],
-  priorityModels = CODEX_SPAWN_AGENT_PRIORITY_MODELS,
+  priorityModels: string[] = [],
   limit = CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT,
 ): SpawnAgentCandidateValidation {
   const catalogModels = new Set(

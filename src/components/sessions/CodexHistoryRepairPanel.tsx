@@ -386,6 +386,33 @@ export function CodexHistoryRepairPanel({
           </div>
         </div>
 
+        <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
+          <div className="flex gap-2 rounded-md border border-border-default bg-muted/30 px-3 py-2">
+            <Info className="mt-0.5 size-4 shrink-0 text-blue-500" />
+            <div>
+              <div className="font-medium text-foreground">
+                统一历史负责合并抽屉
+              </div>
+              <div>
+                设置里的官方开关只迁移 `openai` / `custom` resume
+                桶，并按备份账本精确还原。
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2 rounded-md border border-border-default bg-muted/30 px-3 py-2">
+            <ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+            <div>
+              <div className="font-medium text-foreground">
+                本工具负责找回可见性
+              </div>
+              <div>
+                只在预览确认后修复 active DB、session_index、workspace hints 和
+                rollout 元数据；自动识别 `sqlite_home` 与 `CODEX_SQLITE_HOME`。
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="mt-3 grid gap-2 md:grid-cols-3">
           <RepairStatusTile
             icon={<Database className="size-4" />}

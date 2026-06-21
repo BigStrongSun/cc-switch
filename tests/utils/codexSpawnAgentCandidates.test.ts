@@ -95,7 +95,7 @@ describe("codexSpawnAgentCandidates", () => {
     ]);
   });
 
-  it("校验 live 前五窗口是否遗漏重点模型", () => {
+  it("默认只校验用户已选候选，不强制未选择的重点模型进入前五", () => {
     const result = validateSpawnAgentCandidates(
       {
         models: catalogModels,
@@ -108,6 +108,19 @@ describe("codexSpawnAgentCandidates", () => {
       "qwen3.6",
       "deepseek-v4-flash",
     ]);
+    expect(result.missingPriorityModels).toEqual([]);
+  });
+
+  it("显式传入重点模型时仍可计算推荐模型缺口", () => {
+    const result = validateSpawnAgentCandidates(
+      {
+        models: catalogModels,
+        spawnAgentModels: ["qwen3.6", "deepseek-v4-flash"],
+      },
+      ["gpt-5.4", "gpt-5.4-mini", "gpt-5.5"],
+      ["qwen3.6", "deepseek-v4-flash", "deepseek-v4-pro"],
+    );
+
     expect(result.missingPriorityModels).toEqual([
       "qwen3.6",
       "deepseek-v4-flash",

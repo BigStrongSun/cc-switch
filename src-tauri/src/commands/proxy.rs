@@ -13,6 +13,7 @@ use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats};
 use crate::store::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::process::Command;
@@ -487,20 +488,11 @@ pub async fn diagnose_codex_multirouter(
     checks.push(codex_check(
         "codex_spawn_agent_model_overrides",
         "Codex spawn_agent model overrides",
-        if live_config.spawn_agent_missing_priority_models.is_empty() {
-            CodexDiagnosticStatus::Pass
-        } else {
-            CodexDiagnosticStatus::Warn
-        },
-        if live_config.spawn_agent_missing_priority_models.is_empty() {
-            "Priority routed models are inside the first five picker-visible models used by Codex spawn_agent tool descriptions.".to_string()
-        } else {
-            format!(
-                "Codex 0.137.0 only describes the first {} picker-visible models in spawn_agent. Regenerate the CCSwitchMulti catalog so these models move into that window: {}.",
-                live_config.spawn_agent_visible_model_limit,
-                live_config.spawn_agent_missing_priority_models.join(", ")
-            )
-        },
+        CodexDiagnosticStatus::Pass,
+        format!(
+            "Codex spawn_agent 只展示前 {} 个 picker-visible 模型；当前以用户保存的子 Agent 候选排序为准，不再强制要求未选择的推荐模型进入前五。",
+            live_config.spawn_agent_visible_model_limit
+        ),
         vec![
             format!(
                 "spawn_agent_visible_model_limit={}",
@@ -942,8 +934,6 @@ fn resolve_codex_catalog_path(config_path: &Path, catalog: &str) -> PathBuf {
 }
 
 const CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT: usize = 5;
-const CODEX_SPAWN_AGENT_PRIORITY_MODELS: &[&str] =
-    &["qwen3.6", "deepseek-v4-flash", "deepseek-v4-pro"];
 
 /// 读取生成 catalog 的模型顺序；Codex spawn_agent 工具说明会按该顺序截取前 5 个。
 fn read_codex_catalog_model_slugs(path: &Path) -> Option<Vec<String>> {
@@ -961,25 +951,10 @@ fn read_codex_catalog_model_slugs(path: &Path) -> Option<Vec<String>> {
         })
 }
 
-/// 找出已经写入 catalog、但会被 Codex spawn_agent 前 5 展示限制截掉的重点路由模型。
+/// 保留旧字段兼容前端类型；用户显式配置候选排序后，不再强制要求推荐模型进入前 5。
 fn missing_spawn_agent_priority_models(models: Option<&[String]>) -> Vec<String> {
-    let Some(models) = models else {
-        return Vec::new();
-    };
-    let visible_models = models
-        .iter()
-        .take(CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT)
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-
-    CODEX_SPAWN_AGENT_PRIORITY_MODELS
-        .iter()
-        .filter(|model| {
-            models.iter().any(|candidate| candidate == **model)
-                && !visible_models.iter().any(|candidate| candidate == *model)
-        })
-        .map(|model| (*model).to_string())
-        .collect()
+    let _ = models;
+    Vec::new()
 }
 
 /// 查询 Codex Desktop/app-server 运行态，并与 catalog 写入时间做保守对比。
@@ -1425,11 +1400,7 @@ fn codex_router_log_diagnostics_from_text_at(
         .iter()
         .find(|event| codex_router_log_is_request_event(event))
         .map(|event| event.timestamp.clone());
-    let latest_error = recent_events
-        .iter()
-        .filter(|event| codex_router_log_event_is_recent(event, now, recent_window))
-        .find(|event| event.event.contains("error"))
-        .and_then(|event| event.error.clone().or_else(|| Some(event.line.clone())));
+    let latest_error = latest_unresolved_router_error(&recent_events, now, recent_window);
     let has_recent_request = recent_events
         .iter()
         .filter(|event| codex_router_log_event_is_recent(event, now, recent_window))
@@ -1491,6 +1462,65 @@ fn codex_router_log_event_is_recent(
     };
     let age = now.signed_duration_since(timestamp);
     age >= chrono::Duration::zero() && age <= window
+}
+
+/// 找出最近窗口里仍未被后续成功事件覆盖的 router 错误。
+fn latest_unresolved_router_error(
+    events_newest_first: &[CodexRouterLogEvent],
+    now: chrono::NaiveDateTime,
+    window: chrono::Duration,
+) -> Option<String> {
+    let mut recovered_keys = HashSet::new();
+    for event in events_newest_first
+        .iter()
+        .filter(|event| codex_router_log_event_is_recent(event, now, window))
+    {
+        if codex_router_log_event_is_success(event) {
+            if let Some(key) = codex_router_log_recovery_key(event) {
+                recovered_keys.insert(key);
+            }
+            continue;
+        }
+
+        if !event.event.contains("error") {
+            continue;
+        }
+
+        let key = codex_router_log_recovery_key(event);
+        if key.as_ref().is_some_and(|key| recovered_keys.contains(key)) {
+            continue;
+        }
+
+        return event.error.clone().or_else(|| Some(event.line.clone()));
+    }
+    None
+}
+
+/// 判断日志事件是否代表该 route/provider/model 已恢复成功。
+fn codex_router_log_event_is_success(event: &CodexRouterLogEvent) -> bool {
+    if event.event == "response_ready" {
+        return true;
+    }
+    if event.event != "upstream_status" {
+        return false;
+    }
+    event
+        .status
+        .as_deref()
+        .and_then(|status| status.parse::<u16>().ok())
+        .is_some_and(|status| (200..400).contains(&status))
+}
+
+/// 用 provider/route/model 生成恢复匹配键，避免旧上游错误污染当前健康 route。
+fn codex_router_log_recovery_key(event: &CodexRouterLogEvent) -> Option<String> {
+    let provider = event
+        .effective_provider
+        .as_deref()
+        .or(event.provider.as_deref())
+        .or(event.outer_provider.as_deref())?;
+    let model = event.model.as_deref().unwrap_or("*");
+    let route = event.route_id.as_deref().unwrap_or("*");
+    Some(format!("{provider}|{route}|{model}"))
 }
 
 /// 解析一行 `codex-router.log`，字段均为已清洗的 key=value 片段。
@@ -1601,7 +1631,37 @@ mod codex_router_log_diagnostics_tests {
     }
 
     #[test]
-    fn spawn_agent_priority_diagnostics_warn_when_deepseek_is_after_first_five() {
+    fn recovered_router_errors_do_not_block_current_diagnostics() {
+        let text = concat!(
+            "2026-06-13 00:20:00.000 event=route_resolved trace=a model=gpt-5.5 outer_provider=codex-openai-router effective_provider=codex-openai-router::route::openai-official route_id=openai-official routing_configured=true\n",
+            "2026-06-13 00:20:01.000 event=upstream_error trace=a model=gpt-5.5 provider=codex-openai-router::route::openai-official effective_provider=codex-openai-router::route::openai-official status=502 error=error_sending_request_for_url_(https://chatgpt.com/backend-api/codex/responses)\n",
+            "2026-06-13 00:20:02.000 event=route_resolved trace=b model=gpt-5.5 outer_provider=codex-openai-router effective_provider=codex-openai-router::route::openai-official route_id=openai-official routing_configured=true\n",
+            "2026-06-13 00:20:03.000 event=response_ready trace=b model=gpt-5.5 provider=codex-openai-router::route::openai-official effective_provider=codex-openai-router::route::openai-official status=200\n",
+            "2026-06-13 00:20:04.000 event=route_resolved trace=c model=qwen3.6 outer_provider=codex-openai-router effective_provider=codex-openai-router::route::qwen-local route_id=qwen-local routing_configured=true\n",
+            "2026-06-13 00:20:05.000 event=upstream_error trace=c model=qwen3.6 provider=codex-openai-router::route::qwen-local effective_provider=codex-openai-router::route::qwen-local status=521 body_summary=qwen_gateway_error\n",
+        );
+        let now = chrono::NaiveDateTime::parse_from_str(
+            "2026-06-13 00:24:36.000",
+            "%Y-%m-%d %H:%M:%S%.f",
+        )
+        .expect("valid test time");
+
+        let diagnostics = codex_router_log_diagnostics_from_text_at(
+            "codex-router.log".to_string(),
+            true,
+            text,
+            Some("codex-openai-router"),
+            now,
+        );
+
+        assert_eq!(
+            diagnostics.latest_error.as_deref(),
+            Some("qwen_gateway_error")
+        );
+    }
+
+    #[test]
+    fn spawn_agent_priority_diagnostics_ignores_unselected_recommended_models() {
         let models = vec![
             "gpt-5.5".to_string(),
             "gpt-5.4".to_string(),
@@ -1612,10 +1672,7 @@ mod codex_router_log_diagnostics_tests {
             "deepseek-v4-pro".to_string(),
         ];
 
-        assert_eq!(
-            missing_spawn_agent_priority_models(Some(&models)),
-            vec!["deepseek-v4-flash", "deepseek-v4-pro"]
-        );
+        assert!(missing_spawn_agent_priority_models(Some(&models)).is_empty());
     }
 
     #[test]

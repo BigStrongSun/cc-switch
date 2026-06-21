@@ -18,13 +18,24 @@ fn write_skill(dir: &std::path::Path, name: &str) {
 }
 
 #[cfg(unix)]
-fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) {
+fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) -> bool {
     std::os::unix::fs::symlink(src, dest).expect("create symlink");
+    true
 }
 
 #[cfg(windows)]
-fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) {
-    std::os::windows::fs::symlink_dir(src, dest).expect("create symlink");
+fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) -> bool {
+    match std::os::windows::fs::symlink_dir(src, dest) {
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!(
+                "skip symlink-only assertion because Windows denied symlink creation: {} -> {} ({err})",
+                src.display(),
+                dest.display()
+            );
+            false
+        }
+    }
 }
 
 #[test]
@@ -133,8 +144,11 @@ fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
 
     let opencode_skills_dir = home.join(".config").join("opencode").join("skills");
     fs::create_dir_all(&opencode_skills_dir).expect("create opencode skills dir");
-    symlink_dir(&disabled_skill, &opencode_skills_dir.join("disabled-skill"));
-    symlink_dir(&orphan_skill, &opencode_skills_dir.join("orphan-skill"));
+    let disabled_linked = symlink_dir(&disabled_skill, &opencode_skills_dir.join("disabled-skill"));
+    let orphan_linked = symlink_dir(&orphan_skill, &opencode_skills_dir.join("orphan-skill"));
+    if !disabled_linked {
+        write_skill(&opencode_skills_dir.join("disabled-skill"), "Disabled");
+    }
 
     let state = create_test_state().expect("create test state");
     state
@@ -161,10 +175,12 @@ fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
         !opencode_skills_dir.join("disabled-skill").exists(),
         "DB-known disabled skill should be removed from OpenCode live dir"
     );
-    assert!(
-        !opencode_skills_dir.join("orphan-skill").exists(),
-        "orphaned symlink into SSOT should be cleaned up"
-    );
+    if orphan_linked {
+        assert!(
+            !opencode_skills_dir.join("orphan-skill").exists(),
+            "orphaned symlink into SSOT should be cleaned up"
+        );
+    }
 }
 
 #[test]

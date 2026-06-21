@@ -2489,13 +2489,13 @@ function SpawnAgentCandidatesPanel({
           .map((model) => model.model?.trim())
           .filter((model): model is string => Boolean(model))
           .slice(0, spawnAgentVisibleLimit),
-    CODEX_SPAWN_AGENT_PRIORITY_MODELS,
+    [],
     spawnAgentVisibleLimit,
   );
   const actualCandidateValidation = validateSpawnAgentCandidates(
     candidateCatalog,
     diagnostics?.liveConfig.modelCatalogFirstModels ?? [],
-    CODEX_SPAWN_AGENT_PRIORITY_MODELS,
+    [],
     spawnAgentVisibleLimit,
   );
   const candidateSourceModels = {
@@ -2619,7 +2619,7 @@ function SpawnAgentCandidatesPanel({
       const actual = validateSpawnAgentCandidates(
         candidateCatalog,
         result.liveConfig.modelCatalogFirstModels ?? [],
-        CODEX_SPAWN_AGENT_PRIORITY_MODELS,
+        [],
         result.liveConfig.spawnAgentVisibleModelLimit ?? spawnAgentVisibleLimit,
       );
       const missing = [
@@ -2859,15 +2859,15 @@ function SpawnAgentCandidatesPanel({
         <Badge
           className={cn(
             "border",
-            localCandidateValidation.missingPriorityModels.length === 0
+            localCandidateValidation.missingSelectedModels.length === 0
               ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
               : "border-amber-500/40 bg-amber-500/10 text-amber-100",
           )}
         >
           本地检查:{" "}
-          {localCandidateValidation.missingPriorityModels.length === 0
-            ? "重点已覆盖"
-            : `缺 ${localCandidateValidation.missingPriorityModels.length} 个重点`}
+          {localCandidateValidation.missingSelectedModels.length === 0
+            ? "已选已覆盖"
+            : `缺 ${localCandidateValidation.missingSelectedModels.length} 个已选`}
         </Badge>
       </div>
 
@@ -3553,6 +3553,10 @@ function DiagnosticsPanel({
     diagnostics?.checks.filter((check) => check.status === "fail") ?? [];
   const warningChecks =
     diagnostics?.checks.filter((check) => check.status === "warn") ?? [];
+  const visibleCheckCards =
+    diagnostics?.checks.filter(
+      (check) => check.status !== "fail" && check.status !== "warn",
+    ) ?? [];
 
   return (
     <div className="rounded-lg border border-amber-600/40 bg-amber-950/10 p-4">
@@ -3642,15 +3646,8 @@ function DiagnosticsPanel({
             </div>
           )}
 
-          {diagnostics.desktopRuntime?.mayHaveStaleModelCatalog && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
-              {diagnostics.desktopRuntime.staleReason ??
-                "Codex app-server may still be using an older in-memory model catalog. Fully quit Codex Desktop/app-server, reopen Codex, and then check the model picker again."}
-            </div>
-          )}
-
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {diagnostics.checks.map((check) => (
+            {visibleCheckCards.map((check) => (
               <DiagnosticCheckCard key={check.id} check={check} />
             ))}
           </div>

@@ -144,6 +144,15 @@ def parse_sqlite_home(config_text: str) -> Path | None:
     return None
 
 
+def parse_sqlite_home_env() -> Path | None:
+    """读取 CODEX_SQLITE_HOME，用于兼容 Codex 把 SQLite 迁到配置外目录的场景。"""
+
+    raw = os.environ.get("CODEX_SQLITE_HOME", "").strip()
+    if not raw:
+        return None
+    return resolve_user_path(raw)
+
+
 def resolve_active_state_db(
     codex_home: Path,
     config_text: str,
@@ -164,6 +173,10 @@ def resolve_active_state_db(
     sqlite_home = parse_sqlite_home(config_text)
     if sqlite_home is not None and (sqlite_home / "state_5.sqlite").exists():
         return ActiveStateDb(sqlite_home / "state_5.sqlite", "configured_sqlite_home")
+    if sqlite_home is None:
+        env_sqlite_home = parse_sqlite_home_env()
+        if env_sqlite_home is not None and (env_sqlite_home / "state_5.sqlite").exists():
+            return ActiveStateDb(env_sqlite_home / "state_5.sqlite", "env_sqlite_home")
 
     legacy = codex_home / "state_5.sqlite"
     if legacy.exists():
