@@ -15,6 +15,7 @@ use std::time::Duration;
 pub struct FetchedModel {
     pub id: String,
     pub owned_by: Option<String>,
+    pub context_window: Option<u64>,
 }
 
 /// OpenAI 兼容的 /v1/models 响应格式
@@ -27,6 +28,8 @@ struct ModelsResponse {
 struct ModelEntry {
     id: String,
     owned_by: Option<String>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
 const FETCH_TIMEOUT_SECS: u64 = 15;
@@ -97,6 +100,7 @@ pub async fn fetch_models(
                 .unwrap_or_default()
                 .into_iter()
                 .map(|m| FetchedModel {
+                    context_window: extract_context_window(&m.extra),
                     id: m.id,
                     owned_by: m.owned_by,
                 })
@@ -131,6 +135,36 @@ pub async fn fetch_models(
 /// 3. 版本段非 `/v1`（如 `/v4`）时再追加 `/v1/models` 作为兜底次候选
 /// 4. 若 baseURL 命中 [`KNOWN_COMPAT_SUFFIXES`]，剥离后缀再拼 `/v1/models`、`/models`
 ///
+/// 从不同供应商的 `/models` 条目中提取上下文窗口。
+///
+/// OpenAI-compatible 聚合器没有统一字段名，这里只接受明确的正整数，
+/// 避免把价格、限流等其它数值误当作 context window。
+fn extract_context_window(obj: &serde_json::Map<String, serde_json::Value>) -> Option<u64> {
+    const KEYS: &[&str] = &[
+        "context_window",
+        "max_context_window",
+        "contextWindow",
+        "maxContextWindow",
+    ];
+
+    KEYS.iter()
+        .filter_map(|key| obj.get(*key))
+        .find_map(parse_positive_u64)
+}
+
+/// 将 JSON 数字或纯数字字符串解析为正整数。
+///
+/// 浮点数、负数、空字符串和带单位的文本都会被忽略，调用方保留原有兜底逻辑。
+fn parse_positive_u64(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_u64().filter(|v| *v > 0),
+        serde_json::Value::String(text) => {
+            text.trim().parse::<u64>().ok().filter(|value| *value > 0)
+        }
+        _ => None,
+    }
+}
+
 /// 结果已去重且保持首次出现顺序。
 pub fn build_models_url_candidates(
     base_url: &str,
@@ -466,6 +500,26 @@ mod tests {
         let data = resp.data.unwrap();
         assert_eq!(data[0].id, "my-model");
         assert!(data[0].owned_by.is_none());
+    }
+
+    #[test]
+    fn test_parse_response_extracts_context_window() {
+        let json = r#"{"object":"list","data":[{"id":"model-a","context_window":262144},{"id":"model-b","maxContextWindow":"1000000"},{"id":"model-c","contextWindow":"128000 tokens"}]}"#;
+        let resp: ModelsResponse = serde_json::from_str(json).unwrap();
+        let data = resp
+            .data
+            .unwrap()
+            .into_iter()
+            .map(|entry| FetchedModel {
+                context_window: extract_context_window(&entry.extra),
+                id: entry.id,
+                owned_by: entry.owned_by,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(data[0].context_window, Some(262_144));
+        assert_eq!(data[1].context_window, Some(1_000_000));
+        assert_eq!(data[2].context_window, None);
     }
 
     #[test]

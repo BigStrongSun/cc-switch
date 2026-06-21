@@ -72,6 +72,7 @@ fn parse_models(value: Value) -> Vec<FetchedModel> {
 fn push_model_entry(models: &mut Vec<FetchedModel>, entry: &Value, fallback_id: Option<&str>) {
     if let Some(id) = entry.as_str().map(str::trim).filter(|id| !id.is_empty()) {
         models.push(FetchedModel {
+            context_window: None,
             id: id.to_string(),
             owned_by: Some("Codex".to_string()),
         });
@@ -81,6 +82,7 @@ fn push_model_entry(models: &mut Vec<FetchedModel>, entry: &Value, fallback_id: 
     let Some(obj) = entry.as_object() else {
         if let Some(id) = fallback_id.map(str::trim).filter(|id| !id.is_empty()) {
             models.push(FetchedModel {
+                context_window: None,
                 id: id.to_string(),
                 owned_by: Some("Codex".to_string()),
             });
@@ -104,7 +106,13 @@ fn push_model_entry(models: &mut Vec<FetchedModel>, entry: &Value, fallback_id: 
     )
     .or_else(|| Some("Codex".to_string()));
 
-    models.push(FetchedModel { id, owned_by });
+    let context_window = extract_context_window(obj);
+
+    models.push(FetchedModel {
+        context_window,
+        id,
+        owned_by,
+    });
 }
 
 fn string_field(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
@@ -114,6 +122,33 @@ fn string_field(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<S
         .map(str::trim)
         .find(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+/// 从 Codex OAuth 模型条目中提取上下文窗口。
+///
+/// 官方接口字段可能随客户端版本变化，只有明确的正整数才会被接受。
+fn extract_context_window(obj: &serde_json::Map<String, Value>) -> Option<u64> {
+    const KEYS: &[&str] = &[
+        "context_window",
+        "max_context_window",
+        "contextWindow",
+        "maxContextWindow",
+    ];
+
+    KEYS.iter()
+        .filter_map(|key| obj.get(*key))
+        .find_map(parse_positive_u64)
+}
+
+/// 将 JSON 数字或纯数字字符串转换为正整数。
+///
+/// 带单位的文本会保留为未知值，让前端继续使用用户填写或默认兜底。
+fn parse_positive_u64(value: &Value) -> Option<u64> {
+    match value {
+        Value::Number(number) => number.as_u64().filter(|v| *v > 0),
+        Value::String(text) => text.trim().parse::<u64>().ok().filter(|value| *value > 0),
+        _ => None,
+    }
 }
 
 fn truncate_body(body: String) -> String {
@@ -188,5 +223,20 @@ mod tests {
             models.into_iter().map(|model| model.id).collect::<Vec<_>>(),
             vec!["gpt-5.4".to_string(), "gpt-5.5".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_codex_oauth_models_extracts_context_window() {
+        let models = parse_models(json!({
+            "models": [
+                { "slug": "gpt-5.4", "context_window": 272000 },
+                { "slug": "gpt-5.5", "maxContextWindow": "1000000" },
+                { "slug": "bad", "contextWindow": "128000 tokens" }
+            ]
+        }));
+
+        assert_eq!(models[0].context_window, None);
+        assert_eq!(models[1].context_window, Some(272_000));
+        assert_eq!(models[2].context_window, Some(1_000_000));
     }
 }

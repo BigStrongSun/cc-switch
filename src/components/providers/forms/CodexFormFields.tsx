@@ -435,6 +435,23 @@ export function CodexFormFields({
     [],
   );
 
+  const handleSelectFetchedCatalogModel = useCallback(
+    (index: number, modelId: string, currentDisplayName?: string) => {
+      const fetched = fetchedModels.find((model) => model.id === modelId);
+      const contextWindow =
+        typeof fetched?.contextWindow === "number" && fetched.contextWindow > 0
+          ? String(fetched.contextWindow)
+          : undefined;
+
+      handleUpdateCatalogRow(index, {
+        model: modelId,
+        displayName: currentDisplayName?.trim() ? currentDisplayName : modelId,
+        ...(contextWindow ? { contextWindow } : {}),
+      });
+    },
+    [fetchedModels, handleUpdateCatalogRow],
+  );
+
   const handleRemoveCatalogRow = useCallback((index: number) => {
     setCatalogRows((current) => current.filter((_, i) => i !== index));
   }, []);
@@ -1365,12 +1382,11 @@ export function CodexFormFields({
                             <ModelDropdown
                               models={fetchedModels}
                               onSelect={(id) =>
-                                handleUpdateCatalogRow(index, {
-                                  model: id,
-                                  displayName: row.displayName?.trim()
-                                    ? row.displayName
-                                    : id,
-                                })
+                                handleSelectFetchedCatalogModel(
+                                  index,
+                                  id,
+                                  row.displayName,
+                                )
                               }
                             />
                           )}

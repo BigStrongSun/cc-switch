@@ -1142,6 +1142,7 @@ fn external_provider_model_entries(
     profile: &ExternalOpenAiApiProfile,
 ) -> Vec<Value> {
     let mut ids = Vec::new();
+    let mut entries = Vec::new();
     if profile.app_type.as_deref() == Some(AppType::Codex.as_str())
         && is_codex_official_managed_oauth_provider(provider)
     {
@@ -1154,11 +1155,11 @@ fn external_provider_model_entries(
         &mut ids,
         provider.settings_config.pointer("/modelCatalog/models"),
     );
-    collect_model_objects(&mut ids, provider.settings_config.get("models"));
-    collect_model_objects(&mut ids, provider.settings_config.get("modelList"));
-    collect_model_objects(&mut ids, provider.settings_config.get("modelCatalog"));
+    collect_model_objects(&mut entries, provider.settings_config.get("models"));
+    collect_model_objects(&mut entries, provider.settings_config.get("modelList"));
+    collect_model_objects(&mut entries, provider.settings_config.get("modelCatalog"));
     collect_model_objects(
-        &mut ids,
+        &mut entries,
         provider.settings_config.pointer("/modelCatalog/models"),
     );
     if let Some(model) = provider
@@ -1174,10 +1175,12 @@ fn external_provider_model_entries(
     }
     ids.sort();
     ids.dedup();
-    ids.into_iter()
-        .filter(|id| !id.trim().is_empty())
-        .map(|id| openai_model_entry(&id, "cc-switch"))
-        .collect()
+    entries.extend(
+        ids.into_iter()
+            .filter(|id| !id.trim().is_empty())
+            .map(|id| openai_model_entry(&id, "cc-switch")),
+    );
+    dedup_openai_model_entries(entries)
 }
 
 /// 从 Codex router route 中提取可展示模型。
@@ -1250,16 +1253,17 @@ fn collect_string_array(ids: &mut Vec<String>, value: Option<&Value>) {
 }
 
 /// 收集对象数组里的模型 id。
-fn collect_model_objects(ids: &mut Vec<String>, value: Option<&Value>) {
+fn collect_model_objects(entries: &mut Vec<Value>, value: Option<&Value>) {
     if let Some(values) = value.and_then(|value| value.as_array()) {
         for value in values {
             if let Some(id) = value
                 .get("id")
                 .or_else(|| value.get("model"))
+                .or_else(|| value.get("slug"))
                 .or_else(|| value.get("name"))
                 .and_then(|value| value.as_str())
             {
-                ids.push(id.to_string());
+                entries.push(openai_model_entry_with_source(id, "cc-switch", value));
             }
         }
     }
@@ -1273,6 +1277,61 @@ fn openai_model_entry(id: &str, owner: &str) -> Value {
         "created": 0,
         "owned_by": owner
     })
+}
+
+/// 根据 catalog/source 对象构造 OpenAI model entry，透传明确的上下文窗口字段。
+fn openai_model_entry_with_source(id: &str, owner: &str, source: &Value) -> Value {
+    let mut entry = openai_model_entry(id, owner);
+    if let Some(context_window) = extract_model_context_window(source) {
+        if let Some(object) = entry.as_object_mut() {
+            object.insert("context_window".to_string(), json!(context_window));
+            object.insert("max_context_window".to_string(), json!(context_window));
+        }
+    }
+    entry
+}
+
+/// 从 model catalog 条目中读取正整数上下文窗口，兼容 snake_case 与 camelCase。
+fn extract_model_context_window(value: &Value) -> Option<u64> {
+    const KEYS: &[&str] = &[
+        "context_window",
+        "max_context_window",
+        "contextWindow",
+        "maxContextWindow",
+    ];
+
+    KEYS.iter()
+        .filter_map(|key| value.get(*key))
+        .find_map(parse_positive_model_u64)
+}
+
+/// 只接受 JSON 数字或纯数字字符串，避免把单位文本误导出给第三方 API。
+fn parse_positive_model_u64(value: &Value) -> Option<u64> {
+    match value {
+        Value::Number(number) => number.as_u64().filter(|number| *number > 0),
+        Value::String(text) => text.trim().parse::<u64>().ok().filter(|number| *number > 0),
+        _ => None,
+    }
+}
+
+/// 按模型 id 去重；对象来源先进入列表，因此能优先保留 context 字段。
+fn dedup_openai_model_entries(entries: Vec<Value>) -> Vec<Value> {
+    let mut seen = std::collections::HashSet::new();
+    let mut deduped = entries
+        .into_iter()
+        .filter(|entry| {
+            let Some(id) = entry.get("id").and_then(|value| value.as_str()) else {
+                return false;
+            };
+            seen.insert(id.to_string())
+        })
+        .collect::<Vec<_>>();
+    deduped.sort_by(|a, b| {
+        let a_id = a.get("id").and_then(|value| value.as_str()).unwrap_or("");
+        let b_id = b.get("id").and_then(|value| value.as_str()).unwrap_or("");
+        a_id.cmp(b_id)
+    });
+    deduped
 }
 
 /// 从其他 app provider 构造本次请求专用的 OpenAI wire provider。
@@ -3851,7 +3910,7 @@ data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\"}}\n
                     "defaultModel": "gpt-5.4-mini",
                     "modelCatalog": {
                         "models": [
-                            { "model": "gpt-5.5" },
+                            { "model": "gpt-5.5", "contextWindow": 272000 },
                             { "model": "gpt-5.4" },
                             { "model": "gpt-5.4-mini" },
                             { "model": "gpt-5.3-codex-spark" }
@@ -3891,6 +3950,23 @@ data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\"}}\n
         assert!(ids.contains(&"gpt-5.4"));
         assert!(ids.contains(&"gpt-5.4-mini"));
         assert!(ids.contains(&"gpt-5.3-codex-spark"));
+
+        let gpt55 = response["data"]
+            .as_array()
+            .expect("data array")
+            .iter()
+            .find(|model| model.get("id").and_then(|id| id.as_str()) == Some("gpt-5.5"))
+            .expect("gpt-5.5 model entry");
+        assert_eq!(
+            gpt55.get("context_window").and_then(|value| value.as_u64()),
+            Some(272_000)
+        );
+        assert_eq!(
+            gpt55
+                .get("max_context_window")
+                .and_then(|value| value.as_u64()),
+            Some(272_000)
+        );
     }
 
     #[test]
