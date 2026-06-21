@@ -418,6 +418,9 @@ fn apply_reasoning_options(
     if !supports_thinking && thinking_param == "enable_thinking" {
         result["enable_thinking"] = json!(false);
     }
+    if !supports_thinking && thinking_param == "chat_template_kwargs.enable_thinking" {
+        set_chat_template_enable_thinking(result, false);
+    }
 
     let Some(reasoning_enabled) = reasoning_requested(body) else {
         return;
@@ -432,6 +435,9 @@ fn apply_reasoning_options(
             }
             "enable_thinking" => {
                 result["enable_thinking"] = json!(reasoning_enabled);
+            }
+            "chat_template_kwargs.enable_thinking" => {
+                set_chat_template_enable_thinking(result, reasoning_enabled);
             }
             "reasoning_split" => {
                 result["reasoning_split"] = json!(reasoning_enabled);
@@ -487,6 +493,17 @@ fn apply_reasoning_options(
         }
         _ => {}
     }
+}
+
+/// 写入 vLLM/HF chat template 常用的嵌套 thinking 开关，同时保留已有 kwargs。
+fn set_chat_template_enable_thinking(result: &mut Value, enabled: bool) {
+    if !result
+        .get("chat_template_kwargs")
+        .is_some_and(|value| value.is_object())
+    {
+        result["chat_template_kwargs"] = json!({});
+    }
+    result["chat_template_kwargs"]["enable_thinking"] = json!(enabled);
 }
 
 fn reasoning_requested(body: &Value) -> Option<bool> {
@@ -2494,6 +2511,80 @@ mod tests {
         let result = responses_to_chat_completions_with_reasoning(input, Some(&config)).unwrap();
 
         assert_eq!(result["enable_thinking"], true);
+        assert!(result.get("reasoning_effort").is_none());
+    }
+
+    /// 验证 vLLM/HF chat template 形态的 thinking 开关写入嵌套 kwargs，而不是顶层字段。
+    #[test]
+    fn responses_request_to_chat_maps_chat_template_enable_thinking_provider() {
+        let input = json!({
+            "model": "qwen3-max",
+            "input": "hello",
+            "reasoning": {"effort": "medium"}
+        });
+        let config = CodexChatReasoningConfig {
+            supports_thinking: Some(true),
+            supports_effort: Some(false),
+            thinking_param: Some("chat_template_kwargs.enable_thinking".to_string()),
+            effort_param: Some("none".to_string()),
+            effort_value_mode: None,
+            min_output_tokens: None,
+            output_format: Some("reasoning_content".to_string()),
+        };
+
+        let result = responses_to_chat_completions_with_reasoning(input, Some(&config)).unwrap();
+
+        assert_eq!(result["chat_template_kwargs"]["enable_thinking"], true);
+        assert!(result.get("enable_thinking").is_none());
+        assert!(result.get("reasoning_effort").is_none());
+    }
+
+    /// 验证显式关闭推理时，嵌套 chat template 参数也能关闭上游默认 thinking。
+    #[test]
+    fn responses_request_to_chat_disables_chat_template_enable_thinking_provider() {
+        let input = json!({
+            "model": "qwen3-max",
+            "input": "hello",
+            "reasoning": {"effort": "none"}
+        });
+        let config = CodexChatReasoningConfig {
+            supports_thinking: Some(true),
+            supports_effort: Some(false),
+            thinking_param: Some("chat_template_kwargs.enable_thinking".to_string()),
+            effort_param: Some("none".to_string()),
+            effort_value_mode: None,
+            min_output_tokens: None,
+            output_format: Some("reasoning_content".to_string()),
+        };
+
+        let result = responses_to_chat_completions_with_reasoning(input, Some(&config)).unwrap();
+
+        assert_eq!(result["chat_template_kwargs"]["enable_thinking"], false);
+        assert!(result.get("enable_thinking").is_none());
+        assert!(result.get("reasoning_effort").is_none());
+    }
+
+    /// 验证 provider 明确不支持 thinking 时仍写入嵌套 false，避免上游模板默认开启思考。
+    #[test]
+    fn responses_request_to_chat_forces_chat_template_thinking_off_when_unsupported() {
+        let input = json!({
+            "model": "qwen3-max",
+            "input": "hello"
+        });
+        let config = CodexChatReasoningConfig {
+            supports_thinking: Some(false),
+            supports_effort: Some(false),
+            thinking_param: Some("chat_template_kwargs.enable_thinking".to_string()),
+            effort_param: Some("none".to_string()),
+            effort_value_mode: None,
+            min_output_tokens: None,
+            output_format: Some("reasoning_content".to_string()),
+        };
+
+        let result = responses_to_chat_completions_with_reasoning(input, Some(&config)).unwrap();
+
+        assert_eq!(result["chat_template_kwargs"]["enable_thinking"], false);
+        assert!(result.get("enable_thinking").is_none());
         assert!(result.get("reasoning_effort").is_none());
     }
 
