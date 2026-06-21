@@ -159,6 +159,13 @@ type RouteCandidate = {
   matchPrefixes: string[];
 };
 
+type MultiRouterSettingsDraft = {
+  name: string;
+  notes?: string;
+  enabled: boolean;
+  defaultRouteId?: string;
+};
+
 type CodexCatalogModelDraft = {
   model: string;
   displayName?: string;
@@ -601,6 +608,40 @@ export function createDraftRoutingPlan(
   };
 }
 
+/// MultiRouter 设置页只允许修改方案元信息和入口开关；路由规则、模型目录和本地代理接管配置都继续由工作台自动维护。
+export function applyMultiRouterSettingsDraft(
+  plan: Provider,
+  draft: MultiRouterSettingsDraft,
+): Provider {
+  const currentRouting = readCodexRouting(plan) ?? {};
+  const nextRouting: CodexRouting = {
+    ...currentRouting,
+    enabled: draft.enabled,
+    routes: currentRouting.routes ?? [],
+  };
+  const defaultRouteId = draft.defaultRouteId?.trim();
+  if (
+    defaultRouteId &&
+    (nextRouting.routes ?? []).some((route) => route.id === defaultRouteId)
+  ) {
+    nextRouting.defaultRouteId = defaultRouteId;
+  } else {
+    delete nextRouting.defaultRouteId;
+  }
+
+  return {
+    ...plan,
+    name: draft.name.trim() || plan.name,
+    notes: draft.notes?.trim() || undefined,
+    settingsConfig: {
+      ...plan.settingsConfig,
+      auth: plan.settingsConfig?.auth ?? {},
+      config: plan.settingsConfig?.config ?? null,
+      codexRouting: nextRouting,
+    },
+  };
+}
+
 /// 提取 route 的上游地址；引用真实 Provider 时展示目标 Provider 的配置。
 function routeBaseUrl(
   route: CodexRoute,
@@ -946,11 +987,13 @@ export function CodexRouterWorkspacePage({
   const [testModel, setTestModel] = useState("");
   const [testResult, setTestResult] = useState<string | null>(null);
   const [isRoutePickerOpen, setIsRoutePickerOpen] = useState(false);
+  const [isPlanSettingsOpen, setIsPlanSettingsOpen] = useState(false);
   const [routePickerMessage, setRoutePickerMessage] = useState<string | null>(
     null,
   );
   const [routePickerError, setRoutePickerError] = useState<string | null>(null);
   const [isSavingRoutes, setIsSavingRoutes] = useState(false);
+  const [isSavingPlanSettings, setIsSavingPlanSettings] = useState(false);
   const [routePickerSelectAll, setRoutePickerSelectAll] = useState(false);
   const [optimisticRoutingPlan, setOptimisticRoutingPlan] =
     useState<Provider | null>(null);
@@ -1059,9 +1102,57 @@ export function CodexRouterWorkspacePage({
     }
   }
 
-  /// 编辑路由方案会进入现有 Provider 编辑表单；该表单里可以增删改具体 route。
+  /// MultiRouter 方案只打开工作台专用设置；普通模型源仍进入通用 Provider 表单。
   function handleEditPlan(provider: Provider) {
+    if (isRoutingPlan(provider)) {
+      setSelectedPlanId(provider.id);
+      setActiveTab("routes");
+      setRoutePickerError(null);
+      setRoutePickerMessage(null);
+      setIsPlanSettingsOpen(true);
+      return;
+    }
     onEditProvider(provider);
+  }
+
+  /// 保存 MultiRouter 方案元信息时不触碰 routes/modelCatalog，避免普通 Provider 表单误清空路由私有字段。
+  async function handleSavePlanSettings(
+    plan: Provider,
+    draft: MultiRouterSettingsDraft,
+  ) {
+    const nextProvider = applyMultiRouterSettingsDraft(plan, draft);
+    setIsSavingPlanSettings(true);
+    setRoutePickerError(null);
+    setRoutePickerMessage(null);
+    try {
+      await providersApi.update(nextProvider, "codex");
+      queryClient.setQueryData(["providers", "codex"], (current: any) =>
+        current?.providers
+          ? {
+              ...current,
+              providers: {
+                ...current.providers,
+                [nextProvider.id]: nextProvider,
+              },
+            }
+          : current,
+      );
+      await queryClient.invalidateQueries({ queryKey: ["providers", "codex"] });
+      await queryClient.refetchQueries({
+        queryKey: ["providers", "codex"],
+        type: "active",
+      });
+      setOptimisticRoutingPlan(nextProvider);
+      setSelectedPlanId(nextProvider.id);
+      setIsPlanSettingsOpen(false);
+      setRoutePickerMessage("多路路由设置已保存，接管配置由系统继续自动维护。");
+    } catch (error) {
+      setRoutePickerError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setIsSavingPlanSettings(false);
+    }
   }
 
   /// 路由规则编辑只更新 codexRouting.routes，不再进入通用 Provider 表单，避免“添加 router”卡死路径。
@@ -1275,6 +1366,10 @@ export function CodexRouterWorkspacePage({
               providersById={providersById}
               isRoutePickerOpen={isRoutePickerOpen}
               isSavingRoutes={isSavingRoutes}
+              isPlanSettingsOpen={isPlanSettingsOpen}
+              isSavingPlanSettings={isSavingPlanSettings}
+              onPlanSettingsOpenChange={setIsPlanSettingsOpen}
+              onSavePlanSettings={handleSavePlanSettings}
               routePickerSelectAll={routePickerSelectAll}
               routePickerMessage={routePickerMessage}
               routePickerError={routePickerError}
@@ -1626,6 +1721,10 @@ function RoutesTab({
   onSelectRoute,
   isRoutePickerOpen,
   isSavingRoutes,
+  isPlanSettingsOpen,
+  isSavingPlanSettings,
+  onPlanSettingsOpenChange,
+  onSavePlanSettings,
   routePickerSelectAll,
   routePickerMessage,
   routePickerError,
@@ -1644,6 +1743,13 @@ function RoutesTab({
   onSelectRoute: (entry: RouteEntry) => void;
   isRoutePickerOpen: boolean;
   isSavingRoutes: boolean;
+  isPlanSettingsOpen: boolean;
+  isSavingPlanSettings: boolean;
+  onPlanSettingsOpenChange: (open: boolean) => void;
+  onSavePlanSettings: (
+    plan: Provider,
+    draft: MultiRouterSettingsDraft,
+  ) => Promise<void>;
   routePickerSelectAll: boolean;
   routePickerMessage: string | null;
   routePickerError: string | null;
@@ -1762,6 +1868,16 @@ function RoutesTab({
         />
       ) : null}
 
+      {selectedPlan && isPlanSettingsOpen ? (
+        <MultiRouterSettingsPanel
+          selectedPlan={selectedPlan}
+          selectedRoutes={selectedPlanRoutes}
+          onSave={onSavePlanSettings}
+          onClose={() => onPlanSettingsOpenChange(false)}
+          isSaving={isSavingPlanSettings}
+        />
+      ) : null}
+
       {(routePickerMessage || routePickerError) && (
         <div
           className={cn(
@@ -1780,6 +1896,208 @@ function RoutesTab({
         selectedRoutes={selectedPlanRoutes}
       />
     </div>
+  );
+}
+
+/// MultiRouter 专用设置面板：只暴露方案级元信息和入口状态，避免用户误填普通供应商 API 字段。
+function MultiRouterSettingsPanel({
+  selectedPlan,
+  selectedRoutes,
+  onSave,
+  onClose,
+  isSaving,
+}: {
+  selectedPlan: Provider;
+  selectedRoutes: RouteEntry[];
+  onSave: (plan: Provider, draft: MultiRouterSettingsDraft) => Promise<void>;
+  onClose: () => void;
+  isSaving: boolean;
+}) {
+  const selectedRouting = readCodexRouting(selectedPlan) ?? {};
+  const [name, setName] = useState(selectedPlan.name);
+  const [notes, setNotes] = useState(selectedPlan.notes ?? "");
+  const [enabled, setEnabled] = useState(selectedRouting.enabled !== false);
+  const [defaultRouteId, setDefaultRouteId] = useState(
+    selectedRouting.defaultRouteId ?? "",
+  );
+
+  useEffect(() => {
+    const routing = readCodexRouting(selectedPlan) ?? {};
+    setName(selectedPlan.name);
+    setNotes(selectedPlan.notes ?? "");
+    setEnabled(routing.enabled !== false);
+    setDefaultRouteId(routing.defaultRouteId ?? "");
+  }, [selectedPlan]);
+
+  /// 保存前只提交方案草稿，不接收 API Key/base_url 等普通上游字段。
+  async function handleSave() {
+    await onSave(selectedPlan, {
+      name,
+      notes,
+      enabled,
+      defaultRouteId,
+    });
+  }
+
+  const routeOptions = selectedRoutes
+    .map(({ route }) => ({
+      id: route.id,
+      label: route.label || route.id || "未命名规则",
+      enabled: route.enabled !== false,
+    }))
+    .filter((route): route is { id: string; label: string; enabled: boolean } =>
+      Boolean(route.id),
+    );
+  const autoManagedRows = [
+    {
+      label: "Codex provider id",
+      value: "codex_model_router_v2",
+      detail: "统一稳定桶，多个 MultiRouter 不需要分别填写",
+    },
+    {
+      label: "base_url",
+      value: "http://127.0.0.1:15721/v1",
+      detail: "切换或接管时由 CC Switch 投影到 Codex live config",
+    },
+    {
+      label: "wire_api",
+      value: "responses",
+      detail: "Codex 只连接本地代理，真实上游协议由 route 决定",
+    },
+    {
+      label: "model_catalog_json",
+      value: "cc-switch-model-catalog.json",
+      detail: "根据当前方案的 routes/modelCatalog 自动生成",
+    },
+  ];
+
+  return (
+    <section className="rounded-lg border border-blue-700/50 bg-slate-950/70 p-4 shadow-[0_0_0_1px_rgba(59,130,246,0.15)]">
+      <SectionHeader
+        icon={Settings2}
+        title="多路路由设置"
+        detail="这里配置的是 MultiRouter 方案本身；API Key、API 地址和本地代理接管参数由系统统一维护，不需要逐个多路路由手填。"
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onClose}
+              disabled={isSaving}
+            >
+              关闭
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={isSaving}
+              className="gap-2 bg-blue-600 hover:bg-blue-500"
+            >
+              <Save className="h-4 w-4" />
+              {isSaving ? "保存中" : "保存设置"}
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
+        <div className="space-y-3">
+          <div className="grid gap-2">
+            <label className="text-xs font-semibold text-slate-300">
+              方案名称
+            </label>
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className="h-10 rounded-md border border-blue-700/50 bg-slate-950/80 px-3 text-sm outline-none transition placeholder:text-slate-500 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              placeholder="例如：Codex MultiRouter"
+              disabled={isSaving}
+            />
+          </div>
+          <div className="grid gap-2">
+            <label className="text-xs font-semibold text-slate-300">备注</label>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              rows={3}
+              className="min-h-[84px] resize-y rounded-md border border-blue-700/50 bg-slate-950/80 px-3 py-2 text-sm outline-none transition placeholder:text-slate-500 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              placeholder="例如：默认 Codex 多模型路由"
+              disabled={isSaving}
+            />
+          </div>
+          <label className="flex items-start justify-between gap-3 rounded-lg border border-slate-700 bg-slate-950/50 p-3">
+            <span>
+              <span className="block text-sm font-semibold text-slate-100">
+                MultiRouter 入口
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-slate-400">
+                关闭后该方案不会参与 Codex model 分流，但 routes 会保留。
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(event) => setEnabled(event.target.checked)}
+              className="mt-1 h-5 w-5 accent-blue-500"
+              disabled={isSaving}
+            />
+          </label>
+          <div className="grid gap-2">
+            <label className="text-xs font-semibold text-slate-300">
+              默认路由
+            </label>
+            <select
+              value={defaultRouteId}
+              onChange={(event) => setDefaultRouteId(event.target.value)}
+              className="h-10 rounded-md border border-blue-700/50 bg-slate-950/80 px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              disabled={isSaving || routeOptions.length === 0}
+            >
+              <option value="">不设置默认路由</option>
+              {routeOptions.map((route) => (
+                <option key={route.id} value={route.id}>
+                  {route.label}
+                  {route.enabled ? "" : "（已停用）"}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs leading-5 text-slate-500">
+              没有精确命中 model
+              时才会使用默认路由；匹配规则仍在“编辑匹配规则”里选择。
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-700 bg-slate-950/45 p-3">
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100">
+            <Info className="h-4 w-4 text-blue-300" />
+            自动维护的接管配置
+          </div>
+          <div className="grid gap-2">
+            {autoManagedRows.map((row) => (
+              <div
+                key={row.label}
+                className="rounded-md border border-slate-800 bg-slate-950/70 p-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-400">
+                    {row.label}
+                  </span>
+                  <Badge className="border-blue-500/50 bg-blue-500/15 text-blue-100">
+                    自动
+                  </Badge>
+                </div>
+                <div className="mt-1 break-all font-mono text-xs text-slate-100">
+                  {row.value}
+                </div>
+                <div className="mt-1 text-xs leading-5 text-slate-500">
+                  {row.detail}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 

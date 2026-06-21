@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Provider } from "@/types";
 import {
+  applyMultiRouterSettingsDraft,
   buildModelCatalogForRoutes,
   createDraftRoutingPlan,
   isRoutingPlan,
@@ -180,5 +181,60 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
         ),
       ),
     ).toEqual(["openai-route", "deepseek-route"]);
+  });
+
+  it("updates multirouter settings without dropping routes or model catalog", () => {
+    const qwen: Provider = {
+      id: "codex-qwen",
+      name: "Qwen Local",
+      category: "custom",
+      settingsConfig: {
+        modelCatalog: { models: [{ model: "qwen3.6" }] },
+      },
+    };
+    const plan = createDraftRoutingPlan([qwen], [qwen]);
+    const savedPlan: Provider = {
+      ...plan,
+      name: "Old MultiRouter",
+      notes: "old notes",
+      settingsConfig: {
+        ...plan.settingsConfig,
+        modelCatalog: {
+          models: [{ model: "qwen3.6" }],
+          spawnAgentModels: ["qwen3.6"],
+        },
+        codexRouting: {
+          enabled: true,
+          defaultRouteId: "codex-qwen",
+          routes: [
+            {
+              id: "codex-qwen",
+              label: "Qwen Local",
+              enabled: true,
+              targetProviderId: qwen.id,
+              match: { models: ["qwen3.6"] },
+            },
+          ],
+        },
+      },
+    };
+
+    const updated = applyMultiRouterSettingsDraft(savedPlan, {
+      name: "Daily MultiRouter",
+      notes: "primary plan",
+      enabled: false,
+      defaultRouteId: "missing-route",
+    });
+
+    expect(updated.name).toBe("Daily MultiRouter");
+    expect(updated.notes).toBe("primary plan");
+    expect(updated.settingsConfig.modelCatalog).toEqual(
+      savedPlan.settingsConfig.modelCatalog,
+    );
+    expect(readCodexRouting(updated)?.enabled).toBe(false);
+    expect(readCodexRouting(updated)?.routes).toEqual(
+      readCodexRouting(savedPlan)?.routes,
+    );
+    expect(readCodexRouting(updated)?.defaultRouteId).toBeUndefined();
   });
 });
