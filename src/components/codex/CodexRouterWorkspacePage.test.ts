@@ -126,4 +126,28 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
       "deepseek-v4-flash",
     ]);
   });
+
+  it("seeds OpenAI/Codex providers without a model catalog with fallback models", () => {
+    const officialBackup: Provider = {
+      id: "codex-official-backup",
+      name: "OpenAI Official Backup",
+      category: "official",
+      settingsConfig: { auth: {}, config: "" },
+    };
+
+    const plan = createDraftRoutingPlan([officialBackup], [officialBackup]);
+
+    expect(plan.settingsConfig.modelCatalog.models).toEqual([
+      { model: "gpt-5.5" },
+      { model: "gpt-5.4" },
+      { model: "gpt-5.4-mini" },
+      { model: "gpt-5.3-codex-spark" },
+    ]);
+    expect(plan.settingsConfig.modelCatalog.spawnAgentModels).toEqual([
+      "gpt-5.5",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.3-codex-spark",
+    ]);
+  });
 });

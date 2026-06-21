@@ -171,6 +171,13 @@ type CodexModelCatalogDraft = {
   spawnAgentModels?: string[];
 };
 
+const OPENAI_CODEX_FALLBACK_MODELS = [
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.3-codex-spark",
+];
+
 /// 从 Provider 私有配置里读取 Codex 多模型路由配置；没有配置时返回 null，避免把普通模型源误判成路由方案。
 export function readCodexRouting(provider: Provider): CodexRouting | null {
   const routing = provider.settingsConfig?.codexRouting;
@@ -264,7 +271,32 @@ function collectProviderModelIds(provider: Provider): string[] {
   ].filter(
     (model): model is string => typeof model === "string" && !!model.trim(),
   );
-  return Array.from(new Set([...catalogModels, ...singleModelFields]));
+  const providerText =
+    `${provider.id} ${provider.name} ${provider.category ?? ""}`
+      .toLowerCase()
+      .trim();
+  const providerType = String(
+    provider.meta?.providerType ?? provider.settingsConfig?.providerType ?? "",
+  ).toLowerCase();
+  const baseUrlText = String(
+    provider.settingsConfig?.base_url ??
+      provider.settingsConfig?.baseURL ??
+      provider.settingsConfig?.baseUrl ??
+      "",
+  ).toLowerCase();
+  const looksLikeOpenAiSource =
+    providerText.includes("openai") ||
+    providerType.includes("codex_oauth") ||
+    baseUrlText.includes("chatgpt.com/backend-api/codex");
+  const fallbackModels =
+    looksLikeOpenAiSource &&
+    catalogModels.length === 0 &&
+    singleModelFields.length === 0
+      ? OPENAI_CODEX_FALLBACK_MODELS
+      : [];
+  return Array.from(
+    new Set([...catalogModels, ...singleModelFields, ...fallbackModels]),
+  );
 }
 
 /// 根据 provider 名称和模型名推断少量前缀；只作为无精确模型目录时的兜底，避免把路由规则做成空匹配。
@@ -293,7 +325,30 @@ function inferProviderPrefixes(
       prefixes.add(prefix);
     }
   }
+  if (text.includes("openai")) {
+    ["gpt", "o1", "o3", "o4"].forEach((prefix) => prefixes.add(prefix));
+  }
   return Array.from(prefixes);
+}
+
+/// 已保存的历史 route 可能没有 match 条件；编辑时用目标 Provider 的目录和名称推断一次，保存后写回稳定规则。
+function enrichRouteMatchFromProvider(
+  route: CodexRoute,
+  provider?: Provider,
+): CodexRoute {
+  const existingModels = route.match?.models ?? [];
+  const existingPrefixes = route.match?.prefixes ?? [];
+  if (!provider || existingModels.length > 0 || existingPrefixes.length > 0) {
+    return route;
+  }
+  const modelIds = collectProviderModelIds(provider);
+  return {
+    ...route,
+    match: {
+      models: modelIds,
+      prefixes: inferProviderPrefixes(provider, modelIds),
+    },
+  };
 }
 
 /// 为普通模型源创建一条引用 provider 配置的路由；不复制 API Key/Base URL，避免工作台把来源配置写散。
@@ -345,13 +400,17 @@ function buildRouteCandidates(
     const provider = targetProviderId
       ? modelSources.find((source) => source.id === targetProviderId)
       : undefined;
+    const routeWithInferredMatch = enrichRouteMatchFromProvider(
+      normalizedRoute,
+      provider,
+    );
     candidates.push({
       id,
-      route: normalizedRoute,
+      route: routeWithInferredMatch,
       provider,
       isExisting: true,
-      matchModels: normalizedRoute.match?.models ?? [],
-      matchPrefixes: normalizedRoute.match?.prefixes ?? [],
+      matchModels: routeWithInferredMatch.match?.models ?? [],
+      matchPrefixes: routeWithInferredMatch.match?.prefixes ?? [],
     });
   }
 
@@ -1704,7 +1763,10 @@ function RouteCandidatePicker({
     () =>
       new Set(
         candidates
-          .filter((candidate) => candidate.route.enabled !== false)
+          .filter(
+            (candidate) =>
+              selectAllByDefault || candidate.route.enabled !== false,
+          )
           .map((candidate) => candidate.id),
       ),
   );
@@ -1720,7 +1782,10 @@ function RouteCandidatePicker({
     setEnabledIds(
       new Set(
         candidates
-          .filter((candidate) => candidate.route.enabled !== false)
+          .filter(
+            (candidate) =>
+              selectAllByDefault || candidate.route.enabled !== false,
+          )
           .map((candidate) => candidate.id),
       ),
     );
@@ -1761,30 +1826,44 @@ function RouteCandidatePicker({
             <Button
               size="sm"
               variant="outline"
-              onClick={() =>
+              onClick={() => {
                 setSelectedIds(
                   new Set(candidates.map((candidate) => candidate.id)),
-                )
-              }
+                );
+                setEnabledIds(
+                  new Set(candidates.map((candidate) => candidate.id)),
+                );
+              }}
               disabled={candidates.length === 0 || isSaving}
             >
-              全选
+              全选并启用
             </Button>
             <Button
               size="sm"
               variant="outline"
-              onClick={() =>
+              onClick={() => {
                 setSelectedIds(
                   new Set(
                     candidates
                       .filter((candidate) => candidate.isExisting)
                       .map((candidate) => candidate.id),
                   ),
-                )
-              }
+                );
+                setEnabledIds(
+                  new Set(
+                    candidates
+                      .filter(
+                        (candidate) =>
+                          candidate.isExisting &&
+                          candidate.route.enabled !== false,
+                      )
+                      .map((candidate) => candidate.id),
+                  ),
+                );
+              }}
               disabled={isSaving}
             >
-              只保留当前
+              只保留当前状态
             </Button>
             <Button
               size="sm"
@@ -1842,8 +1921,26 @@ function RouteCandidatePicker({
                     {checked ? <CheckCircle2 className="h-3.5 w-3.5" /> : null}
                   </span>
                   <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold text-slate-100">
-                      {candidate.route.label || targetLabel}
+                    <span className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-semibold text-slate-100">
+                        {candidate.route.label || targetLabel}
+                      </span>
+                      <Badge
+                        className={cn(
+                          "border text-[11px]",
+                          !checked
+                            ? "border-slate-600 bg-slate-900 text-slate-300"
+                            : enabled
+                              ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-100"
+                              : "border-amber-500/60 bg-amber-500/15 text-amber-100",
+                        )}
+                      >
+                        {!checked
+                          ? "未加入"
+                          : enabled
+                            ? "已加入并启用"
+                            : "已加入但停用"}
+                      </Badge>
                     </span>
                     <span className="mt-1 block truncate text-xs text-slate-400">
                       {targetLabel} ·{" "}
@@ -1857,11 +1954,13 @@ function RouteCandidatePicker({
                   onClick={() => toggleSetValue(setEnabledIds, candidate.id)}
                   disabled={!checked || isSaving}
                   className={cn(
-                    "h-8",
-                    enabled ? "text-emerald-100" : "text-slate-400",
+                    "h-8 min-w-[88px]",
+                    enabled
+                      ? "border-emerald-500/50 text-emerald-100"
+                      : "border-amber-500/50 text-amber-100",
                   )}
                 >
-                  {enabled ? "启用" : "停用"}
+                  {enabled ? "已启用" : "已停用"}
                 </Button>
               </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -2753,9 +2852,7 @@ function StatusTab({
                           : "border-emerald-500/50 bg-emerald-500/15 text-emerald-100",
                       )}
                     >
-                      {entry.route.enabled === false
-                        ? "规则停用"
-                        : "规则已启用"}
+                      {entry.route.enabled === false ? "已停用" : "已启用"}
                     </Badge>
                   </div>
                   <div className="mt-3 text-xs leading-5 text-slate-400">
@@ -3669,7 +3766,7 @@ function RouteListButton({
               : "border-emerald-500/50 bg-emerald-500/15 text-emerald-100",
           )}
         >
-          {entry.route.enabled === false ? "规则停用" : "规则已启用"}
+          {entry.route.enabled === false ? "已停用" : "已启用"}
         </Badge>
       </div>
       <div className="mt-3 flex flex-wrap gap-2 text-xs">

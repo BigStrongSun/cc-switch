@@ -485,38 +485,69 @@ export function CodexFormFields({
     [onSpawnAgentModelsChange, spawnAgentModels],
   );
 
+  // 路由行的增删改必须同步写回父表单，避免用户切换开关后立即保存时仍提交上一帧旧值。
+  const publishRoutingRows = useCallback(
+    (
+      rows: CodexRoutingRow[],
+      patch: Partial<Omit<CodexRoutingConfig, "routes">> = {},
+    ) => {
+      if (!onCodexRoutingChange) return;
+      const next: CodexRoutingConfig = {
+        enabled: codexRouting.enabled ?? false,
+        defaultRouteId: codexRouting.defaultRouteId ?? "",
+        ...patch,
+        routes: rows.map(({ rowId: _rowId, ...route }) => route),
+      };
+      lastSentRoutingRef.current = next;
+      onCodexRoutingChange(next);
+    },
+    [codexRouting.defaultRouteId, codexRouting.enabled, onCodexRoutingChange],
+  );
+
   const handleRoutingEnabledChange = useCallback(
     (checked: boolean) => {
-      if (!onCodexRoutingChange) return;
-      onCodexRoutingChange({ ...codexRouting, enabled: checked });
+      publishRoutingRows(routingRows, { enabled: checked });
     },
-    [codexRouting, onCodexRoutingChange],
+    [publishRoutingRows, routingRows],
   );
 
   const handleAddRoute = useCallback(() => {
     setRoutingRows((current) => {
+      const next = [...current, createRoutingRow()];
       setEditingRouteIndex(current.length);
-      return [...current, createRoutingRow()];
+      publishRoutingRows(next);
+      return next;
     });
-  }, []);
+  }, [publishRoutingRows]);
 
   const handleUpdateRoute = useCallback(
     (index: number, patch: Partial<CodexRoutingRoute>) => {
-      setRoutingRows((current) =>
-        current.map((row, i) => (i === index ? { ...row, ...patch } : row)),
-      );
+      setRoutingRows((current) => {
+        const next = current.map((row, i) =>
+          i === index ? { ...row, ...patch } : row,
+        );
+        publishRoutingRows(next);
+        return next;
+      });
     },
-    [],
+    [publishRoutingRows],
   );
 
-  const handleRemoveRoute = useCallback((index: number) => {
-    setRoutingRows((current) => current.filter((_, i) => i !== index));
-    setEditingRouteIndex((current) => {
-      if (current === null) return current;
-      if (current === index) return null;
-      return current > index ? current - 1 : current;
-    });
-  }, []);
+  const handleRemoveRoute = useCallback(
+    (index: number) => {
+      setRoutingRows((current) => {
+        const next = current.filter((_, i) => i !== index);
+        publishRoutingRows(next);
+        return next;
+      });
+      setEditingRouteIndex((current) => {
+        if (current === null) return current;
+        if (current === index) return null;
+        return current > index ? current - 1 : current;
+      });
+    },
+    [publishRoutingRows],
+  );
 
   const editingRoute =
     editingRouteIndex !== null ? routingRows[editingRouteIndex] : undefined;
@@ -708,7 +739,12 @@ export function CodexFormFields({
                 return (
                   <div
                     key={route.rowId}
-                    className="flex items-center justify-between gap-3 rounded-md border border-border-default bg-muted/10 p-3"
+                    className={cn(
+                      "flex items-center justify-between gap-3 rounded-md border p-3 transition-colors",
+                      route.enabled === false
+                        ? "border-amber-500/45 bg-amber-500/10"
+                        : "border-emerald-500/45 bg-emerald-500/10",
+                    )}
                   >
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -720,11 +756,16 @@ export function CodexFormFields({
                             ? `目标: ${route.targetProviderId}`
                             : route.upstream.apiFormat}
                         </span>
-                        {route.enabled === false && (
-                          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                            已停用
-                          </span>
-                        )}
+                        <span
+                          className={cn(
+                            "rounded border px-1.5 py-0.5 text-[11px] font-medium",
+                            route.enabled === false
+                              ? "border-amber-500/50 bg-amber-500/15 text-amber-200"
+                              : "border-emerald-500/50 bg-emerald-500/15 text-emerald-200",
+                          )}
+                        >
+                          {route.enabled === false ? "已停用" : "已启用"}
+                        </span>
                         {capabilityLabels.map((label) => (
                           <span
                             key={label}
@@ -743,21 +784,24 @@ export function CodexFormFields({
                           : route.upstream.baseUrl || "尚未填写上游 Base URL"}
                       </p>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Switch
-                        checked={route.enabled !== false}
-                        onCheckedChange={(checked) =>
-                          handleUpdateRoute(index, { enabled: checked })
-                        }
-                        aria-label={t("codexConfig.routeEnabled", {
-                          defaultValue: "启用路由",
-                        })}
-                      />
+                    <div className="flex shrink-0 items-center gap-2">
+                      <label className="flex items-center gap-2 rounded-md border border-border-default bg-background/60 px-2 py-1 text-xs text-foreground">
+                        <Switch
+                          checked={route.enabled !== false}
+                          onCheckedChange={(checked) =>
+                            handleUpdateRoute(index, { enabled: checked })
+                          }
+                          aria-label={t("codexConfig.routeEnabled", {
+                            defaultValue: "启用路由",
+                          })}
+                        />
+                        {route.enabled === false ? "已停用" : "已启用"}
+                      </label>
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="h-9 w-9 text-muted-foreground"
+                        className="h-9 w-9 text-foreground/80 hover:text-foreground"
                         onClick={() => setEditingRouteIndex(index)}
                         title={t("codexConfig.editRoute", {
                           defaultValue: "编辑路由",
@@ -769,7 +813,7 @@ export function CodexFormFields({
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                        className="h-9 w-9 text-foreground/80 hover:text-destructive"
                         onClick={() => handleRemoveRoute(index)}
                         title={t("common.delete", { defaultValue: "删除" })}
                       >
@@ -835,9 +879,7 @@ export function CodexFormFields({
                       handleUpdateRoute(editingRouteIndex, { enabled: checked })
                     }
                   />
-                  {t("codexConfig.routeEnabled", {
-                    defaultValue: "启用路由",
-                  })}
+                  {editingRoute.enabled === false ? "已停用" : "已启用"}
                 </label>
               </div>
 
