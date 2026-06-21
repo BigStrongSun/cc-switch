@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -48,13 +48,19 @@ export function AddProviderDialog({
     appId !== "openclaw" &&
     appId !== "hermes" &&
     appId !== "claude-desktop";
+  const isCodexRouterEntry = appId === "codex";
   const [activeTab, setActiveTab] = useState<"app-specific" | "universal">(
-    "app-specific",
+    isCodexRouterEntry ? "universal" : "app-specific",
   );
   const [universalFormOpen, setUniversalFormOpen] = useState(false);
   const [selectedUniversalPreset, setSelectedUniversalPreset] =
     useState<UniversalProviderPreset | null>(null);
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
+
+  useEffect(() => {
+    // Codex 的添加入口实际是在创建多路路由，默认引导到模型源选择页。
+    setActiveTab(isCodexRouterEntry ? "universal" : "app-specific");
+  }, [isCodexRouterEntry, open]);
 
   const handleUniversalProviderSave = useCallback(
     async (provider: UniversalProvider) => {
@@ -311,7 +317,11 @@ export function AddProviderDialog({
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           <Plus className="h-4 w-4 mr-2" />
-          {t("universalProvider.add")}
+          {isCodexRouterEntry
+            ? t("codexMultiRouter.addSource", {
+                defaultValue: "添加模型源",
+              })
+            : t("universalProvider.add")}
         </Button>
       </>
     );
@@ -319,10 +329,43 @@ export function AddProviderDialog({
   return (
     <FullScreenPanel
       isOpen={open}
-      title={t("provider.addNewProvider")}
+      title={
+        isCodexRouterEntry
+          ? t("codexMultiRouter.createTitle", {
+              defaultValue: "创建多路路由",
+            })
+          : t("provider.addNewProvider")
+      }
       onClose={() => onOpenChange(false)}
       footer={footer}
     >
+      {isCodexRouterEntry && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 text-sm text-muted-foreground">
+          <div className="font-medium text-foreground">
+            {t("codexMultiRouter.guideTitle", {
+              defaultValue: "多路路由创建方式",
+            })}
+          </div>
+          <div className="mt-2 grid gap-2 md:grid-cols-3">
+            <div>
+              {t("codexMultiRouter.guideStepSelect", {
+                defaultValue: "1. 先选择或接入模型源。",
+              })}
+            </div>
+            <div>
+              {t("codexMultiRouter.guideStepSync", {
+                defaultValue: "2. 同步后自动生成 Codex 可用配置。",
+              })}
+            </div>
+            <div>
+              {t("codexMultiRouter.guideStepRules", {
+                defaultValue: "3. 再到路由规则里调整模型分流。",
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showUniversalTab ? (
         <Tabs
           value={activeTab}
@@ -330,10 +373,18 @@ export function AddProviderDialog({
         >
           <TabsList className="grid w-full grid-cols-2 mb-6">
             <TabsTrigger value="app-specific">
-              {t(`apps.${appId}`)} {t("provider.tabProvider")}
+              {isCodexRouterEntry
+                ? t("codexMultiRouter.singleSourceTab", {
+                    defaultValue: "单独接入模型源",
+                  })
+                : `${t(`apps.${appId}`)} ${t("provider.tabProvider")}`}
             </TabsTrigger>
             <TabsTrigger value="universal">
-              {t("provider.tabUniversal")}
+              {isCodexRouterEntry
+                ? t("codexMultiRouter.sourceTab", {
+                    defaultValue: "选择模型源",
+                  })
+                : t("provider.tabUniversal")}
             </TabsTrigger>
           </TabsList>
 
@@ -349,7 +400,9 @@ export function AddProviderDialog({
           </TabsContent>
 
           <TabsContent value="universal" className="mt-0">
-            <UniversalProviderPanel />
+            <UniversalProviderPanel
+              context={isCodexRouterEntry ? "codex-router-source" : "default"}
+            />
           </TabsContent>
         </Tabs>
       ) : (

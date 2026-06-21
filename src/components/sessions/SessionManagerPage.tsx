@@ -15,7 +15,6 @@ import {
   FileClock,
   FileText,
   FolderOpen,
-  FileText,
   X,
   CheckSquare,
 } from "lucide-react";

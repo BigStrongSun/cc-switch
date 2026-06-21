@@ -9,8 +9,15 @@ import { universalProvidersApi } from "@/lib/api";
 import type { UniversalProvider, UniversalProvidersMap } from "@/types";
 import { deepClone } from "@/utils/deepClone";
 
-export function UniversalProviderPanel() {
+interface UniversalProviderPanelProps {
+  context?: "default" | "codex-router-source";
+}
+
+export function UniversalProviderPanel({
+  context = "default",
+}: UniversalProviderPanelProps) {
   const { t } = useTranslation();
+  const isCodexRouterSourceContext = context === "codex-router-source";
 
   // 状态
   const [providers, setProviders] = useState<UniversalProvidersMap>({});
@@ -239,6 +246,15 @@ export function UniversalProviderPanel() {
       </p>
 
       {/* 供应商列表 */}
+      {isCodexRouterSourceContext && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">
+          {t("codexMultiRouter.sourcePanelDescription", {
+            defaultValue:
+              "选择已有模型源并同步到 Codex，或添加新的统一模型源。多路路由会基于这些已接入的模型源继续配置分流规则。",
+          })}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />

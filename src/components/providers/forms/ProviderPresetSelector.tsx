@@ -120,6 +120,7 @@ interface ProviderPresetSelectorProps {
   onPresetChange: (value: string) => void;
   onUniversalPresetSelect?: (preset: UniversalProviderPreset) => void;
   onManageUniversalProviders?: () => void;
+  selectionMode?: "provider" | "codex-router-source";
   category?: ProviderCategory; // 当前选中的分类
 }
 
@@ -130,9 +131,11 @@ export function ProviderPresetSelector({
   onPresetChange,
   onUniversalPresetSelect,
   onManageUniversalProviders,
+  selectionMode = "provider",
   category,
 }: Readonly<ProviderPresetSelectorProps>) {
   const { t } = useTranslation();
+  const isCodexRouterSourceMode = selectionMode === "codex-router-source";
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortMode, setSortMode] = useState<PresetSortMode>(
@@ -189,6 +192,14 @@ export function ProviderPresetSelector({
   );
 
   const getCategoryHint = (): ReactNode => {
+    // Codex 多路路由创建入口强调“选择模型源”，避免用户误进手写完整供应商配置。
+    if (isCodexRouterSourceMode) {
+      return t("codexMultiRouter.sourcePickerHint", {
+        defaultValue:
+          "先选择一个模型源，预设会自动填充端点、协议和模型目录；只有预设不覆盖你的服务时才使用自定义模型源。",
+      });
+    }
+
     switch (category) {
       case "official":
         return t("providerForm.officialHint", {
@@ -288,7 +299,13 @@ export function ProviderPresetSelector({
   return (
     <div ref={searchContainerRef} className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <FormLabel>{t("providerPreset.label")}</FormLabel>
+        <FormLabel>
+          {isCodexRouterSourceMode
+            ? t("codexMultiRouter.sourcePickerLabel", {
+                defaultValue: "选择模型源",
+              })
+            : t("providerPreset.label")}
+        </FormLabel>
         <div className="flex items-center gap-2">
           {searchOpen && (
             <Input
@@ -374,7 +391,13 @@ export function ProviderPresetSelector({
           }`}
         >
           <span className="inline-block w-4 h-4 flex-shrink-0" aria-hidden />
-          <span className="truncate">{t("providerPreset.custom")}</span>
+          <span className="truncate">
+            {isCodexRouterSourceMode
+              ? t("codexMultiRouter.customSource", {
+                  defaultValue: "自定义模型源",
+                })
+              : t("providerPreset.custom")}
+          </span>
         </button>
 
         {visiblePresetEntries.length === 0 && (

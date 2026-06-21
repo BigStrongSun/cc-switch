@@ -315,7 +315,7 @@ function ProviderFormFull({
   };
 
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(
-    initialData ? null : "custom",
+    initialData ? null : appId === "codex" ? "codex-0" : "custom",
   );
   const [activePreset, setActivePreset] = useState<{
     id: string;
@@ -371,7 +371,9 @@ function ProviderFormFull({
   const isAnyOmoCategory = isOmoCategory || isOmoSlimCategory;
 
   useEffect(() => {
-    setSelectedPresetId(initialData ? null : "custom");
+    setSelectedPresetId(
+      initialData ? null : appId === "codex" ? "codex-0" : "custom",
+    );
     setActivePreset(null);
 
     if (!initialData) {
@@ -1772,6 +1774,19 @@ function ProviderFormFull({
     });
   };
 
+  useEffect(() => {
+    // Codex 多路路由的“单独接入”备用路径也应先给可选模型源，
+    // 避免初始状态落到需要手写所有字段的自定义配置。
+    if (
+      appId === "codex" &&
+      !initialData &&
+      selectedPresetId === "codex-0" &&
+      !form.getValues("name")
+    ) {
+      handlePresetChange("codex-0");
+    }
+  }, [appId, initialData, selectedPresetId]);
+
   const settingsConfigErrorField = (
     <FormField
       control={form.control}
@@ -1801,6 +1816,9 @@ function ProviderFormFull({
               onUniversalPresetSelect={onUniversalPresetSelect}
               onManageUniversalProviders={onManageUniversalProviders}
               category={category}
+              selectionMode={
+                appId === "codex" ? "codex-router-source" : "provider"
+              }
             />
           )}
 
