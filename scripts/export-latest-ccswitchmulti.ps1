@@ -299,7 +299,7 @@ $releaseDir = Join-Path $tauriDir "target\release"
 $bundleDir = Join-Path $releaseDir "bundle"
 $packageJson = Get-Content -LiteralPath (Join-Path $repoRoot "package.json") -Raw | ConvertFrom-Json
 $version = [string]$packageJson.version
-$githubRepo = "BigStrongSun/cc-switch"
+$githubRepo = "BigStrongSun/ccswitchmulti"
 $defaultSigningKeyPath = Join-Path $env:USERPROFILE ".ccswitchmulti\tauri-update.key"
 $hasUpdaterSigningKey = Initialize-TauriSigningKey -DefaultKeyPath $defaultSigningKeyPath
 

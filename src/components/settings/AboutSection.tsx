@@ -78,7 +78,7 @@ type WslShellPreference = {
 const WSL_SHELL_OPTIONS = ["sh", "bash", "zsh", "fish", "dash"] as const;
 // UI-friendly order: login shell first.
 const WSL_SHELL_FLAG_OPTIONS = ["-lic", "-lc", "-c"] as const;
-const CCSWITCHMULTI_REPO_URL = "https://github.com/BigStrongSun/cc-switch";
+const CCSWITCHMULTI_REPO_URL = "https://github.com/BigStrongSun/ccswitchmulti";
 const CCSWITCHMULTI_RELEASES_URL = `${CCSWITCHMULTI_REPO_URL}/releases`;
 
 const ENV_BADGE_CONFIG: Record<
@@ -808,9 +808,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() =>
-                settingsApi.openExternal(CCSWITCHMULTI_REPO_URL)
-              }
+              onClick={() => settingsApi.openExternal(CCSWITCHMULTI_REPO_URL)}
               className="h-8 gap-1.5 text-xs"
             >
               <Github className="h-3.5 w-3.5" />
