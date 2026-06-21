@@ -102,6 +102,21 @@ vi.mock("@/components/providers/EditProviderDialog", () => ({
     ) : null,
 }));
 
+vi.mock("@/components/codex/CodexRouterWorkspacePage", async () => {
+  const actual = await vi.importActual<any>(
+    "@/components/codex/CodexRouterWorkspacePage",
+  );
+  return {
+    ...actual,
+    CodexRouterWorkspacePage: ({ initialProviderId, initialTab }: any) => (
+      <div data-testid="codex-router-workspace">
+        <span data-testid="codex-router-target">{initialProviderId}</span>
+        <span data-testid="codex-router-tab">{initialTab}</span>
+      </div>
+    ),
+  };
+});
+
 vi.mock("@/components/UsageScriptModal", () => ({
   default: ({ isOpen, provider, onSave, onClose }: any) =>
     isOpen ? (
@@ -314,6 +329,54 @@ describe("App integration with MSW", () => {
     expect(toastErrorMock).not.toHaveBeenCalledWith(
       expect.stringContaining("Provider key is required for openclaw"),
     );
+  });
+
+  it("opens Codex MultiRouter provider edits in the router workspace", async () => {
+    setProviders("codex", {
+      "codex-router": {
+        id: "codex-router",
+        name: "OpenAI Multi-Model Router",
+        settingsConfig: {
+          codexRouting: {
+            enabled: true,
+            defaultRouteId: "openai-official",
+            routes: [
+              {
+                id: "openai-official",
+                enabled: true,
+                targetProviderId: "codex-openai",
+                match: { prefixes: ["gpt-"] },
+              },
+            ],
+          },
+        },
+        category: "aggregator",
+        sortIndex: 0,
+        createdAt: Date.now(),
+      },
+    });
+    setCurrentProviderId("codex", "codex-router");
+
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    fireEvent.click(screen.getByText("switch-codex"));
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "codex-router",
+      ),
+    );
+
+    fireEvent.click(screen.getByText("edit"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("codex-router-workspace")).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("edit-provider-dialog")).toBeNull();
+    expect(screen.getByTestId("codex-router-target").textContent).toBe(
+      "codex-router",
+    );
+    expect(screen.getByTestId("codex-router-tab").textContent).toBe("routes");
   });
 
   it("shows toast when duplicate cannot load live provider ids", async () => {

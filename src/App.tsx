@@ -93,7 +93,11 @@ import AgentsDefaultsPanel from "@/components/openclaw/AgentsDefaultsPanel";
 import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
 import HermesMemoryPanel from "@/components/hermes/HermesMemoryPanel";
 import { OpenAICompatibleApiPage } from "@/components/openai/OpenAICompatibleApiPage";
-import { CodexRouterWorkspacePage } from "@/components/codex/CodexRouterWorkspacePage";
+import {
+  CodexRouterWorkspacePage,
+  isRoutingPlan,
+  type WorkspaceTab,
+} from "@/components/codex/CodexRouterWorkspacePage";
 
 type View =
   | "providers"
@@ -177,6 +181,10 @@ function App() {
     activeApp === "claude-desktop" ? "claude" : activeApp;
   const [currentView, setCurrentView] = useState<View>(getInitialView);
   const [settingsDefaultTab, setSettingsDefaultTab] = useState("general");
+  const [codexRouterWorkspaceTarget, setCodexRouterWorkspaceTarget] = useState<{
+    providerId?: string | null;
+    tab: WorkspaceTab;
+  }>({ tab: "status" });
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
 
@@ -832,6 +840,20 @@ function App() {
     }
   };
 
+  // MultiRouter provider 只能在专用工作台里编辑，避免落入通用 Provider 表单后走到旧 route 编辑器。
+  const openCodexRouterWorkspace = (
+    provider?: Provider | null,
+    tab: WorkspaceTab = "routes",
+  ) => {
+    setActiveApp("codex");
+    setCodexRouterWorkspaceTarget({
+      providerId: provider?.id ?? null,
+      tab,
+    });
+    setEditingProvider(null);
+    setCurrentView("codexRouter");
+  };
+
   const notifyWindowControlError = (error: unknown) => {
     toast.error(
       t("notifications.windowControlFailed", {
@@ -903,8 +925,13 @@ function App() {
               isProxyRunning={isProxyRunning}
               isCodexTakeoverActive={Boolean(takeoverStatus?.codex)}
               activeProviderId={codexActiveProviderId}
+              initialProviderId={codexRouterWorkspaceTarget.providerId}
+              initialTab={codexRouterWorkspaceTarget.tab}
               onEditProvider={(provider) => {
-                setActiveApp("codex");
+                if (isRoutingPlan(provider)) {
+                  openCodexRouterWorkspace(provider, "routes");
+                  return;
+                }
                 setEditingProvider(provider);
               }}
               onCreateProvider={() => {
@@ -990,6 +1017,10 @@ function App() {
                       activeProviderId={activeProviderId}
                       onSwitch={switchProvider}
                       onEdit={(provider) => {
+                        if (activeApp === "codex" && isRoutingPlan(provider)) {
+                          openCodexRouterWorkspace(provider, "routes");
+                          return;
+                        }
                         setEditingProvider(provider);
                       }}
                       onDelete={(provider) =>

@@ -77,7 +77,12 @@ import type {
   ProxyStatus,
 } from "@/types/proxy";
 
-type WorkspaceTab = "overview" | "sources" | "routes" | "status" | "test";
+export type WorkspaceTab =
+  | "overview"
+  | "sources"
+  | "routes"
+  | "status"
+  | "test";
 
 type StatusView = "link" | "debug" | "providers" | "traffic";
 
@@ -970,6 +975,8 @@ export function CodexRouterWorkspacePage({
   isProxyRunning,
   isCodexTakeoverActive,
   activeProviderId,
+  initialProviderId,
+  initialTab = "status",
   onEditProvider,
   onCreateProvider: _onCreateProvider,
 }: {
@@ -978,10 +985,12 @@ export function CodexRouterWorkspacePage({
   isProxyRunning: boolean;
   isCodexTakeoverActive: boolean;
   activeProviderId?: string;
+  initialProviderId?: string | null;
+  initialTab?: WorkspaceTab;
   onEditProvider: (provider: Provider) => void;
   onCreateProvider: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>("status");
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(initialTab);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [selectedRouteKey, setSelectedRouteKey] = useState<string | null>(null);
   const [testModel, setTestModel] = useState("");
@@ -1049,6 +1058,18 @@ export function CodexRouterWorkspacePage({
       ({ provider, route, index }) =>
         `${provider.id}:${route.id ?? index}` === selectedRouteKey,
     ) ?? selectedPlanRouteEntries[0];
+
+  // 从主页或 Provider 列表跳转进来时，直接定位到指定 MultiRouter 和目标功能页。
+  useEffect(() => {
+    if (!initialProviderId) return;
+    const exists = routingPlans.some(
+      (provider) => provider.id === initialProviderId,
+    );
+    if (!exists) return;
+    setSelectedPlanId(initialProviderId);
+    setSelectedRouteKey(null);
+    setActiveTab(initialTab);
+  }, [initialProviderId, initialTab, routingPlans]);
 
   useEffect(() => {
     const persistedPlan = optimisticRoutingPlan
