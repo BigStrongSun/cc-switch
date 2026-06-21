@@ -2748,6 +2748,61 @@ experimental_bearer_token = "provider-token"
     }
 
     #[test]
+    fn merge_provider_config_replaces_same_custom_provider_table() {
+        // 同名自定义 provider 恢复时，live 表可能来自接管态并带本地代理字段；
+        // 备份/provider 表缺少这些字段时，必须整表替换而不是只覆盖已有键。
+        let live_config = r#"model_provider = "custom"
+model = "gpt-5"
+
+[model_providers.custom]
+name = "OpenAI Router"
+base_url = "http://127.0.0.1:15721/v1"
+wire_api = "responses"
+experimental_bearer_token = "PROXY_MANAGED"
+
+[desktop]
+notifications-turn-mode = "always"
+"#;
+        let provider_config = r#"model_provider = "custom"
+model = "gpt-5"
+
+[model_providers.custom]
+name = "OpenAI"
+wire_api = "responses"
+requires_openai_auth = true
+"#;
+
+        let merged =
+            merge_codex_provider_config_texts(live_config, provider_config).expect("merge config");
+        let parsed: toml::Value = toml::from_str(&merged).expect("parse merged config");
+        let custom = parsed
+            .get("model_providers")
+            .and_then(|value| value.get("custom"))
+            .expect("custom provider table");
+
+        assert_eq!(
+            custom.get("name").and_then(|value| value.as_str()),
+            Some("OpenAI")
+        );
+        assert!(
+            custom.get("base_url").is_none(),
+            "restored provider table must drop takeover proxy base_url"
+        );
+        assert!(
+            custom.get("experimental_bearer_token").is_none(),
+            "restored provider table must drop takeover proxy token"
+        );
+        assert_eq!(
+            parsed
+                .get("desktop")
+                .and_then(|value| value.get("notifications-turn-mode"))
+                .and_then(|value| value.as_str()),
+            Some("always"),
+            "user-owned desktop settings should still be preserved"
+        );
+    }
+
+    #[test]
     fn merge_empty_official_config_clears_provider_fields_but_keeps_user_sections() {
         let live_config = r#"model = "deepseek-v4-flash"
 model_provider = "codex_model_router_v2"
