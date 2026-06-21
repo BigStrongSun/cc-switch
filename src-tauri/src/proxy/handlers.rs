@@ -139,22 +139,18 @@ fn codex_catalog_model_id(entry: &Value) -> Option<String> {
 
 /// 将 cc-switch catalog 扩展为同时兼容 raw catalog 和 OpenAI list 的响应。
 fn codex_catalog_models_response(mut catalog: Value) -> Value {
-    let mut ids = catalog
-        .get("models")
-        .and_then(|models| models.as_array())
-        .map(|models| {
-            models
-                .iter()
-                .filter_map(codex_catalog_model_id)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let mut ids = Vec::new();
+    let mut entries = Vec::new();
+    collect_string_array(&mut ids, catalog.get("models"));
+    collect_model_objects(&mut entries, catalog.get("models"));
     ids.sort();
     ids.dedup();
-    let data = ids
-        .into_iter()
-        .map(|id| openai_model_entry(&id, "cc-switch"))
-        .collect::<Vec<_>>();
+    entries.extend(
+        ids.into_iter()
+            .filter(|id| !id.trim().is_empty())
+            .map(|id| openai_model_entry(&id, "cc-switch")),
+    );
+    let data = dedup_openai_model_entries(entries);
 
     if let Some(object) = catalog.as_object_mut() {
         object.insert("object".to_string(), json!("list"));
@@ -1202,6 +1198,9 @@ fn external_codex_router_model_entries(
         return Ok(Vec::new());
     };
     let mut ids = Vec::new();
+    let mut entries = Vec::new();
+    let catalog_sources =
+        collect_model_sources_by_id(provider.settings_config.pointer("/modelCatalog/models"));
     if let Some(routes) = provider
         .settings_config
         .pointer("/codexRouting/routes")
@@ -1218,6 +1217,8 @@ fn external_codex_router_model_entries(
             }
             collect_string_array(&mut ids, route.pointer("/match/models"));
             collect_string_array(&mut ids, route.get("models"));
+            collect_model_objects(&mut entries, route.pointer("/match/models"));
+            collect_model_objects(&mut entries, route.get("models"));
             if ids.is_empty() {
                 collect_string_array(&mut ids, route.pointer("/match/prefixes"));
             }
@@ -1228,11 +1229,17 @@ fn external_codex_router_model_entries(
     }
     ids.sort();
     ids.dedup();
-    Ok(ids
-        .into_iter()
-        .filter(|id| !id.trim().is_empty())
-        .map(|id| openai_model_entry(&id, "cc-switch"))
-        .collect())
+    entries.extend(
+        ids.into_iter()
+            .filter(|id| !id.trim().is_empty())
+            .map(|id| {
+                catalog_sources
+                    .get(id.as_str())
+                    .map(|source| openai_model_entry_with_source(&id, "cc-switch", source))
+                    .unwrap_or_else(|| openai_model_entry(&id, "cc-switch"))
+            }),
+    );
+    Ok(dedup_openai_model_entries(entries))
 }
 
 /// 收集字符串数组里的模型 id。
@@ -1270,6 +1277,20 @@ fn collect_model_objects(entries: &mut Vec<Value>, value: Option<&Value>) {
             }
         }
     }
+}
+
+/// 按模型 id 建立 catalog 对象索引，供 route 只有字符串 match 时回填上下文窗口。
+fn collect_model_sources_by_id(value: Option<&Value>) -> std::collections::HashMap<String, Value> {
+    let mut sources = std::collections::HashMap::new();
+    if let Some(values) = value.and_then(|value| value.as_array()) {
+        for value in values {
+            let Some(id) = codex_catalog_model_id(value) else {
+                continue;
+            };
+            sources.entry(id).or_insert_with(|| value.clone());
+        }
+    }
+    sources
 }
 
 /// 构造 OpenAI-compatible model entry。
@@ -3152,8 +3173,8 @@ mod tests {
     fn codex_catalog_models_response_keeps_catalog_and_openai_data() {
         let response = codex_catalog_models_response(json!({
             "models": [
-                { "slug": "qwen3.6", "display_name": "Qwen 3.6" },
-                { "model": "deepseek-v4-flash", "display_name": "DeepSeek V4 Flash" },
+                { "slug": "qwen3.6", "display_name": "Qwen 3.6", "context_window": 262144 },
+                { "model": "deepseek-v4-flash", "display_name": "DeepSeek V4 Flash", "contextWindow": 1000000 },
                 { "slug": "qwen3.6", "display_name": "duplicate" }
             ]
         }));
@@ -3170,6 +3191,16 @@ mod tests {
             .filter_map(|model| model.get("id").and_then(|id| id.as_str()))
             .collect();
         assert_eq!(ids, vec!["deepseek-v4-flash", "qwen3.6"]);
+        let qwen = response["data"]
+            .as_array()
+            .expect("OpenAI data array")
+            .iter()
+            .find(|model| model.get("id").and_then(|id| id.as_str()) == Some("qwen3.6"))
+            .expect("qwen model entry");
+        assert_eq!(
+            qwen.get("context_window").and_then(|value| value.as_u64()),
+            Some(262_144)
+        );
     }
 
     #[test]
@@ -4033,6 +4064,81 @@ data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\"}}\n
                 .get("max_context_window")
                 .and_then(|value| value.as_u64()),
             Some(272_000)
+        );
+    }
+
+    #[test]
+    fn external_models_response_reads_codex_router_model_catalog_context() {
+        let db = Arc::new(Database::memory().expect("memory db"));
+        db.save_provider(
+            "codex",
+            &Provider::with_id(
+                "codex-router".to_string(),
+                "Codex Router".to_string(),
+                json!({
+                    "modelCatalog": {
+                        "models": [
+                            { "model": "deepseek-v4-flash", "contextWindow": 1000000 },
+                            { "model": "qwen3.6", "context_window": 262144 }
+                        ]
+                    },
+                    "codexRouting": {
+                        "enabled": true,
+                        "routes": [
+                            {
+                                "id": "deepseek",
+                                "label": "DeepSeek",
+                                "match": { "models": ["deepseek-v4-flash"] }
+                            },
+                            {
+                                "id": "qwen",
+                                "label": "Qwen",
+                                "match": { "models": [{ "model": "qwen3.6", "context_window": 262144 }] }
+                            }
+                        ]
+                    }
+                }),
+                None,
+            ),
+        )
+        .expect("save provider");
+        external_openai_api::update_profile(
+            &db,
+            ExternalOpenAiApiProfileUpdate {
+                enabled: true,
+                backend_type: ExternalOpenAiApiBackendType::CodexRouterRoute,
+                app_type: Some("codex".to_string()),
+                provider_id: Some("codex-router".to_string()),
+                route_id: None,
+                default_model: Some("deepseek-v4-flash".to_string()),
+                listen_address: None,
+                listen_port: None,
+            },
+        )
+        .expect("save profile");
+        let profile = external_openai_api::load_profile(&db).expect("load profile");
+        let state = build_state(db);
+
+        let response = external_openai_api_models_response(&state, &profile).expect("models");
+        let data = response["data"].as_array().expect("data array");
+        let deepseek = data
+            .iter()
+            .find(|model| model.get("id").and_then(|id| id.as_str()) == Some("deepseek-v4-flash"))
+            .expect("deepseek entry");
+        let qwen = data
+            .iter()
+            .find(|model| model.get("id").and_then(|id| id.as_str()) == Some("qwen3.6"))
+            .expect("qwen entry");
+
+        assert_eq!(
+            deepseek
+                .get("context_window")
+                .and_then(|value| value.as_u64()),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            qwen.get("context_window").and_then(|value| value.as_u64()),
+            Some(262_144)
         );
     }
 

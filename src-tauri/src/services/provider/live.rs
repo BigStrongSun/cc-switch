@@ -312,7 +312,6 @@ fn strip_codex_common_config_provider_fields(doc: &mut DocumentMut) {
     for key in [
         "model",
         "model_provider",
-        "model_context_window",
         "model_catalog_json",
         "openai_base_url",
         "experimental_bearer_token",
@@ -1702,6 +1701,7 @@ mod tests {
             "config": "model_provider = \"openai\"\n[model_providers.openai]\nbase_url = \"https://api.openai.com/v1\"\n"
         });
         let snippet = r#"model_provider = "router"
+model_context_window = 262144
 model_catalog_json = "cc-switch-model-catalog.json"
 openai_base_url = "http://127.0.0.1:15721/v1"
 experimental_bearer_token = "sk-router"
@@ -1720,6 +1720,10 @@ web_search = true
         assert!(applied_config.contains("https://api.openai.com/v1"));
         assert!(applied_config.contains("[features]"));
         assert!(applied_config.contains("web_search = true"));
+        assert!(
+            applied_config.contains("model_context_window = 262144"),
+            "model_context_window is a user-visible Codex context display setting, not a local proxy route field"
+        );
         assert!(!applied_config.contains("model_catalog_json"));
         assert!(!applied_config.contains("openai_base_url"));
         assert!(!applied_config.contains("experimental_bearer_token"));

@@ -2524,7 +2524,6 @@ impl ProxyService {
         for key in [
             "model",
             "model_provider",
-            "model_context_window",
             "model_catalog_json",
             "openai_base_url",
             "experimental_bearer_token",
@@ -5539,6 +5538,63 @@ base_url = "https://new.example/v1"
         assert!(
             config.contains("https://new.example/v1"),
             "provider-specific base_url should still update to the new provider"
+        );
+    }
+
+    #[test]
+    fn merge_codex_user_config_preserves_context_window_until_provider_overrides() {
+        let existing = r#"model_provider = "old"
+model = "old-model"
+model_context_window = 262144
+approval_policy = "on-request"
+
+[model_providers.old]
+base_url = "https://old.example/v1"
+"#;
+        let target_without_context = r#"model_provider = "new"
+model = "new-model"
+
+[model_providers.new]
+base_url = "https://new.example/v1"
+"#;
+        let merged = ProxyService::merge_codex_user_config_with_provider_config(
+            existing,
+            target_without_context,
+        )
+        .expect("merge without context");
+        let parsed: toml::Value = toml::from_str(&merged).expect("parse merged config");
+
+        assert_eq!(
+            parsed
+                .get("model_context_window")
+                .and_then(|value| value.as_integer()),
+            Some(262_144),
+            "target providers that omit context_window should not erase the user's Codex context display"
+        );
+        assert_eq!(
+            parsed
+                .get("model_provider")
+                .and_then(|value| value.as_str()),
+            Some("new")
+        );
+
+        let target_with_context = r#"model_provider = "new"
+model = "new-model"
+model_context_window = 1000000
+"#;
+        let overridden = ProxyService::merge_codex_user_config_with_provider_config(
+            existing,
+            target_with_context,
+        )
+        .expect("merge with context");
+        let parsed_override: toml::Value =
+            toml::from_str(&overridden).expect("parse overridden config");
+        assert_eq!(
+            parsed_override
+                .get("model_context_window")
+                .and_then(|value| value.as_integer()),
+            Some(1_000_000),
+            "provider-specific explicit context_window should still win"
         );
     }
 

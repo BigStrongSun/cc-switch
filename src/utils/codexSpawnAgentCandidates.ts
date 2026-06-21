@@ -4,6 +4,8 @@ export interface CodexCatalogModel {
   model?: string;
   displayName?: string;
   display_name?: string;
+  contextWindow?: string | number;
+  context_window?: string | number;
 }
 
 export interface CodexModelCatalog {

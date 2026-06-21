@@ -1586,7 +1586,7 @@ fn remove_codex_provider_owned_fields_missing_from_provider(
         remove_active_custom_codex_model_provider_section(live_doc);
     }
 
-    for key in ["model", "model_provider", "model_context_window"] {
+    for key in ["model", "model_provider"] {
         if provider_doc.get(key).is_none() {
             live_doc.as_table_mut().remove(key);
         }
@@ -1619,7 +1619,6 @@ fn strip_codex_provider_owned_fields_from_live(live_config_text: &str) -> Result
     for key in [
         "model",
         "model_provider",
-        "model_context_window",
         "openai_base_url",
         "experimental_bearer_token",
     ] {
@@ -2608,6 +2607,7 @@ model = "gpt-5"
     fn merge_provider_config_preserves_live_user_sections() {
         let live_config = r#"model = "gpt-5.5"
 model_provider = "openai"
+model_context_window = 262144
 approval_policy = "on-request"
 experimental_bearer_token = "old-top-level-token"
 
@@ -2671,6 +2671,13 @@ experimental_bearer_token = "provider-token"
                 .get("model_catalog_json")
                 .and_then(|value| value.as_str()),
             Some("cc-switch-model-catalog.json")
+        );
+        assert_eq!(
+            parsed
+                .get("model_context_window")
+                .and_then(|value| value.as_integer()),
+            Some(262_144),
+            "provider switches should preserve user-owned context display when the provider omits it"
         );
         assert!(
             parsed.get("experimental_bearer_token").is_none(),
@@ -2806,6 +2813,7 @@ requires_openai_auth = true
     fn merge_empty_official_config_clears_provider_fields_but_keeps_user_sections() {
         let live_config = r#"model = "deepseek-v4-flash"
 model_provider = "codex_model_router_v2"
+model_context_window = 262144
 model_catalog_json = "cc-switch-model-catalog.json"
 openai_base_url = "http://127.0.0.1:15721/v1"
 experimental_bearer_token = "stale-token"
@@ -2829,6 +2837,13 @@ wire_api = "responses"
 
         assert!(parsed.get("model").is_none());
         assert!(parsed.get("model_provider").is_none());
+        assert_eq!(
+            parsed
+                .get("model_context_window")
+                .and_then(|value| value.as_integer()),
+            Some(262_144),
+            "official fallback should keep the user's context display setting"
+        );
         assert!(parsed.get("model_catalog_json").is_none());
         assert!(parsed.get("openai_base_url").is_none());
         assert!(parsed.get("experimental_bearer_token").is_none());

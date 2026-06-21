@@ -312,6 +312,46 @@ function collectProviderModelIds(provider: Provider): string[] {
   );
 }
 
+/// 从模型源 catalog 条目构造 MultiRouter 自己的 catalog 草稿；保留上下文窗口字段供 Codex 与第三方 API 继续透传。
+function catalogDraftFromSourceModel(
+  id: string,
+  source?: Pick<
+    CodexCatalogModelDraft,
+    "displayName" | "display_name" | "contextWindow" | "context_window"
+  >,
+): CodexCatalogModelDraft {
+  const displayName = source?.displayName ?? source?.display_name;
+  const contextWindow = source?.contextWindow ?? source?.context_window;
+  return {
+    model: id,
+    ...(displayName ? { displayName } : {}),
+    ...(contextWindow ? { contextWindow } : {}),
+  };
+}
+
+/// 汇总所有模型源的模型目录；对象 catalog 优先，字符串模型名作为无元数据兜底。
+function buildModelCatalogDraftFromSources(
+  modelSources: Provider[],
+): CodexCatalogModelDraft[] {
+  const byModel = new Map<string, CodexCatalogModelDraft>();
+
+  for (const provider of modelSources) {
+    for (const catalogModel of readCodexModelCatalog(provider).models) {
+      const id = catalogModel.model?.trim();
+      if (!id || byModel.has(id)) continue;
+      byModel.set(id, catalogDraftFromSourceModel(id, catalogModel));
+    }
+
+    for (const model of collectProviderModelIds(provider)) {
+      const id = model.trim();
+      if (!id || byModel.has(id)) continue;
+      byModel.set(id, { model: id });
+    }
+  }
+
+  return Array.from(byModel.values());
+}
+
 /// 根据 provider 名称和模型名推断少量前缀；只作为无精确模型目录时的兜底，避免把路由规则做成空匹配。
 function inferProviderPrefixes(
   provider: Provider,
@@ -552,10 +592,7 @@ export function buildModelCatalogForRoutes(
     for (const catalogModel of targetCatalogModels) {
       const id = catalogModel.model?.trim();
       if (!id || byModel.has(id)) continue;
-      byModel.set(id, {
-        model: id,
-        displayName: catalogModel.displayName ?? catalogModel.display_name,
-      });
+      byModel.set(id, catalogDraftFromSourceModel(id, catalogModel));
     }
     for (const model of route.match?.models ?? []) {
       const id = model.trim();
@@ -589,11 +626,10 @@ export function createDraftRoutingPlan(
 ): Provider {
   const existingIds = new Set(providers.map((provider) => provider.id));
   const id = uniqueRouteId("codex-multirouter", existingIds);
-  const sourceModels = modelSources.flatMap((provider) =>
-    collectProviderModelIds(provider),
-  );
+  const catalogModels = buildModelCatalogDraftFromSources(modelSources);
+  const sourceModels = catalogModels.map((model) => model.model);
   const modelCatalog: CodexModelCatalogDraft = {
-    models: Array.from(new Set(sourceModels)).map((model) => ({ model })),
+    models: catalogModels,
     spawnAgentModels: Array.from(new Set(sourceModels)).slice(0, 5),
   };
   return {

@@ -18,7 +18,13 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
       category: "official",
       settingsConfig: {
         modelCatalog: {
-          models: [{ model: "gpt-5.4-mini", displayName: "GPT 5.4 Mini" }],
+          models: [
+            {
+              model: "gpt-5.4-mini",
+              displayName: "GPT 5.4 Mini",
+              contextWindow: 128000,
+            },
+          ],
         },
       },
       meta: { apiFormat: "openai_responses" },
@@ -29,7 +35,13 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
       category: "custom",
       settingsConfig: {
         modelCatalog: {
-          models: [{ model: "qwen3.6", displayName: "Qwen 3.6" }],
+          models: [
+            {
+              model: "qwen3.6",
+              displayName: "Qwen 3.6",
+              contextWindow: 262144,
+            },
+          ],
         },
       },
       meta: { apiFormat: "openai_chat" },
@@ -42,8 +54,12 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
     expect(readCodexRouting(plan)?.enabled).toBe(true);
     expect(readCodexRouting(plan)?.routes).toEqual([]);
     expect(plan.settingsConfig.modelCatalog.models).toEqual([
-      { model: "gpt-5.4-mini" },
-      { model: "qwen3.6" },
+      {
+        model: "gpt-5.4-mini",
+        displayName: "GPT 5.4 Mini",
+        contextWindow: 128000,
+      },
+      { model: "qwen3.6", displayName: "Qwen 3.6", contextWindow: 262144 },
     ]);
   });
 
@@ -54,7 +70,13 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
       category: "custom",
       settingsConfig: {
         modelCatalog: {
-          models: [{ model: "qwen3.6", displayName: "Qwen 3.6" }],
+          models: [
+            {
+              model: "qwen3.6",
+              displayName: "Qwen 3.6",
+              contextWindow: 262144,
+            },
+          ],
         },
       },
       meta: { apiFormat: "openai_chat" },
@@ -65,7 +87,7 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
       category: "custom",
       settingsConfig: {
         modelCatalog: {
-          models: [{ model: "deepseek-v4-flash" }],
+          models: [{ model: "deepseek-v4-flash", contextWindow: 1000000 }],
         },
       },
       meta: { apiFormat: "openai_chat" },
@@ -120,8 +142,8 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
       (readCodexRouting(savedPlan)?.routes ?? []).map((route) => route.id),
     ).toEqual(["codex-qwen", "codex-deepseek"]);
     expect(savedPlan.settingsConfig.modelCatalog.models).toEqual([
-      { model: "qwen3.6" },
-      { model: "deepseek-v4-flash" },
+      { model: "qwen3.6", displayName: "Qwen 3.6", contextWindow: 262144 },
+      { model: "deepseek-v4-flash", contextWindow: 1000000 },
     ]);
     expect(savedPlan.settingsConfig.modelCatalog.spawnAgentModels).toEqual([
       "qwen3.6",
