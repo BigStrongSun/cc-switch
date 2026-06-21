@@ -1,4 +1,4 @@
-﻿# Unified Codex Session History: Feature Overview and Usage Guide (CC Switch)
+# Unified Codex Session History: Feature Overview and Usage Guide (CC Switch)
 
 > Applies to CC Switch v3.16.x and later. This guide is based on the current code; every command and path can be verified by hand. Examples use de-identified data and contain no real session content or API keys.
 

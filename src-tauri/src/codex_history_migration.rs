@@ -3366,6 +3366,7 @@ fn migrate_codex_state_dbs_to_target(
 fn codex_state_db_paths(codex_dir: &Path, config_text: &str) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     push_unique_path(&mut paths, codex_dir.join(CODEX_STATE_DB_FILENAME));
+    // Codex lets SQLite state move away from CODEX_HOME; config takes precedence.
     if let Some(sqlite_home) = sqlite_home_from_codex_config(config_text) {
         push_unique_path(&mut paths, sqlite_home.join(CODEX_STATE_DB_FILENAME));
     } else if let Some(sqlite_home) = sqlite_home_from_env() {
@@ -5295,6 +5296,46 @@ base_url = "https://proxy.example/v1"
             )
             .expect("count backed up source providers");
         assert_eq!(backed_up_source_count, 2);
+    }
+
+    #[test]
+    #[serial]
+    fn state_db_paths_include_codex_sqlite_home_env() {
+        let dir = tempdir().expect("tempdir");
+        let codex_dir = dir.path().join(".codex");
+        let sqlite_home = dir.path().join("sqlite-home");
+        let _guard = EnvVarGuard::set("CODEX_SQLITE_HOME", &sqlite_home);
+
+        let paths = codex_state_db_paths(&codex_dir, "");
+
+        assert_eq!(
+            paths,
+            vec![
+                codex_dir.join(CODEX_STATE_DB_FILENAME),
+                sqlite_home.join(CODEX_STATE_DB_FILENAME),
+            ]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn config_sqlite_home_takes_precedence_over_codex_sqlite_home_env() {
+        let dir = tempdir().expect("tempdir");
+        let codex_dir = dir.path().join(".codex");
+        let env_sqlite_home = dir.path().join("env-sqlite-home");
+        let config_sqlite_home = dir.path().join("config-sqlite-home");
+        let _guard = EnvVarGuard::set("CODEX_SQLITE_HOME", &env_sqlite_home);
+        let config_text = format!("sqlite_home = \"{}\"\n", config_sqlite_home.display());
+
+        let paths = codex_state_db_paths(&codex_dir, &config_text);
+
+        assert_eq!(
+            paths,
+            vec![
+                codex_dir.join(CODEX_STATE_DB_FILENAME),
+                config_sqlite_home.join(CODEX_STATE_DB_FILENAME),
+            ]
+        );
     }
 
     #[test]
