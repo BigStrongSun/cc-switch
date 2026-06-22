@@ -259,7 +259,101 @@ pub fn materialize_codex_routed_provider_from_target(
     }
 
     materialized.settings_config = JsonValue::Object(settings);
+    if should_treat_target_as_managed_codex_oauth(route_provider, target_provider, &materialized) {
+        let meta = materialized.meta.get_or_insert_with(ProviderMeta::default);
+        meta.provider_type = Some("codex_oauth".to_string());
+    }
     materialized
+}
+
+/// 判断 route 引用的旧版官方 Codex provider 是否实际应走托管 ChatGPT OAuth。
+///
+/// 早期 `codex-official` 只保存 `auth.auth_mode = "chatgpt"` 和 OAuth tokens，
+/// 没有写 `meta.provider_type = "codex_oauth"` 或 `base_url`。MultiRouter 通过
+/// `targetProviderId` 命中这类 provider 时，如果不在物化阶段补齐语义，后续
+/// `CodexAdapter::extract_base_url` 会把它当成普通 OpenAI-compatible provider 并报
+/// “缺少 base_url”。这里只在目标 provider 本身没有可解析 base_url 时兜底，避免覆盖
+/// 用户明确配置的第三方 OpenAI-compatible Codex provider。
+fn should_treat_target_as_managed_codex_oauth(
+    route_provider: &Provider,
+    target_provider: &Provider,
+    materialized: &Provider,
+) -> bool {
+    if materialized
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.provider_type.as_deref())
+        == Some("codex_oauth")
+    {
+        return true;
+    }
+
+    if provider_has_codex_base_url(target_provider) || provider_has_codex_base_url(materialized) {
+        return false;
+    }
+
+    let route_target = codex_route_target_provider_id(route_provider).unwrap_or_default();
+    target_provider_looks_like_managed_codex_oauth(target_provider, route_target)
+}
+
+/// 检查 provider settings/config 中是否已经有可用于 Codex adapter 的 base_url。
+fn provider_has_codex_base_url(provider: &Provider) -> bool {
+    provider
+        .settings_config
+        .get("base_url")
+        .or_else(|| provider.settings_config.get("baseURL"))
+        .or_else(|| provider.settings_config.get("baseUrl"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .is_some_and(|url| !url.is_empty())
+        || provider
+            .settings_config
+            .get("config")
+            .and_then(|value| value.as_str())
+            .and_then(extract_codex_base_url_from_toml)
+            .is_some()
+}
+
+/// 识别旧版官方 Codex OAuth provider，不依赖新版 meta 字段是否已回填。
+fn target_provider_looks_like_managed_codex_oauth(
+    provider: &Provider,
+    route_target_provider_id: &str,
+) -> bool {
+    if provider
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.provider_type.as_deref())
+        == Some("codex_oauth")
+    {
+        return true;
+    }
+
+    let auth = provider.settings_config.get("auth");
+    let has_chatgpt_auth_mode = auth
+        .and_then(|auth| auth.get("auth_mode"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .is_some_and(|mode| mode.eq_ignore_ascii_case("chatgpt"));
+    let has_oauth_tokens = auth
+        .and_then(|auth| auth.get("tokens"))
+        .and_then(|tokens| {
+            tokens
+                .get("access_token")
+                .or_else(|| tokens.get("refresh_token"))
+                .and_then(|value| value.as_str())
+        })
+        .map(str::trim)
+        .is_some_and(|token| !token.is_empty());
+    let id_or_name_marks_official = [
+        provider.id.as_str(),
+        provider.name.as_str(),
+        route_target_provider_id,
+    ]
+    .into_iter()
+    .map(str::to_ascii_lowercase)
+    .any(|value| value.contains("codex-official") || value.contains("openai official"));
+
+    (has_chatgpt_auth_mode || has_oauth_tokens) && id_or_name_marks_official
 }
 
 /// 从新旧配置中挑出本次请求的 route 候选；匹配 route 在前，fallback route 在后。
@@ -1277,12 +1371,7 @@ impl ProviderAdapter for CodexAdapter {
     fn extract_base_url(&self, provider: &Provider) -> Result<String, ProxyError> {
         // Codex v2 路由到 ChatGPT OAuth 时仍然固定使用 CodexAdapter；
         // 这里补齐托管账号 provider 的 base_url 语义，避免走普通 OpenAI 兼容配置解析。
-        if provider
-            .meta
-            .as_ref()
-            .and_then(|meta| meta.provider_type.as_deref())
-            == Some("codex_oauth")
-        {
+        if provider_is_managed_codex_oauth(provider) {
             return Ok("https://chatgpt.com/backend-api/codex".to_string());
         }
 
@@ -1326,12 +1415,7 @@ impl ProviderAdapter for CodexAdapter {
     fn extract_auth(&self, provider: &Provider) -> Option<AuthInfo> {
         // ChatGPT Codex OAuth 的真实 access_token 由 forwarder 动态换取；
         // adapter 这里只返回策略占位，保持和 ClaudeAdapter 的托管账号语义一致。
-        if provider
-            .meta
-            .as_ref()
-            .and_then(|meta| meta.provider_type.as_deref())
-            == Some("codex_oauth")
-        {
+        if provider_is_managed_codex_oauth(provider) {
             return Some(AuthInfo::new(
                 "codex_oauth_placeholder".to_string(),
                 AuthStrategy::CodexOAuth,
@@ -1409,6 +1493,26 @@ impl ProviderAdapter for CodexAdapter {
             )]),
         }
     }
+}
+
+/// 判断任意 Codex provider 是否应使用托管 ChatGPT/Codex OAuth。
+///
+/// 新数据直接读取 `meta.providerType = "codex_oauth"`；旧版 official provider 可能只
+/// 有 `auth.auth_mode = "chatgpt"` 和 OAuth tokens，且没有 base_url。第三方
+/// OpenAI-compatible API profile 直接指向这类 provider 时不会经过 MultiRouter 物化，
+/// 因此 adapter 本身也必须能识别它。
+fn provider_is_managed_codex_oauth(provider: &Provider) -> bool {
+    if provider
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.provider_type.as_deref())
+        == Some("codex_oauth")
+    {
+        return true;
+    }
+
+    !provider_has_codex_base_url(provider)
+        && target_provider_looks_like_managed_codex_oauth(provider, "")
 }
 
 #[cfg(test)]
@@ -1534,6 +1638,67 @@ mod tests {
             &materialized,
             "/v1/responses"
         ));
+    }
+
+    #[test]
+    fn test_codex_route_target_provider_infers_legacy_official_oauth_base_url() {
+        let adapter = CodexAdapter::new();
+        let router = create_provider(json!({
+            "codexRouting": {
+                "enabled": true,
+                "routes": [{
+                    "id": "official",
+                    "label": "OpenAI Official",
+                    "targetProviderId": "codex-official",
+                    "match": { "models": ["gpt-5.5"] },
+                    "upstream": {
+                        "apiFormat": "openai_responses",
+                        "auth": { "source": "provider_config" }
+                    }
+                }]
+            }
+        }));
+        let target = Provider::with_id(
+            "codex-official".to_string(),
+            "OpenAI Official Backup".to_string(),
+            json!({
+                "auth": {
+                    "auth_mode": "chatgpt",
+                    "tokens": {
+                        "access_token": "managed-access-token"
+                    }
+                },
+                "config": "model_reasoning_effort = \"medium\"\n"
+            }),
+            None,
+        );
+
+        let routed = resolve_codex_model_routed_provider(&router, &json!({ "model": "gpt-5.5" }))
+            .expect("official route");
+        let materialized = materialize_codex_routed_provider_from_target(&routed, &target);
+
+        assert_eq!(
+            materialized
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.provider_type.as_deref()),
+            Some("codex_oauth")
+        );
+        assert_eq!(
+            adapter.extract_base_url(&materialized).unwrap(),
+            "https://chatgpt.com/backend-api/codex"
+        );
+        assert_eq!(
+            adapter.extract_auth(&materialized).unwrap().strategy,
+            AuthStrategy::CodexOAuth
+        );
+        assert_eq!(
+            adapter.build_url(
+                &adapter.extract_base_url(&materialized).unwrap(),
+                "/v1/responses"
+            ),
+            "https://chatgpt.com/backend-api/codex/responses"
+        );
     }
 
     #[test]
