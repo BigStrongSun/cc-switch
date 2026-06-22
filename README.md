@@ -2,7 +2,7 @@
 
 # CCSwitchMulti
 
-### A Codex MultiRouter branch of CC Switch
+### 基于官方 CC Switch 的 Codex MultiRouter 分支
 
 [![Version](https://img.shields.io/github/v/release/BigStrongSun/cc-switch?color=blue&label=version)](https://github.com/BigStrongSun/cc-switch/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/BigStrongSun/cc-switch/releases)
@@ -21,59 +21,93 @@ English | [中文](README_ZH.md) | [日本語](README_JA.md) | [Deutsch](README_
 
 <img src="assets/xiaohongshu-discussion-qr.png" alt="小红书讨论群二维码" width="180" />
 
-**Need help or want to share feedback?** You can open a GitHub Issue, or scan the QR code to join the Xiaohongshu discussion group.
-
-求助和反馈除了提交 GitHub Issue，也可以扫码加入小红书讨论群一起讨论。（二维码有效期至 2026-07-20）
+**求助和反馈**：可以提交 GitHub Issue，也可以扫码加入小红书讨论群一起讨论。（二维码有效期至 2026-07-20）
 
 </div>
 
-## CCSwitchMulti Branch Notice
+## CCSwitchMulti 分支说明
 
-CCSwitchMulti is a downstream branch of the official [CC Switch](https://github.com/farion1231/cc-switch). It keeps the upstream desktop manager, provider database, local proxy, MCP/Skills sync, session management, cloud sync, and cross-platform Tauri app structure, while adding a Codex-focused MultiRouter workflow for running several model sources behind one Codex provider.
+CCSwitchMulti 是基于官方 [CC Switch](https://github.com/farion1231/cc-switch) 继续维护的下游分支。它保留官方版本的桌面管理器、Provider 数据库、本地代理、MCP/Skills 同步、会话管理、云同步和 Tauri 跨平台结构，同时额外加入面向 Codex 的 MultiRouter 工作流，让多个模型来源可以合并到同一个 Codex Provider 后面使用。
 
-The rest of this README still contains the inherited upstream CC Switch documentation. Read this section first when you are using builds from the `BigStrongSun/cc-switch` fork, because the branch adds behavior that does not exist in stock CC Switch.
+后面的 README 仍然保留了上游 CC Switch 的原始说明。使用 `BigStrongSun/cc-switch` 发布版本时，请先阅读本节，因为这里记录的是 CCSwitchMulti 分支相对官方版本新增的能力、实现边界和使用注意事项。
 
-### Extra Capabilities In This Branch
+### 适合谁使用
 
-- **Codex MultiRouter provider**: exposes one Codex provider, usually named `OpenAI Multi-Model Router`, that can show and route multiple model families such as official OpenAI/Codex models, Codex Spark, Qwen, and DeepSeek from the same Codex model picker.
-- **Model catalog projection**: stores the router catalog in CC Switch provider settings, then writes Codex-readable `model_catalog_json`, `cc-switch-model-catalog.json`, and owned `models_cache.json` data so Codex can discover the merged candidate list.
-- **Per-model routing**: stores route rules in `settings_config.codexRouting`; the Rust local proxy reads each request model, selects the matching upstream, injects the right credentials, and bridges OpenAI Responses traffic to Chat Completions backends when needed.
-- **Stable Codex runtime bucket**: uses the router provider bucket `codex_model_router_v2` instead of the built-in `openai` provider or an unstable generic custom bucket, avoiding OpenAI WebSocket semantics and reducing Codex history split.
-- **Codex Desktop picker unlock**: includes runtime diagnostics and a CDP-based renderer unlock for Codex Desktop model-list filtering, including the Statsig model whitelist path that can otherwise hide local/router models.
-- **History visibility repair**: includes a dedicated Codex history repair workspace that can dry-run and apply fixes for provider buckets, session index entries, project hints, user-event markers, and active Desktop sqlite locations.
-- **External OpenAI-compatible API sidecar**: provides a separate local API surface for third-party OpenAI-compatible clients, distinct from the Codex takeover port.
+这个分支特别适合已经有 ChatGPT Pro、Plus 或 Team 订阅，并且希望把 GPT 系列最新、最强模型作为主 Agent 来做规划、决策和质量把关的用户。你可以让主 Agent 继续使用官方 GPT/Codex 能力，同时把大量可拆分的执行任务路由到自己的廉价 API、本地部署模型，或 DeepSeek V4、Qwen 等国产/开源模型上，从而降低 Codex 官方额度消耗。
 
-### How It Works
+典型用法是：主线程使用 GPT-5.5 / GPT-5.4 负责复杂判断、任务拆解和最终审查；子 Agent、批量执行、简单修复、日志分析、重复验证等工作交给 DeepSeek V4 Flash、Qwen、本地 vLLM 或其他 OpenAI-compatible API。按我们的实际测试，这种“强主 Agent + 低成本执行模型”的组合在不少 Codex 工作流里可以至少节约一半官方额度，具体节省比例取决于你的任务结构、路由规则和上游价格。
 
-For Codex MultiRouter, CCSwitchMulti does not simply switch Codex to a single third-party provider. It enables app-level takeover for Codex, starts the local Codex proxy on the takeover port, writes Codex live config to a local Responses-compatible provider, and keeps the real upstream routing plan inside CC Switch's database.
+### 功能截图
 
-The important pieces are:
+#### Provider 列表中的 MultiRouter
 
-- `model_provider = "codex_model_router_v2"` in Codex live config for the MultiRouter runtime bucket.
-- `model_catalog_json = "cc-switch-model-catalog.json"` at the top level of Codex config, plus generated catalog/cache files under the user's Codex config directory.
-- `settings_config.modelCatalog` as the CC Switch-side source of truth for visible models.
-- `settings_config.codexRouting` as the CC Switch-side source of truth for model-to-upstream route rules.
-- `supports_websockets = false` for the local router provider, so Codex uses the HTTP Responses path instead of falling back into built-in OpenAI WebSocket behavior.
-- `requires_openai_auth = true` for Desktop integration, so ChatGPT OAuth account/quota state remains visible while requests still go through the local router.
+![CCSwitchMulti Provider 列表](assets/screenshots/ccswitchmulti/provider-list.png)
 
-### Usage Notes
+`OpenAI Multi-Model Router` 会作为一个 Codex Provider 出现在列表中。它不是普通单一上游，而是一个本地路由入口：Codex 只连到 CCSwitchMulti，本地代理再按模型把请求分发到 OpenAI、Qwen、DeepSeek 或其他上游。
 
-- Use this fork's releases from [BigStrongSun/cc-switch](https://github.com/BigStrongSun/cc-switch/releases), not the upstream release page, when you need CCSwitchMulti features.
-- Keep CCSwitchMulti running while Codex is using `OpenAI Multi-Model Router`; Codex traffic goes through the local takeover proxy.
-- Fully quit and reopen Codex Desktop after changing the router catalog, routes, or takeover state. A running Codex app-server can keep an older model manager in memory.
-- If the Codex Desktop picker still shows only the official models even though diagnostics show a full catalog, start Codex through the CCSwitchMulti unlock flow so the renderer can be launched with a remote debugging port and patched at runtime.
-- CCSwitchMulti does not patch Codex Desktop's `app.asar` on disk; picker unlock is a runtime renderer injection for the active Desktop session.
-- Do not put router TOML, `model_catalog_json`, or `127.0.0.1:<port>` entries into shared Codex common config. They are provider-owned takeover fields and should be written by CCSwitchMulti.
-- Do not route MultiRouter through the built-in Codex `openai` provider or `openai_base_url`. That path can re-enable official OpenAI/WebSocket semantics and break the router/fallback boundary.
-- Qwen, DeepSeek, and other non-OpenAI routes still depend on their upstream endpoints and keys. A model appearing in the picker only proves catalog visibility; request success still depends on route configuration and upstream availability.
-- The Codex takeover port and the external OpenAI-compatible API sidecar are different surfaces. Do not use the sidecar health check as proof that Codex MultiRouter takeover is active.
+#### Codex 多模型路由工作台
 
-### Build And Release Notes
+![Codex 多模型路由状态页](assets/screenshots/ccswitchmulti/multirouter-status.png)
 
-- Current branch package/product identity is `cc-switch-multi` / `CCSwitchMulti`.
-- Windows release exports are produced by `pnpm release:export`; local packaging intentionally disables updater artifact signing when no signing key is available.
-- The portable build still uses the normal user app-data/config locations, so avoid running an upstream official CC Switch instance and a CCSwitchMulti instance at the same time unless you deliberately want them to share state.
-- macOS assets require a macOS build/signing environment; Windows/WSL builds do not produce notarized macOS artifacts.
+多模型路由工作台会展示路由入口、本地监听、Codex 接管、启用规则和最近转发状态。这里用于判断 Codex 请求是否真的进入 MultiRouter，而不是只看模型菜单是否出现。
+
+![Codex 多模型路由规则](assets/screenshots/ccswitchmulti/multirouter-routes.png)
+
+路由规则页可以把同一个 Codex 入口拆成多个上游规则：例如 `gpt-*` 走官方 OpenAI/Codex，`qwen3.6` 走本地或远端 vLLM，`deepseek-*` 走 DeepSeek API。规则启用后，Codex 侧只需要按模型名选择即可。
+
+#### Codex Desktop 中的模型选择
+
+![Codex Desktop 模型选择器](assets/screenshots/ccswitchmulti/codex-model-picker.png)
+
+接管成功后，Codex Desktop 的模型选择器可以同时看到 GPT-5.5、GPT-5.4、GPT-5.4 Mini、Codex Spark、Qwen3.6 Local、DeepSeek V4 Flash、DeepSeek V4 Pro 等候选模型。主 Agent 可以用官方 GPT，子任务可以切到更便宜的模型。
+
+#### 使用统计与成本观测
+
+![CCSwitchMulti 使用统计](assets/screenshots/ccswitchmulti/usage-statistics.png)
+
+统计页可以按模型查看请求数、token 和成本。截图中的工作流同时使用了 GPT-5.5、DeepSeek V4 Flash、Qwen3.6、GPT-5.4 Mini、GPT-5.4 和 Codex Spark，便于评估哪些任务适合迁移到低成本模型。
+
+### 本分支额外提供的能力
+
+- **Codex MultiRouter Provider**：提供一个通常名为 `OpenAI Multi-Model Router` 的 Codex Provider，可在同一个 Codex 模型选择器里展示并路由官方 OpenAI/Codex、Codex Spark、Qwen、DeepSeek 等模型来源。
+- **模型目录投影**：在 CC Switch Provider 配置中维护路由模型目录，并写出 Codex 可读取的 `model_catalog_json`、`cc-switch-model-catalog.json` 和 CC Switch 接管的 `models_cache.json`，让 Codex 能发现合并后的候选模型。
+- **按模型分流**：通过 `settings_config.codexRouting` 保存路由规则；Rust 本地代理会读取每次请求里的 `model`，选择匹配的上游，注入对应凭据，并在需要时把 OpenAI Responses 请求桥接到 Chat Completions 后端。
+- **稳定的 Codex 运行桶**：MultiRouter 使用 `codex_model_router_v2` 作为运行时 provider bucket，而不是 Codex 内置 `openai` 或易漂移的通用 custom bucket，从而避免重新触发官方 OpenAI WebSocket 语义，并减少 Codex 历史记录分桶混乱。
+- **Codex Desktop 模型菜单解锁**：包含运行时诊断和基于 CDP 的 renderer 注入，用于处理 Codex Desktop 里 Statsig 模型白名单导致本地/路由模型被隐藏的问题。
+- **Codex 历史显示修复**：提供独立的历史修复工作区，可先 dry-run，再修复 provider bucket、session index、project hints、user-event 标记和当前 Desktop sqlite 位置等问题。
+- **外部 OpenAI-compatible API sidecar**：提供单独的本地 OpenAI-compatible API 表面，给第三方客户端使用；它和 Codex takeover 端口不是同一路。
+
+### 实现方式
+
+Codex MultiRouter 不是简单地把 Codex 切到某一个第三方 Provider。CCSwitchMulti 会为 Codex 启用 app-level takeover，启动本地 Codex 代理端口，把 Codex live config 写成指向本地的 Responses-compatible Provider，并把真实上游、模型目录和路由计划保存在 CC Switch 数据库里。
+
+关键实现点包括：
+
+- Codex live config 中的 MultiRouter 运行桶是 `model_provider = "codex_model_router_v2"`。
+- Codex config 顶层写入 `model_catalog_json = "cc-switch-model-catalog.json"`，同时在用户 Codex 配置目录下生成 catalog/cache 文件。
+- `settings_config.modelCatalog` 是 CC Switch 侧维护可见模型的事实来源。
+- `settings_config.codexRouting` 是 CC Switch 侧维护模型到上游路由规则的事实来源。
+- 本地 router provider 写入 `supports_websockets = false`，让 Codex 走 HTTP Responses 路径，避免回到内置 OpenAI WebSocket 行为。
+- Desktop 集成保留 `requires_openai_auth = true`，这样 ChatGPT OAuth 账号和额度状态仍可在 Codex Desktop 中显示，但实际请求仍由本地 MultiRouter 接管。
+
+### 使用注意
+
+- 需要 CCSwitchMulti 能力时，请使用 [BigStrongSun/cc-switch](https://github.com/BigStrongSun/cc-switch/releases) 的发布版本，不要下载上游官方 release。
+- Codex 使用 `OpenAI Multi-Model Router` 时必须保持 CCSwitchMulti 运行，因为 Codex 请求会经过本地 takeover 代理。
+- 修改 router 模型目录、路由规则或 takeover 状态后，需要完整退出并重新打开 Codex Desktop；已经运行的 Codex app-server 可能继续持有旧的模型管理器缓存。
+- 如果诊断显示 catalog 已完整，但 Codex Desktop 模型菜单仍只显示官方模型，请通过 CCSwitchMulti 的模型菜单解锁流程启动 Codex，让 renderer 带 remote debugging 端口运行并接受运行时补丁。
+- CCSwitchMulti 不会修改 Codex Desktop 磁盘上的 `app.asar`；模型菜单解锁是针对当前 Desktop 会话的运行时 renderer 注入。
+- 不要把 router TOML、`model_catalog_json` 或 `127.0.0.1:<port>` 写进共享的 Codex common config。这些是 Provider takeover 私有字段，应由 CCSwitchMulti 写入。
+- 不要让 MultiRouter 走 Codex 内置 `openai` Provider 或 `openai_base_url`。那条路径可能重新启用官方 OpenAI/WebSocket 语义，破坏路由和 fallback 边界。
+- Qwen、DeepSeek 等非 OpenAI 路由仍依赖对应上游 endpoint、API key 和网络可用性。模型出现在菜单里只说明 catalog 可见，不代表请求一定成功。
+- Codex takeover 端口和外部 OpenAI-compatible API sidecar 是两套不同入口；不要用 sidecar 的健康检查来判断 Codex MultiRouter 是否已经接管成功。
+
+### 构建与发布说明
+
+- 当前分支的包名/产品名是 `ccswitchmulti` / `CCSwitchMulti`。
+- Windows 发布导出使用 `pnpm release:export`；本地打包在没有签名私钥时会显式关闭 updater artifact 签名。
+- 免安装版仍使用系统默认用户数据和配置目录，因此除非明确要共享状态，否则不要同时运行上游官方 CC Switch 和 CCSwitchMulti。
+- macOS 产物需要 macOS 构建、签名和 notarization 环境；Windows/WSL 构建不会产出已签名公证的 macOS 包。
 
 ## ❤️Sponsor
 
@@ -82,9 +116,11 @@ The important pieces are:
 <details open>
 <summary>Click to collapse</summary>
 
-[![Kimi K2.6](https://kimi-file.moonshot.cn/prod-chat-kimi/kfs/4/2/2026-06-08/1d8j61pt3v89kkekm5mbg)](https://platform.moonshot.cn/console?aff=cc-switch)
+[![MiniMax](assets/partners/banners/minimax-en.jpeg)](https://platform.minimax.io/subscribe/coding-plan?code=ClLhgxr2je&source=link)
 
-Kimi K2.6 is an open-source, native multimodal agentic model from Moonshot AI, built for long-horizon coding, coding-driven design, and swarm-based task orchestration. It is designed to handle complex end-to-end engineering work across front-end, DevOps, performance optimization, and full-stack workflows, while coordinating large groups of specialized agents to plan, implement, test, and iterate on real coding tasks.
+MiniMax-M2.7 is a next-generation large language model designed for autonomous evolution and real-world productivity. Unlike traditional models, M2.7 actively participates in its own improvement through agent teams, dynamic tool use, and reinforcement learning loops. It delivers strong performance in software engineering (56.22% on SWE-Pro, 55.6% on VIBE-Pro, 57.0% on Terminal Bench 2) and excels in complex office workflows, achieving a leading 1495 ELO on GDPval-AA. With high-fidelity editing across Word, Excel, and PowerPoint, and a 97% adherence rate across 40+ complex skills, M2.7 sets a new standard for building AI-native workflows and organizations.
+
+[Click](https://platform.minimax.io/subscribe/coding-plan?code=ClLhgxr2je&source=link) to get an exclusive 12% off the MiniMax Token Plan!
 
 ---
 
@@ -119,7 +155,7 @@ Register now via <a href="https://pateway.ai/?ch=etzpm8&aff=WB6M6F67#/">this lin
 
 <tr>
 <td width="180"><a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch"><img src="assets/partners/logos/byteplus.png" alt="BytePlus" width="150"></a></td>
-<td>Thanks to Dola seed for sponsoring this project! Dola Seed 2.0 is a full‑modal general large model independently developed by ByteDance for the global market. Built on a unified multimodal architecture, it supports joint understanding and generation of text, images, audio, and video. It natively enables agent collaboration, with strong reasoning, long‑task execution, tool integration, and coding capabilities. It is widely applicable to smart cockpits, personal assistants, education, customer support, marketing, retail, and other scenarios. It excels in multimodal perception, end‑to‑end complex task delivery, stable interaction, and data security, and is readily accessible and deployable via the ModelArk platform.Register via <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch">this link</a> to get 500,000 tokens of free inference quota per model.<a href="https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch"> >>中国大陆地区的开发者请点击这里</a></td>
+<td>Thanks to Dola seed for sponsoring this project! Dola Seed 2.0 is a full‑modal general large model independently developed by ByteDance for the global market. Built on a unified multimodal architecture, it supports joint understanding and generation of text, images, audio, and video. It natively enables agent collaboration, with strong reasoning, long‑task execution, tool integration, and coding capabilities. It is widely applicable to smart cockpits, personal assistants, education, customer support, marketing, retail, and other scenarios. It excels in multimodal perception, end‑to‑end complex task delivery, stable interaction, and data security, and is readily accessible and deployable via the ModelArk platform.Register via <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch">this link</a> to get 500,000 tokens of free inference quota per model.<a href="https://www.volcengine.com/activity/agentplan?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch"> >>中国大陆地区的开发者请点击这里</a></td>
 </tr>
 
 <tr>
@@ -163,6 +199,11 @@ Register now via <a href="https://pateway.ai/?ch=etzpm8&aff=WB6M6F67#/">this lin
 </tr>
 
 <tr>
+<td width="180"><a href="https://lemondata.cc/r/FFX1ZDUP"><img src="assets/partners/logos/lemondata.png" alt="LemonData" width="150"></a></td>
+<td>Thanks to LemonData for sponsoring this project! LemonData is a high-performance AI API aggregation platform — one API key for 300+ models including GPT, Claude, Gemini, DeepSeek, and more. All models priced 30–70% below official rates with auto-failover, smart routing, and unlimited concurrency. New users get $1 free credit instantly upon registration — sign up via <a href="https://lemondata.cc/r/FFX1ZDUP">this link</a>to claim your bonus and start building right away</strong>!</td>
+</tr>
+
+<tr>
 <td width="180"><a href="https://ctok.ai"><img src="assets/partners/logos/ctok.png" alt="CTok" width="150"></a></td>
 <td>Thanks to CTok.ai for sponsoring this project! CTok.ai is dedicated to building a one-stop AI programming tool service platform. We offer professional Claude Code packages and technical community services, with support for Google Gemini and OpenAI Codex. Through carefully designed plans and a professional tech community, we provide developers with reliable service guarantees and continuous technical support, making AI-assisted programming a true productivity tool. Click <a href="https://ctok.ai">here</a> to register!</td>
 </tr>
@@ -198,7 +239,7 @@ Register now via <a href="https://pateway.ai/?ch=etzpm8&aff=WB6M6F67#/">this lin
 </tr>
 
 <tr>
-<td width="180"><a href="https://www.ccsub.net/register?ref=Y6Z8DXEA"><img src="assets/partners/logos/ccsub.svg" alt="CCSub" width="150"></a></td>
+<td width="180"><a href="https://www.ccsub.net/register?ref=Y6Z8DXEA"><img src="assets/partners/logos/ccsub.jpg" alt="CCSub" width="150"></a></td>
 <td>Thanks to CCSub for sponsoring this project! CCSub is a stable, affordable AI API relay platform — your drop-in replacement for a Claude.ai subscription. One API key gives you access to Claude Opus 4.8, Sonnet, Haiku, GPT-5, Gemini, and DeepSeek at roughly 30% of direct API cost, with no VPN required from anywhere in the world. Compatible with Claude Code, Codex, Cursor, Cline, Continue, Windsurf, and all major AI coding tools. Register via <a href="https://www.ccsub.net/register?ref=Y6Z8DXEA">this link</a> and get $5 free credit on sign-up.</td>
 </tr>
 
@@ -356,7 +397,7 @@ For detailed guides on every feature, check out the **[User Manual](docs/user-ma
 
 ### Windows Users
 
-Download the latest `CC-Switch-v{version}-Windows.msi` installer or `CC-Switch-v{version}-Windows-Portable.zip` portable version from the [Releases](../../releases) page.
+Download the latest `CCSwitchMulti-v{version}-Windows.msi` installer or `CCSwitchMulti-v{version}-Windows-Portable.zip` portable version from the [Releases](../../releases) page.
 
 ### macOS Users
 
@@ -374,7 +415,7 @@ brew upgrade --cask cc-switch
 
 **Method 2: Manual Download**
 
-Download `CC-Switch-v{version}-macOS.dmg` (recommended) or `.zip` from the [Releases](../../releases) page.
+Download `CCSwitchMulti-v{version}-macOS.dmg` (recommended) or `.zip` from the [Releases](../../releases) page.
 
 > **Note**: CC Switch for macOS is code-signed and notarized by Apple. You can install and open it directly.
 
@@ -390,9 +431,9 @@ paru -S cc-switch-bin
 
 Download the latest Linux build from the [Releases](../../releases) page:
 
-- `CC-Switch-v{version}-Linux.deb` (Debian/Ubuntu)
-- `CC-Switch-v{version}-Linux.rpm` (Fedora/RHEL/openSUSE)
-- `CC-Switch-v{version}-Linux.AppImage` (Universal)
+- `CCSwitchMulti-v{version}-Linux.deb` (Debian/Ubuntu)
+- `CCSwitchMulti-v{version}-Linux.rpm` (Fedora/RHEL/openSUSE)
+- `CCSwitchMulti-v{version}-Linux.AppImage` (Universal)
 
 > **Flatpak**: Not included in official releases. You can build it yourself from the `.deb` — see [`flatpak/README.md`](flatpak/README.md) for instructions.
 
