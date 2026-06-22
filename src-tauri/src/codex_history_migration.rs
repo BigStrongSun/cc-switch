@@ -626,6 +626,7 @@ pub fn repair_codex_history_visibility_for_multirouter(
             include_archived,
             include_subagents,
             selected_session_ids,
+            provider_bucket_sync_enabled: !skip_provider_bucket_sync,
             backup_root_override: None,
         },
     )
@@ -931,6 +932,7 @@ pub fn repair_codex_history_visibility_standalone(
             include_archived: options.include_archived.unwrap_or(false),
             include_subagents: options.include_subagents.unwrap_or(false),
             selected_session_ids: BTreeSet::new(),
+            provider_bucket_sync_enabled: !options.skip_provider_bucket_sync.unwrap_or(false),
             backup_root_override: None,
         },
     )
@@ -956,6 +958,7 @@ struct HistoryVisibilityRepairRuntimeOptions {
     include_archived: bool,
     include_subagents: bool,
     selected_session_ids: BTreeSet<String>,
+    provider_bucket_sync_enabled: bool,
     backup_root_override: Option<PathBuf>,
 }
 
@@ -1036,7 +1039,24 @@ fn repair_codex_history_visibility_at(
     }
 
     let rows = load_codex_thread_history_rows(&conn)?;
-    let source_provider_set: HashSet<String> = source_provider_ids.iter().cloned().collect();
+    let mut effective_source_provider_ids = source_provider_ids;
+    // 页面修复的目标是“当前 Codex 历史页能看到全部会话”。历史库里可能存在
+    // 手写 provider、远端转发 provider 或未来 Codex 版本产生的新桶名；这些桶
+    // 不一定在旧版白名单里，因此以 active DB 的实际 threads.model_provider 为准
+    // 自动纳入所有非目标桶。
+    if runtime.provider_bucket_sync_enabled {
+        for row in &rows {
+            if let Some(provider) = row.model_provider.as_deref().map(str::trim) {
+                if !provider.is_empty() && provider != target_provider {
+                    effective_source_provider_ids.insert(provider.to_string());
+                }
+            }
+        }
+    } else {
+        effective_source_provider_ids.clear();
+    }
+    let source_provider_set: HashSet<String> =
+        effective_source_provider_ids.iter().cloned().collect();
     let provider_update_ids: Vec<String> = rows
         .iter()
         .filter(|row| {
@@ -1197,7 +1217,7 @@ fn repair_codex_history_visibility_at(
         active_db_kind: Some(active_db.kind.clone()),
         live_config_model_provider,
         target_provider: target_provider.to_string(),
-        source_provider_ids: source_provider_ids.iter().cloned().collect(),
+        source_provider_ids: effective_source_provider_ids.iter().cloned().collect(),
         sqlite_threads: rows.len(),
         provider_rows_to_update: provider_update_ids.len(),
         rollout_first_lines_to_update: rollout_provider_updates.len(),
@@ -4180,6 +4200,7 @@ mod tests {
                 include_archived: false,
                 include_subagents: false,
                 selected_session_ids: BTreeSet::new(),
+                provider_bucket_sync_enabled: true,
                 backup_root_override: Some(dir.path().join("dry-run-backup")),
             },
         )
@@ -4215,6 +4236,7 @@ mod tests {
                 include_archived: false,
                 include_subagents: false,
                 selected_session_ids: BTreeSet::new(),
+                provider_bucket_sync_enabled: true,
                 backup_root_override: Some(backup_root.clone()),
             },
         )
@@ -4290,6 +4312,132 @@ mod tests {
             .join("state/sqlite")
             .join(CODEX_STATE_DB_FILENAME)
             .exists());
+    }
+
+    #[test]
+    fn repair_visibility_merges_unknown_provider_buckets_into_current_target() {
+        let dir = tempdir().expect("tempdir");
+        let codex_dir = dir.path().join(".codex");
+        let sqlite_dir = codex_dir.join("sqlite");
+        let session_dir = codex_dir.join("sessions/2026/06/23");
+        fs::create_dir_all(&sqlite_dir).expect("create sqlite dir");
+        fs::create_dir_all(&session_dir).expect("create session dir");
+
+        let rollout = session_dir.join("rollout-remote-forward.jsonl");
+        fs::write(
+            &rollout,
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"remote-forward\",\"model_provider\":\"remote_ccswitch_forward\"}}\n",
+                "{\"type\":\"user_message\",\"message\":\"hello remote\"}\n"
+            ),
+        )
+        .expect("write rollout");
+
+        let db_path = sqlite_dir.join(CODEX_STATE_DB_FILENAME);
+        let conn = Connection::open(&db_path).expect("open active db");
+        create_history_test_threads_table(&conn);
+        conn.execute(
+            "INSERT INTO threads VALUES (?1, ?2, 'remote_ccswitch_forward', ?3, 0, 0, 'vscode', 'user', 'Remote forward', 'Remote forward', NULL, 1000, 1000000)",
+            (
+                &"remote-forward",
+                &rollout.to_string_lossy().to_string(),
+                &"C:\\Users\\sunda\\Documents\\LLMservice",
+            ),
+        )
+        .expect("insert thread");
+        drop(conn);
+
+        fs::write(codex_dir.join("session_index.jsonl"), "").expect("write index");
+        fs::write(
+            codex_dir.join(".codex-global-state.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "thread-workspace-root-hints": {},
+                "projectless-thread-ids": [],
+                "electron-saved-workspace-roots": []
+            }))
+            .expect("global json"),
+        )
+        .expect("write global state");
+
+        let active = ActiveCodexStateDb {
+            path: db_path.clone(),
+            kind: "sqlite_subdir".to_string(),
+        };
+        let target_provider = "custom";
+        let project_path = "C:\\Users\\sunda\\Documents\\LLMservice".to_string();
+        let dry_run = repair_codex_history_visibility_at(
+            &codex_dir,
+            active.clone(),
+            target_provider,
+            Some(target_provider.to_string()),
+            BTreeSet::new(),
+            Some(project_path.clone()),
+            HistoryVisibilityRepairRuntimeOptions {
+                dry_run: true,
+                count: 20,
+                window_limit: 50,
+                balance_recent_window: true,
+                max_per_project: 10,
+                max_total: 300,
+                source_filter: Some("vscode".to_string()),
+                include_archived: false,
+                include_subagents: false,
+                selected_session_ids: BTreeSet::new(),
+                provider_bucket_sync_enabled: true,
+                backup_root_override: Some(dir.path().join("dry-run-backup")),
+            },
+        )
+        .expect("dry run repair");
+
+        assert!(dry_run
+            .source_provider_ids
+            .iter()
+            .any(|provider| provider == "remote_ccswitch_forward"));
+        assert_eq!(dry_run.provider_rows_to_update, 1);
+        assert_eq!(dry_run.rollout_first_lines_to_update, 1);
+        assert_eq!(dry_run.visible_candidate_rows, 1);
+
+        let backup_root = dir.path().join("history-repair-backup");
+        let applied = repair_codex_history_visibility_at(
+            &codex_dir,
+            active,
+            target_provider,
+            Some(target_provider.to_string()),
+            BTreeSet::new(),
+            Some(project_path),
+            HistoryVisibilityRepairRuntimeOptions {
+                dry_run: false,
+                count: 20,
+                window_limit: 50,
+                balance_recent_window: true,
+                max_per_project: 10,
+                max_total: 300,
+                source_filter: Some("vscode".to_string()),
+                include_archived: false,
+                include_subagents: false,
+                selected_session_ids: BTreeSet::new(),
+                provider_bucket_sync_enabled: true,
+                backup_root_override: Some(backup_root),
+            },
+        )
+        .expect("apply repair");
+
+        assert_eq!(applied.provider_rows_updated, 1);
+        assert_eq!(applied.rollout_first_lines_updated, 1);
+
+        let conn = Connection::open(&db_path).expect("reopen active db");
+        let provider: String = conn
+            .query_row(
+                "SELECT model_provider FROM threads WHERE id = 'remote-forward'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read repaired provider");
+        assert_eq!(provider, target_provider);
+
+        let rollout_text = fs::read_to_string(&rollout).expect("rollout after");
+        assert!(rollout_text.contains("\"model_provider\":\"custom\""));
+        assert!(!rollout_text.contains("remote_ccswitch_forward"));
     }
 
     #[test]
@@ -4388,6 +4536,7 @@ mod tests {
                 include_archived: false,
                 include_subagents: false,
                 selected_session_ids: selected,
+                provider_bucket_sync_enabled: true,
                 backup_root_override: Some(dir.path().join("dry-run-backup")),
             },
         )
@@ -4523,6 +4672,7 @@ mod tests {
                 include_archived: false,
                 include_subagents: false,
                 selected_session_ids: BTreeSet::new(),
+                provider_bucket_sync_enabled: true,
                 backup_root_override: Some(dir.path().join("dry-run-backup")),
             },
         )
@@ -4556,6 +4706,7 @@ mod tests {
                 include_archived: false,
                 include_subagents: false,
                 selected_session_ids: BTreeSet::new(),
+                provider_bucket_sync_enabled: true,
                 backup_root_override: Some(backup_root),
             },
         )
