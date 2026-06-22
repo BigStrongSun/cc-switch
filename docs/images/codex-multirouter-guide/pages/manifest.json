@@ -1,0 +1,62 @@
+[
+    {
+        "title":  "CCSwitchMulti Codex 多路由使用说明",
+        "png":  "docs/images/codex-multirouter-guide/pages/00-overview.png"
+    },
+    {
+        "title":  "1. 先登录 Codex Desktop",
+        "png":  "docs/images/codex-multirouter-guide/pages/01-step-1.png"
+    },
+    {
+        "title":  "2. 在 CCSwitchMulti 里完成 OAuth 授权",
+        "png":  "docs/images/codex-multirouter-guide/pages/02-step-2.png"
+    },
+    {
+        "title":  "3. 添加额外模型源",
+        "png":  "docs/images/codex-multirouter-guide/pages/03-step-3.png"
+    },
+    {
+        "title":  "4. 开启本地路由映射并获取模型列表",
+        "png":  "docs/images/codex-multirouter-guide/pages/04-step-4.png"
+    },
+    {
+        "title":  "5. 创建 Codex 多模型路由",
+        "png":  "docs/images/codex-multirouter-guide/pages/05-step-5.png"
+    },
+    {
+        "title":  "6. 添加并启用路由规则",
+        "png":  "docs/images/codex-multirouter-guide/pages/06-step-6.png"
+    },
+    {
+        "title":  "7. 配置子 Agent 候选模型",
+        "png":  "docs/images/codex-multirouter-guide/pages/07-step-7.png"
+    },
+    {
+        "title":  "8. 选中 MultiRouter 并启动路由",
+        "png":  "docs/images/codex-multirouter-guide/pages/08-step-8.png"
+    },
+    {
+        "title":  "9. 使用状态 / Debug 检查链路",
+        "png":  "docs/images/codex-multirouter-guide/pages/09-step-9.png"
+    },
+    {
+        "title":  "10. 完全退出并重启 Codex Desktop",
+        "png":  "docs/images/codex-multirouter-guide/pages/10-step-10.png"
+    },
+    {
+        "title":  "11. 修复 Codex 历史记录显示",
+        "png":  "docs/images/codex-multirouter-guide/pages/11-step-11.png"
+    },
+    {
+        "title":  "常见问题",
+        "png":  "docs/images/codex-multirouter-guide/pages/12-faq.png"
+    },
+    {
+        "title":  "截图待补清单",
+        "png":  "docs/images/codex-multirouter-guide/pages/13-screenshot-checklist.png"
+    },
+    {
+        "title":  "相关文档",
+        "png":  "docs/images/codex-multirouter-guide/pages/14-related-docs.png"
+    }
+]

@@ -7,6 +7,7 @@
 - 使用规则固化：先登录 Codex Desktop，再在 CCSwitchMulti `设置 → 认证` 完成 ChatGPT/Codex OAuth；额外模型源如 DeepSeek/GLM/本地模型通常要开启 `需要本地路由映射`，在高级选项 `模型映射` 中点击 `获取模型列表` 并配置上下文窗口；MultiRouter 的 `子 Agent 候选模型` 必须手动把目标模型排入前 5 并 `保存排序`；保存/切换/模型目录变化后必须完全退出并重启 Codex Desktop。
 - 历史修复说明保持当前产品边界：历史入口在右上角时钟/会话管理页的 `Codex 历史修复`，流程是 `加载历史`、按需全选当前页、`预览修复`、确认计数后 `确认写入`，完成后再次重启 Codex。该功能修复 provider bucket 可见性，不应表述为会话正文丢失修复。
 - 主 `README.md` 前部的 CCSwitchMulti 分支说明后新增 `Codex 多路由配置说明书` 小节，直接链接 `docs/guides/codex-multirouter-guide-zh.md`，让首次配置用户先读完整流程而不是只看功能截图。
+- 渲染产物：`docs/images/codex-multirouter-guide/pages/` 保存 Markdown 说明书按页渲染的 PNG，规格为 1440x2400；页码包括 `00-overview.png`、`01-step-1.png` 到 `11-step-11.png`、`12-faq.png`、`13-screenshot-checklist.png`、`14-related-docs.png`，并有 `manifest.json` 记录标题和路径。生成时使用 bundled `marked` 解析 Markdown 与 Microsoft Edge headless 截图，保留 PNG，不保留中间 HTML。
 
 ## 2026-06-22 CCSwitchMulti README Xiaohongshu Feedback QR
 
