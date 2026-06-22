@@ -71,7 +71,16 @@ requires_openai_auth = true`;
 
 function modelCatalog(
   models: Array<
-    string | { model: string; displayName?: string; contextWindow?: number }
+    | string
+    | {
+        model: string;
+        displayName?: string;
+        contextWindow?: number;
+        inputModalities?: Array<"text" | "image">;
+        textOnly?: boolean;
+        supportsImage?: boolean;
+        vision?: boolean;
+      }
   >,
 ): CodexCatalogModel[] {
   return models.map((entry) =>
@@ -81,6 +90,14 @@ function modelCatalog(
           model: entry.model,
           displayName: entry.displayName,
           contextWindow: entry.contextWindow,
+          ...(entry.inputModalities
+            ? { inputModalities: entry.inputModalities }
+            : {}),
+          ...(entry.textOnly !== undefined ? { textOnly: entry.textOnly } : {}),
+          ...(entry.supportsImage !== undefined
+            ? { supportsImage: entry.supportsImage }
+            : {}),
+          ...(entry.vision !== undefined ? { vision: entry.vision } : {}),
         },
   );
 }
@@ -293,11 +310,17 @@ requires_openai_auth = true`,
         model: "deepseek-v4-flash",
         displayName: "DeepSeek V4 Flash",
         contextWindow: 1000000,
+        inputModalities: ["text"],
+        textOnly: true,
+        supportsImage: false,
       },
       {
         model: "deepseek-v4-pro",
         displayName: "DeepSeek V4 Pro",
         contextWindow: 1000000,
+        inputModalities: ["text"],
+        textOnly: true,
+        supportsImage: false,
       },
     ]),
     codexChatReasoning: {

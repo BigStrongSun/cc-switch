@@ -202,4 +202,25 @@ describe("Codex Chat provider presets", () => {
       ).toEqual(expected.contextWindows);
     }
   });
+
+  it("declares DeepSeek Codex models as text-only", () => {
+    const preset = codexProviderPresets.find((item) => item.name === "DeepSeek");
+
+    expect(preset?.modelCatalog).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          model: "deepseek-v4-flash",
+          inputModalities: ["text"],
+          textOnly: true,
+          supportsImage: false,
+        }),
+        expect.objectContaining({
+          model: "deepseek-v4-pro",
+          inputModalities: ["text"],
+          textOnly: true,
+          supportsImage: false,
+        }),
+      ]),
+    );
+  });
 });

@@ -6,6 +6,13 @@ export interface CodexCatalogModel {
   display_name?: string;
   contextWindow?: string | number;
   context_window?: string | number;
+  inputModalities?: string[];
+  input_modalities?: string[];
+  textOnly?: boolean;
+  text_only?: boolean;
+  supportsImage?: boolean;
+  supports_image?: boolean;
+  vision?: boolean;
 }
 
 export interface CodexModelCatalog {

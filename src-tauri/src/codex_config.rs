@@ -475,6 +475,27 @@ fn codex_catalog_capabilities_are_text_only(capabilities: &Value) -> Option<bool
         })
 }
 
+/// 从 `modelCatalog.models[]` 中读取指定模型的能力声明。
+///
+/// route 能力仍是最强声明；catalog 能力用于 provider 预设和 MultiRouter 聚合目录，
+/// 避免只靠模型名硬编码判断多模态能力。
+fn codex_catalog_capabilities_for_model<'a>(settings: &'a Value, model: &str) -> Option<&'a Value> {
+    let models = settings
+        .get("modelCatalog")?
+        .get("models")
+        .and_then(|value| value.as_array())?;
+
+    models
+        .iter()
+        .find(|entry| {
+            ["model", "id", "slug"]
+                .into_iter()
+                .filter_map(|field| entry.get(field).and_then(|value| value.as_str()))
+                .any(|candidate| candidate.trim().eq_ignore_ascii_case(model))
+        })
+        .map(|entry| entry.get("capabilities").unwrap_or(entry))
+}
+
 /// 为 Codex Desktop renderer 生成 camelCase reasoning effort 数组。
 ///
 /// 官方 catalog 模板使用 `supported_reasoning_levels[].effort`，但 Desktop
@@ -751,6 +772,10 @@ fn codex_catalog_model_specs(settings: &Value, config_text: &str) -> Vec<CodexCa
 
         let text_only = codex_routing_capabilities_for_model(settings, model)
             .and_then(codex_catalog_capabilities_are_text_only)
+            .or_else(|| {
+                codex_catalog_capabilities_for_model(settings, model)
+                    .and_then(codex_catalog_capabilities_are_text_only)
+            })
             .unwrap_or_else(|| codex_catalog_model_name_is_text_only(model));
 
         specs.push(CodexCatalogModelSpec {
@@ -3822,6 +3847,29 @@ openai_base_url = "http://127.0.0.1:15721/v1"
 
         assert_eq!(specs.len(), 1);
         assert!(specs[0].text_only);
+    }
+
+    #[test]
+    fn codex_model_catalog_uses_model_catalog_declared_modalities() {
+        let settings = json!({
+            "modelCatalog": {
+                "models": [
+                    {
+                        "model": "vendor/custom-text-model",
+                        "displayName": "Custom Text Model",
+                        "inputModalities": ["text"]
+                    }
+                ]
+            }
+        });
+
+        let specs = codex_catalog_model_specs(&settings, r#"model_context_window = 64000"#);
+
+        assert_eq!(specs.len(), 1);
+        assert!(
+            specs[0].text_only,
+            "catalog-declared text-only models should not need a route capability or hardcoded model name"
+        );
     }
 
     #[test]

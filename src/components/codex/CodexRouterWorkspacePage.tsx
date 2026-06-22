@@ -134,6 +134,8 @@ type CodexRoute = {
   };
 };
 
+type CodexRouteCapabilities = NonNullable<CodexRoute["capabilities"]>;
+
 type CodexRouting = {
   enabled?: boolean;
   defaultRouteId?: string;
@@ -217,6 +219,14 @@ type CodexCatalogModelDraft = {
   display_name?: string;
   contextWindow?: string | number;
   context_window?: string | number;
+  inputModalities?: string[];
+  input_modalities?: string[];
+  textOnly?: boolean;
+  text_only?: boolean;
+  supportsImage?: boolean;
+  supports_image?: boolean;
+  vision?: boolean;
+  capabilities?: CodexRouteCapabilities;
 };
 
 type CodexModelCatalogDraft = {
@@ -589,20 +599,160 @@ function collectProviderModelIds(provider: Provider): string[] {
   );
 }
 
+/// 归一化模型名尾段，用于保守识别已知纯文本模型，避免 provider 名称大小写或平台前缀影响判断。
+function normalizeModelTailForCapability(model: string): string {
+  const normalized = model.trim().toLowerCase();
+  return normalized.split("/").pop() ?? normalized;
+}
+
+/// 少量内置纯文本模型兜底；只在 provider/catalog 没有显式能力声明时使用，避免把未知多模态模型误降级。
+function modelNameLooksTextOnly(model: string): boolean {
+  const tail = normalizeModelTailForCapability(model);
+  const compactTail = tail.replace(/[^a-z0-9]/g, "");
+  const exactTextOnlyModels = new Set([
+    "ark-code-latest",
+    "deepseek-chat",
+    "deepseek-reasoner",
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "glm-5.1",
+    "kat-coder",
+    "kat-coder-pro",
+    "kat-coder-pro-v1",
+    "kat-coder-pro-v2",
+    "ling-2.5-1t",
+    "longcat-flash-chat",
+    "mimo-v2.5-pro",
+    "us.deepseek.r1-v1",
+  ]);
+  return (
+    compactTail.startsWith("deepseekv4") ||
+    exactTextOnlyModels.has(tail) ||
+    tail.startsWith("minimax-m2.7") ||
+    tail.startsWith("qwen3-coder") ||
+    tail.startsWith("step-3.5-flash")
+  );
+}
+
+/// 从单个 catalog 模型条目读取图片输入能力；显式字段优先于模型名兜底。
+function imageSupportFromCatalogModel(
+  model: CodexCatalogModel | CodexCatalogModelDraft,
+): boolean | undefined {
+  const supportsImage = model.supportsImage ?? model.supports_image;
+  if (typeof supportsImage === "boolean") return supportsImage;
+  if (typeof model.vision === "boolean") return model.vision;
+  const textOnly = model.textOnly ?? model.text_only;
+  if (typeof textOnly === "boolean") return !textOnly;
+  const modalities = model.inputModalities ?? model.input_modalities;
+  if (Array.isArray(modalities)) {
+    return modalities.some((item) => item.toLowerCase() === "image");
+  }
+  return undefined;
+}
+
+/// 把图片能力结论转成 route/catalog 都能消费的统一能力对象。
+function capabilitiesFromImageSupport(
+  supportsImage: boolean | undefined,
+): CodexRouteCapabilities | undefined {
+  if (supportsImage === undefined) return undefined;
+  return supportsImage
+    ? { inputModalities: ["text", "image"], textOnly: false }
+    : { inputModalities: ["text"], textOnly: true };
+}
+
+/// 基于目标 provider 的 catalog 和 route 匹配模型推断能力；不会把未知模型默认标成图文。
+function inferRouteCapabilitiesFromProvider(
+  provider: Provider,
+  modelIds: string[],
+): CodexRouteCapabilities | undefined {
+  const catalogModels = readCodexModelCatalog(provider).models;
+  const modelSet = new Set(modelIds.map((model) => model.trim()).filter(Boolean));
+  const relevantCatalogModels =
+    modelSet.size > 0
+      ? catalogModels.filter((model) => model.model && modelSet.has(model.model))
+      : catalogModels;
+  const imageSupport = relevantCatalogModels
+    .map(imageSupportFromCatalogModel)
+    .find((value): value is boolean => value !== undefined);
+  if (imageSupport !== undefined) {
+    return capabilitiesFromImageSupport(imageSupport);
+  }
+
+  const relevantModelIds =
+    modelSet.size > 0
+      ? Array.from(modelSet)
+      : catalogModels
+          .map((model) => model.model?.trim())
+          .filter((model): model is string => Boolean(model));
+  if (
+    relevantModelIds.length > 0 &&
+    relevantModelIds.every(modelNameLooksTextOnly)
+  ) {
+    return capabilitiesFromImageSupport(false);
+  }
+  return undefined;
+}
+
+/// 旧版 MultiRouter 候选曾经给所有 route 写入“图文 + 推理”的默认能力；这不是用户显式配置。
+function isLegacyDefaultRouteCapabilities(
+  capabilities?: CodexRouteCapabilities,
+): boolean {
+  if (!capabilities) return false;
+  const modalities = capabilities.inputModalities ?? [];
+  return (
+    capabilities.textOnly === false &&
+    capabilities.supportsReasoning === true &&
+    modalities.length === 2 &&
+    modalities.includes("text") &&
+    modalities.includes("image")
+  );
+}
+
+/// 用目标 provider 的真实能力修正 route；保留用户显式写入的非旧默认能力。
+function normalizeRouteCapabilitiesFromProvider(
+  route: CodexRoute,
+  provider?: Provider,
+): CodexRoute {
+  if (!provider) return route;
+  const inferred = inferRouteCapabilitiesFromProvider(
+    provider,
+    route.match?.models ?? collectProviderModelIds(provider),
+  );
+  if (!inferred) return route;
+  if (route.capabilities && !isLegacyDefaultRouteCapabilities(route.capabilities)) {
+    return route;
+  }
+  return { ...route, capabilities: inferred };
+}
+
 /// 从模型源 catalog 条目构造 MultiRouter 自己的 catalog 草稿；保留上下文窗口字段供 Codex 与第三方 API 继续透传。
 function catalogDraftFromSourceModel(
   id: string,
-  source?: Pick<
-    CodexCatalogModelDraft,
-    "displayName" | "display_name" | "contextWindow" | "context_window"
-  >,
+  source?: CodexCatalogModelDraft | CodexCatalogModel,
 ): CodexCatalogModelDraft {
   const displayName = source?.displayName ?? source?.display_name;
   const contextWindow = source?.contextWindow ?? source?.context_window;
+  const capabilities = capabilitiesFromImageSupport(
+    source ? imageSupportFromCatalogModel(source) : undefined,
+  );
   return {
     model: id,
     ...(displayName ? { displayName } : {}),
     ...(contextWindow ? { contextWindow } : {}),
+    ...(source?.inputModalities ? { inputModalities: source.inputModalities } : {}),
+    ...(source?.input_modalities
+      ? { input_modalities: source.input_modalities }
+      : {}),
+    ...(source?.textOnly !== undefined ? { textOnly: source.textOnly } : {}),
+    ...(source?.text_only !== undefined ? { text_only: source.text_only } : {}),
+    ...(source?.supportsImage !== undefined
+      ? { supportsImage: source.supportsImage }
+      : {}),
+    ...(source?.supports_image !== undefined
+      ? { supports_image: source.supports_image }
+      : {}),
+    ...(source?.vision !== undefined ? { vision: source.vision } : {}),
+    ...(capabilities ? { capabilities } : {}),
   };
 }
 
@@ -688,6 +838,7 @@ function createRouteFromProvider(
 ): CodexRoute {
   const modelIds = collectProviderModelIds(provider);
   const prefixes = inferProviderPrefixes(provider, modelIds);
+  const capabilities = inferRouteCapabilitiesFromProvider(provider, modelIds);
   return {
     id: uniqueRouteId(`router-${provider.id}`, usedIds),
     label: provider.name,
@@ -701,11 +852,7 @@ function createRouteFromProvider(
       apiFormat: provider.meta?.apiFormat ?? "openai_chat",
       auth: { source: "provider_config" },
     },
-    capabilities: {
-      inputModalities: ["text", "image"],
-      textOnly: false,
-      supportsReasoning: true,
-    },
+    ...(capabilities ? { capabilities } : {}),
   };
 }
 
@@ -734,13 +881,17 @@ function buildRouteCandidates(
       normalizedRoute,
       provider,
     );
+    const routeWithInferredCapabilities = normalizeRouteCapabilitiesFromProvider(
+      routeWithInferredMatch,
+      provider,
+    );
     candidates.push({
       id,
-      route: routeWithInferredMatch,
+      route: routeWithInferredCapabilities,
       provider,
       isExisting: true,
-      matchModels: routeWithInferredMatch.match?.models ?? [],
-      matchPrefixes: routeWithInferredMatch.match?.prefixes ?? [],
+      matchModels: routeWithInferredCapabilities.match?.models ?? [],
+      matchPrefixes: routeWithInferredCapabilities.match?.prefixes ?? [],
     });
   }
 
@@ -843,6 +994,21 @@ export function normalizeCodexRouteForSave(
   };
 }
 
+/// route 能力比 provider catalog 更接近最终路由结果；写入聚合 catalog，确保 Codex 看到的模型能力与规则一致。
+function applyRouteCapabilitiesToCatalogModel(
+  model: CodexCatalogModelDraft,
+  route: CodexRoute,
+): CodexCatalogModelDraft {
+  if (!route.capabilities) return model;
+  return {
+    ...model,
+    capabilities: route.capabilities,
+    inputModalities:
+      route.capabilities.inputModalities ?? model.inputModalities,
+    textOnly: route.capabilities.textOnly ?? model.textOnly,
+  };
+}
+
 /// 从已选 route 和目标模型源汇总 MultiRouter 的模型目录；Codex 选择器和 spawn_agent 都依赖这个目录。
 export function buildModelCatalogForRoutes(
   plan: Provider,
@@ -870,12 +1036,24 @@ export function buildModelCatalogForRoutes(
     for (const catalogModel of targetCatalogModels) {
       const id = catalogModel.model?.trim();
       if (!id || byModel.has(id)) continue;
-      byModel.set(id, catalogDraftFromSourceModel(id, catalogModel));
+      byModel.set(
+        id,
+        applyRouteCapabilitiesToCatalogModel(
+          catalogDraftFromSourceModel(id, catalogModel),
+          route,
+        ),
+      );
     }
     for (const model of route.match?.models ?? []) {
       const id = model.trim();
       if (!id || byModel.has(id)) continue;
-      byModel.set(id, existingModelById.get(id) ?? { model: id });
+      byModel.set(
+        id,
+        applyRouteCapabilitiesToCatalogModel(
+          existingModelById.get(id) ?? { model: id },
+          route,
+        ),
+      );
     }
   }
 

@@ -259,6 +259,13 @@ export interface CodexCatalogModel {
   model: string;
   displayName?: string;
   contextWindow?: string | number;
+  inputModalities?: Array<"text" | "image">;
+  input_modalities?: Array<"text" | "image">;
+  textOnly?: boolean;
+  text_only?: boolean;
+  supportsImage?: boolean;
+  supports_image?: boolean;
+  vision?: boolean;
 }
 
 export interface CodexModelCatalogConfig {
