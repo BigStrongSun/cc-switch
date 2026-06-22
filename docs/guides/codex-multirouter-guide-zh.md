@@ -211,6 +211,10 @@ Codex 多模型路由
 3. 给 Codex 发送一条简单测试消息。
 4. 回到 CCSwitchMulti 状态页确认请求命中了正确路由。
 
+如果配置正确，此时 Codex 的模型候选列表里应该能看到你在 MultiRouter 里设置的所有备选模型。你也可以询问 Codex 当前可用的子 Agent 候选模型，返回结果应当和 `子 Agent 候选模型` 里保存的前 5 个顺序一致。
+
+![Codex Desktop 中显示 MultiRouter 提供的模型候选列表](../images/codex-multirouter/13-codex-model-picker-validation.png)
+
 如果模型候选仍然只有少数 OpenAI 模型，优先确认所有 Codex Desktop / app-server 进程已经完全退出；必要时从 CCSwitchMulti 重新启动或解锁 Codex Desktop，再检查模型列表。
 
 ## 11. 修复 Codex 历史记录显示
