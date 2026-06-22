@@ -293,7 +293,12 @@ fn should_treat_target_as_managed_codex_oauth(
     }
 
     let route_target = codex_route_target_provider_id(route_provider).unwrap_or_default();
-    target_provider_looks_like_managed_codex_oauth(target_provider, route_target)
+    if target_provider_looks_like_managed_codex_oauth(target_provider, route_target) {
+        return true;
+    }
+
+    provider_id_or_name_marks_official(target_provider, route_target)
+        && provider_has_managed_codex_oauth_auth(route_provider)
 }
 
 /// 检查 provider settings/config 中是否已经有可用于 Codex adapter 的 base_url。
@@ -328,6 +333,11 @@ fn target_provider_looks_like_managed_codex_oauth(
         return true;
     }
 
+    provider_has_managed_codex_oauth_auth(provider)
+        && provider_id_or_name_marks_official(provider, route_target_provider_id)
+}
+
+fn provider_has_managed_codex_oauth_auth(provider: &Provider) -> bool {
     let auth = provider.settings_config.get("auth");
     let has_chatgpt_auth_mode = auth
         .and_then(|auth| auth.get("auth_mode"))
@@ -344,6 +354,11 @@ fn target_provider_looks_like_managed_codex_oauth(
         })
         .map(str::trim)
         .is_some_and(|token| !token.is_empty());
+
+    has_chatgpt_auth_mode || has_oauth_tokens
+}
+
+fn provider_id_or_name_marks_official(provider: &Provider, route_target_provider_id: &str) -> bool {
     let id_or_name_marks_official = [
         provider.id.as_str(),
         provider.name.as_str(),
@@ -353,7 +368,7 @@ fn target_provider_looks_like_managed_codex_oauth(
     .map(str::to_ascii_lowercase)
     .any(|value| value.contains("codex-official") || value.contains("openai official"));
 
-    (has_chatgpt_auth_mode || has_oauth_tokens) && id_or_name_marks_official
+    id_or_name_marks_official
 }
 
 /// 从新旧配置中挑出本次请求的 route 候选；匹配 route 在前，fallback route 在后。
@@ -1698,6 +1713,62 @@ mod tests {
                 "/v1/responses"
             ),
             "https://chatgpt.com/backend-api/codex/responses"
+        );
+    }
+
+    #[test]
+    fn test_codex_route_target_provider_infers_official_oauth_from_router_auth() {
+        let adapter = CodexAdapter::new();
+        let router = create_provider(json!({
+            "auth": {
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "access_token": "router-managed-access-token"
+                }
+            },
+            "codexRouting": {
+                "enabled": true,
+                "routes": [{
+                    "id": "router-codex-official",
+                    "label": "OpenAI Official",
+                    "targetProviderId": "codex-official",
+                    "match": { "models": ["gpt-5.5"] },
+                    "upstream": {
+                        "apiFormat": "openai_chat",
+                        "auth": { "source": "provider_config" }
+                    }
+                }],
+                "defaultRouteId": "router-codex-official"
+            }
+        }));
+        let target = Provider::with_id(
+            "codex-official".to_string(),
+            "OpenAI Official".to_string(),
+            json!({
+                "auth": {},
+                "config": ""
+            }),
+            None,
+        );
+
+        let routed = resolve_codex_model_routed_provider(&router, &json!({ "model": "gpt-5.5" }))
+            .expect("official route");
+        let materialized = materialize_codex_routed_provider_from_target(&routed, &target);
+
+        assert_eq!(
+            materialized
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.provider_type.as_deref()),
+            Some("codex_oauth")
+        );
+        assert_eq!(
+            adapter.extract_base_url(&materialized).unwrap(),
+            "https://chatgpt.com/backend-api/codex"
+        );
+        assert_eq!(
+            adapter.extract_auth(&materialized).unwrap().strategy,
+            AuthStrategy::CodexOAuth
         );
     }
 
