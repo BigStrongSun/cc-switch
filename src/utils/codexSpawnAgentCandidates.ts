@@ -27,6 +27,42 @@ export const CODEX_SPAWN_AGENT_PRIORITY_MODELS = [
   "deepseek-v4-pro",
 ];
 
+// 从当前 catalog 模型里提取稳定模型 ID，供 spawn_agent 候选兜底和校验复用。
+function catalogModelIds(models: CodexCatalogModel[]): string[] {
+  return models
+    .map((model) => model.model?.trim())
+    .filter((model): model is string => Boolean(model));
+}
+
+// 规整 spawn_agent 候选顺序：先保留已配置且仍存在的模型，再用 catalog 顺序补满前五个。
+export function normalizeCodexSpawnAgentModels(
+  selectedModels: string[],
+  catalogModels: CodexCatalogModel[],
+  limit = CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT,
+): string[] {
+  const availableModels = catalogModelIds(catalogModels);
+  const available = new Set(availableModels);
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const item of selectedModels) {
+    const model = item.trim();
+    if (!model || seen.has(model) || !available.has(model)) continue;
+    seen.add(model);
+    normalized.push(model);
+    if (normalized.length >= limit) return normalized;
+  }
+
+  for (const model of availableModels) {
+    if (seen.has(model)) continue;
+    seen.add(model);
+    normalized.push(model);
+    if (normalized.length >= limit) break;
+  }
+
+  return normalized;
+}
+
 // 读取 MultiRouter provider 私有配置中的模型目录和 spawn_agent 候选顺序。
 export function readCodexModelCatalog(
   provider: Pick<Provider, "settingsConfig"> | null,
@@ -56,10 +92,12 @@ export function readCodexModelCatalog(
   const spawnAgentModels = rawSpawnAgentModels
     .filter((item: unknown): item is string => typeof item === "string")
     .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT);
+    .filter(Boolean);
 
-  return { models, spawnAgentModels };
+  return {
+    models,
+    spawnAgentModels: normalizeCodexSpawnAgentModels(spawnAgentModels, models),
+  };
 }
 
 // 展示模型名称时优先使用 catalog 的 displayName，保留 slug 方便用户复制。
@@ -75,11 +113,7 @@ export function normalizeSpawnAgentCandidateSelection(
   catalogModels: CodexCatalogModel[],
   limit = CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT,
 ): string[] {
-  const available = new Set(
-    catalogModels
-      .map((model) => model.model?.trim())
-      .filter((model): model is string => Boolean(model)),
-  );
+  const available = new Set(catalogModelIds(catalogModels));
   const seen = new Set<string>();
   const normalized: string[] = [];
 

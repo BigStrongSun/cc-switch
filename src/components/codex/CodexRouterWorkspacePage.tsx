@@ -54,18 +54,24 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { providersApi } from "@/lib/api";
+import { fetchModelsForConfig, type FetchedModel } from "@/lib/api/model-fetch";
 import { proxyApi } from "@/lib/api/proxy";
 import { useRequestLogs } from "@/lib/query/usage";
 import { cn } from "@/lib/utils";
 import {
   catalogModelLabel,
   CODEX_SPAWN_AGENT_PRIORITY_MODELS,
+  normalizeCodexSpawnAgentModels,
   normalizeSpawnAgentCandidateSelection,
   readCodexModelCatalog,
   reorderSpawnAgentCandidates,
   validateSpawnAgentCandidates,
   type CodexCatalogModel,
 } from "@/utils/codexSpawnAgentCandidates";
+import {
+  extractCodexExperimentalBearerToken,
+  getCodexBaseUrl,
+} from "@/utils/providerConfigUtils";
 import type { Provider } from "@/types";
 import type { RequestLog } from "@/types/usage";
 import type {
@@ -179,6 +185,20 @@ type MultiRouterSettingsDraft = {
   defaultRouteId?: string;
 };
 
+type ProviderModelRefreshState = {
+  status: "loading" | "success" | "error" | "skipped";
+  message: string;
+  modelCount?: number;
+};
+
+type ProviderModelFetchConfig = {
+  baseUrl: string;
+  apiKey: string;
+  isFullUrl: boolean;
+  customUserAgent?: string;
+  skipReason?: string;
+};
+
 type ProxyListenDraftValidation =
   | {
       ok: true;
@@ -212,6 +232,124 @@ const OPENAI_CODEX_FALLBACK_MODELS = [
 ];
 const DEFAULT_CODEX_PROXY_LISTEN_ADDRESS = "127.0.0.1";
 const DEFAULT_CODEX_PROXY_LISTEN_PORT = 15721;
+
+/// 提取普通 Codex provider 的 /models 读取配置；官方 OAuth/缺少普通端点的 provider 不走这里。
+function getProviderModelFetchConfig(
+  provider: Provider,
+): ProviderModelFetchConfig {
+  const settings = provider.settingsConfig ?? {};
+  const configText = typeof settings.config === "string" ? settings.config : "";
+  const auth =
+    settings.auth &&
+    typeof settings.auth === "object" &&
+    !Array.isArray(settings.auth)
+      ? (settings.auth as Record<string, unknown>)
+      : {};
+  const baseUrl = String(
+    settings.base_url ??
+      settings.baseURL ??
+      settings.baseUrl ??
+      getCodexBaseUrl(provider) ??
+      "",
+  ).trim();
+  const apiKey = String(
+    auth.OPENAI_API_KEY ??
+      settings.apiKey ??
+      settings.api_key ??
+      extractCodexExperimentalBearerToken(configText) ??
+      "",
+  ).trim();
+  const providerType = String(
+    provider.meta?.providerType ?? settings.providerType ?? "",
+  ).toLowerCase();
+  const isOfficialLike =
+    provider.category === "official" || providerType.includes("codex_oauth");
+
+  if (isOfficialLike && (!baseUrl || !apiKey)) {
+    return {
+      baseUrl,
+      apiKey,
+      isFullUrl: false,
+      skipReason: "官方/OAuth provider 不使用普通 /models 端点。",
+    };
+  }
+  if (!baseUrl) {
+    return {
+      baseUrl,
+      apiKey,
+      isFullUrl: false,
+      skipReason: "缺少 Base URL，无法读取模型列表。",
+    };
+  }
+  if (!apiKey) {
+    return {
+      baseUrl,
+      apiKey,
+      isFullUrl: false,
+      skipReason: "缺少 API Key，无法读取模型列表。",
+    };
+  }
+
+  return {
+    baseUrl,
+    apiKey,
+    isFullUrl: Boolean(provider.meta?.isFullUrl ?? settings.isFullUrl),
+    customUserAgent:
+      typeof provider.meta?.customUserAgent === "string"
+        ? provider.meta.customUserAgent
+        : typeof settings.customUserAgent === "string"
+          ? settings.customUserAgent
+          : undefined,
+  };
+}
+
+/// 将远端 /models 结果写回普通 provider 的 modelCatalog，供 MultiRouter 候选和 spawn_agent 直接消费。
+function providerWithFetchedModelCatalog(
+  provider: Provider,
+  fetchedModels: FetchedModel[],
+): Provider {
+  const currentCatalog = readCodexModelCatalog(provider);
+  const byModel = new Map<string, CodexCatalogModelDraft>();
+  for (const model of currentCatalog.models) {
+    const id = model.model?.trim();
+    if (!id) continue;
+    byModel.set(id, {
+      model: id,
+      ...(model.displayName ? { displayName: model.displayName } : {}),
+      ...(model.display_name ? { display_name: model.display_name } : {}),
+      ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
+      ...(model.context_window ? { context_window: model.context_window } : {}),
+    });
+  }
+
+  for (const fetched of fetchedModels) {
+    const id = fetched.id.trim();
+    if (!id) continue;
+    const existing = byModel.get(id);
+    byModel.set(id, {
+      ...(existing ?? { model: id, displayName: id }),
+      model: id,
+      ...(fetched.contextWindow && fetched.contextWindow > 0
+        ? { contextWindow: fetched.contextWindow }
+        : {}),
+    });
+  }
+
+  const models = Array.from(byModel.values());
+  return {
+    ...provider,
+    settingsConfig: {
+      ...provider.settingsConfig,
+      modelCatalog: {
+        models,
+        spawnAgentModels: normalizeCodexSpawnAgentModels(
+          currentCatalog.spawnAgentModels,
+          models,
+        ),
+      },
+    },
+  };
+}
 
 /// 把监听地址转换成客户端可连接的 host；0.0.0.0/:: 只能绑定，不能直接作为 Codex base_url。
 export function codexProxyConnectHost(listenAddress: string): string {
@@ -715,12 +853,13 @@ export function buildModelCatalogForRoutes(
   const existingModels = Array.isArray(existingCatalog?.models)
     ? (existingCatalog.models as CodexCatalogModelDraft[])
     : [];
-  const byModel = new Map<string, CodexCatalogModelDraft>();
+  const existingModelById = new Map<string, CodexCatalogModelDraft>();
   for (const model of existingModels) {
     const id = model.model?.trim();
-    if (id) byModel.set(id, model);
+    if (id) existingModelById.set(id, model);
   }
 
+  const byModel = new Map<string, CodexCatalogModelDraft>();
   for (const route of routes) {
     const targetProvider = routeTargetProviderId(route)
       ? providersById.get(routeTargetProviderId(route)!)
@@ -736,7 +875,7 @@ export function buildModelCatalogForRoutes(
     for (const model of route.match?.models ?? []) {
       const id = model.trim();
       if (!id || byModel.has(id)) continue;
-      byModel.set(id, { model: id });
+      byModel.set(id, existingModelById.get(id) ?? { model: id });
     }
   }
 
@@ -1202,7 +1341,11 @@ export function CodexRouterWorkspacePage({
   const [routePickerSelectAll, setRoutePickerSelectAll] = useState(false);
   const [optimisticRoutingPlan, setOptimisticRoutingPlan] =
     useState<Provider | null>(null);
+  const [providerModelRefreshStates, setProviderModelRefreshStates] = useState<
+    Record<string, ProviderModelRefreshState>
+  >({});
   const appliedInitialNavigationRef = useRef<string | null>(null);
+  const modelRefreshAttemptedKeysRef = useRef<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
   const effectiveProviders = useMemo(() => {
@@ -1235,6 +1378,156 @@ export function CodexRouterWorkspacePage({
       new Map(effectiveProviders.map((provider) => [provider.id, provider])),
     [effectiveProviders],
   );
+
+  // 进入 MultiRouter 路由规则页时自动刷新所有候选普通 provider 的 /models 目录。
+  useEffect(() => {
+    if (activeTab !== "routes") return;
+    if (modelSources.length === 0) return;
+
+    let cancelled = false;
+    for (const provider of modelSources) {
+      const fetchConfig = getProviderModelFetchConfig(provider);
+      const attemptKey = [
+        provider.id,
+        fetchConfig.baseUrl,
+        Boolean(fetchConfig.apiKey),
+        fetchConfig.isFullUrl,
+        fetchConfig.customUserAgent ?? "",
+      ].join("|");
+      if (modelRefreshAttemptedKeysRef.current.has(attemptKey)) continue;
+      modelRefreshAttemptedKeysRef.current.add(attemptKey);
+
+      if (fetchConfig.skipReason) {
+        setProviderModelRefreshStates((current) => ({
+          ...current,
+          [provider.id]: {
+            status: "skipped",
+            message: fetchConfig.skipReason!,
+          },
+        }));
+        continue;
+      }
+
+      setProviderModelRefreshStates((current) => ({
+        ...current,
+        [provider.id]: {
+          status: "loading",
+          message: "正在读取模型列表...",
+        },
+      }));
+
+      fetchModelsForConfig(
+        fetchConfig.baseUrl,
+        fetchConfig.apiKey,
+        fetchConfig.isFullUrl,
+        undefined,
+        fetchConfig.customUserAgent,
+      )
+        .then(async (models) => {
+          if (cancelled) return;
+          if (models.length === 0) {
+            setProviderModelRefreshStates((current) => ({
+              ...current,
+              [provider.id]: {
+                status: "error",
+                message:
+                  "获取模型列表失败：远端返回空列表，请检查当前 provider 配置。",
+                modelCount: 0,
+              },
+            }));
+            return;
+          }
+
+          const nextProvider = providerWithFetchedModelCatalog(
+            provider,
+            models,
+          );
+          await providersApi.update(nextProvider, "codex");
+          if (cancelled) return;
+          const updatedProvidersById = new Map(providersById);
+          updatedProvidersById.set(nextProvider.id, nextProvider);
+          const affectedPlans: Provider[] = [];
+          for (const plan of routingPlans) {
+            const routes = readCodexRouting(plan)?.routes ?? [];
+            if (
+              !routes.some(
+                (route) => routeTargetProviderId(route) === nextProvider.id,
+              )
+            ) {
+              continue;
+            }
+            const nextPlan: Provider = {
+              ...plan,
+              settingsConfig: {
+                ...plan.settingsConfig,
+                modelCatalog: buildModelCatalogForRoutes(
+                  plan,
+                  routes,
+                  updatedProvidersById,
+                ),
+              },
+            };
+            await providersApi.update(nextPlan, "codex");
+            affectedPlans.push(nextPlan);
+          }
+          queryClient.setQueryData(["providers", "codex"], (current: any) =>
+            current?.providers
+              ? {
+                  ...current,
+                  providers: {
+                    ...current.providers,
+                    [nextProvider.id]: nextProvider,
+                    ...Object.fromEntries(
+                      affectedPlans.map((plan) => [plan.id, plan]),
+                    ),
+                  },
+                }
+              : current,
+          );
+          const selectedAffectedPlan = affectedPlans.find(
+            (plan) => plan.id === selectedPlanId,
+          );
+          if (selectedAffectedPlan) {
+            setOptimisticRoutingPlan(selectedAffectedPlan);
+          }
+          setProviderModelRefreshStates((current) => ({
+            ...current,
+            [provider.id]: {
+              status: "success",
+              message: `已读取并更新 ${models.length} 个模型。`,
+              modelCount: models.length,
+            },
+          }));
+          await queryClient.invalidateQueries({
+            queryKey: ["providers", "codex"],
+          });
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setProviderModelRefreshStates((current) => ({
+            ...current,
+            [provider.id]: {
+              status: "error",
+              message: `获取模型列表失败，请检查当前 provider 配置：${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            },
+          }));
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    modelSources,
+    providersById,
+    queryClient,
+    routingPlans,
+    selectedPlanId,
+  ]);
+
   const routeEntries = routingPlans.flatMap((provider) =>
     (readCodexRouting(provider)?.routes ?? []).map((route, index) => ({
       provider,
@@ -1592,6 +1885,7 @@ export function CodexRouterWorkspacePage({
               isProxyRunning={isProxyRunning}
               isCodexTakeoverActive={isCodexTakeoverActive}
               activeProviderId={activeProviderId}
+              providerModelRefreshStates={providerModelRefreshStates}
               isRoutePickerOpen={isRoutePickerOpen}
               isSavingRoutes={isSavingRoutes}
               isPlanSettingsOpen={isPlanSettingsOpen}
@@ -1994,6 +2288,7 @@ function RoutesTab({
   isProxyRunning,
   isCodexTakeoverActive,
   activeProviderId,
+  providerModelRefreshStates,
   isRoutePickerOpen,
   isSavingRoutes,
   isPlanSettingsOpen,
@@ -2021,6 +2316,7 @@ function RoutesTab({
   isProxyRunning: boolean;
   isCodexTakeoverActive: boolean;
   activeProviderId?: string;
+  providerModelRefreshStates: Record<string, ProviderModelRefreshState>;
   isRoutePickerOpen: boolean;
   isSavingRoutes: boolean;
   isPlanSettingsOpen: boolean;
@@ -2196,6 +2492,7 @@ function RoutesTab({
         <RouteCandidatePicker
           selectedPlan={selectedPlan}
           modelSources={modelSources}
+          providerModelRefreshStates={providerModelRefreshStates}
           onSaveRoutes={onSaveRoutes}
           onClose={() => onRoutePickerOpenChange(false)}
           isSaving={isSavingRoutes}
@@ -2225,6 +2522,11 @@ function RoutesTab({
           {routePickerError ?? routePickerMessage}
         </div>
       )}
+
+      <ProviderModelRefreshPanel
+        modelSources={modelSources}
+        states={providerModelRefreshStates}
+      />
 
       <SpawnAgentCandidatesPanel
         selectedPlan={selectedPlan}
@@ -2664,11 +2966,66 @@ function MultiRouterSettingsPanel({
   );
 }
 
+/// 进入路由页后自动读取候选 provider 的模型列表；这里集中展示成功/失败，避免候选缺失时无从判断。
+function ProviderModelRefreshPanel({
+  modelSources,
+  states,
+}: {
+  modelSources: Provider[];
+  states: Record<string, ProviderModelRefreshState>;
+}) {
+  const visibleRows = modelSources
+    .map((provider) => ({ provider, state: states[provider.id] }))
+    .filter(({ state }) => state && state.status !== "skipped");
+
+  if (visibleRows.length === 0) return null;
+
+  return (
+    <section className="rounded-lg border border-slate-700 bg-slate-950/45 p-4">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100">
+        <RefreshCw className="h-4 w-4 text-sky-300" />
+        候选 provider 模型列表刷新
+      </div>
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {visibleRows.map(({ provider, state }) => {
+          const tone =
+            state.status === "success"
+              ? "border-emerald-700/50 bg-emerald-950/30 text-emerald-100"
+              : state.status === "loading"
+                ? "border-sky-700/50 bg-sky-950/30 text-sky-100"
+                : "border-rose-700/50 bg-rose-950/30 text-rose-100";
+          return (
+            <div
+              key={provider.id}
+              className={cn("rounded-md border p-3", tone)}
+            >
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <span className="truncate text-xs font-semibold">
+                  {provider.name}
+                </span>
+                <Badge className="shrink-0 border border-current bg-transparent text-[10px]">
+                  {state.status === "success"
+                    ? `${state.modelCount ?? 0} 个模型`
+                    : state.status === "loading"
+                      ? "读取中"
+                      : "失败"}
+                </Badge>
+              </div>
+              <div className="mt-1 text-xs leading-5">{state.message}</div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 /// 子 Agent 候选模型属于路由规则配置：前五个会进入 Codex spawn_agent 的可用模型窗口。
 /// 规则选择器是工作台专用编辑界面：用户只勾选候选 router，保存时统一写回 codexRouting.routes。
 function RouteCandidatePicker({
   selectedPlan,
   modelSources,
+  providerModelRefreshStates,
   onSaveRoutes,
   onClose,
   isSaving,
@@ -2676,6 +3033,7 @@ function RouteCandidatePicker({
 }: {
   selectedPlan: Provider;
   modelSources: Provider[];
+  providerModelRefreshStates: Record<string, ProviderModelRefreshState>;
   onSaveRoutes: (plan: Provider, routes: CodexRoute[]) => Promise<void>;
   onClose: () => void;
   isSaving: boolean;
@@ -2839,6 +3197,9 @@ function RouteCandidatePicker({
             candidate.provider?.name ??
             routeTargetProviderId(candidate.route) ??
             "自定义 route";
+          const refreshState = candidate.provider
+            ? providerModelRefreshStates[candidate.provider.id]
+            : undefined;
           return (
             <div
               key={candidate.id}
@@ -2937,6 +3298,20 @@ function RouteCandidatePicker({
                   </span>
                 ) : null}
               </div>
+              {refreshState && refreshState.status !== "skipped" ? (
+                <div
+                  className={cn(
+                    "mt-3 rounded-md border px-3 py-2 text-xs leading-5",
+                    refreshState.status === "success"
+                      ? "border-emerald-700/50 bg-emerald-950/30 text-emerald-100"
+                      : refreshState.status === "loading"
+                        ? "border-sky-700/50 bg-sky-950/30 text-sky-100"
+                        : "border-rose-700/50 bg-rose-950/30 text-rose-100",
+                  )}
+                >
+                  {refreshState.message}
+                </div>
+              ) : null}
             </div>
           );
         })}

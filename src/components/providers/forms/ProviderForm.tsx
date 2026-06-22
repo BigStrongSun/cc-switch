@@ -197,13 +197,23 @@ const normalizeCodexSpawnAgentModelsForSave = (
   selectedModels: string[],
   catalogModels: CodexCatalogModel[],
 ): string[] => {
-  const availableModels = new Set(catalogModels.map((item) => item.model));
+  const catalogModelIds = catalogModels
+    .map((item) => item.model.trim())
+    .filter(Boolean);
+  const availableModels = new Set(catalogModelIds);
   const seen = new Set<string>();
   const normalized: string[] = [];
 
   for (const item of selectedModels) {
     const model = item.trim();
     if (!model || seen.has(model) || !availableModels.has(model)) continue;
+    seen.add(model);
+    normalized.push(model);
+    if (normalized.length >= 5) return normalized;
+  }
+
+  for (const model of catalogModelIds) {
+    if (seen.has(model)) continue;
     seen.add(model);
     normalized.push(model);
     if (normalized.length >= 5) break;
@@ -1243,11 +1253,9 @@ function ProviderFormFull({
           shouldPersistCodexLocalConfig && (codexConfig ?? "").trim()
             ? setCodexWireApi(codexConfig ?? "", "responses")
             : (codexConfig ?? "");
-        const normalizedCatalogModels =
-          shouldPersistCodexLocalConfig &&
-          (localCodexApiFormat === "openai_chat" || hasCodexRouting)
-            ? normalizeCodexCatalogModelsForSave(codexCatalogModels)
-            : [];
+        const normalizedCatalogModels = shouldPersistCodexLocalConfig
+          ? normalizeCodexCatalogModelsForSave(codexCatalogModels)
+          : [];
         const normalizedSpawnAgentModels =
           normalizedCatalogModels.length > 0
             ? normalizeCodexSpawnAgentModelsForSave(

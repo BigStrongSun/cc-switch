@@ -250,6 +250,67 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
     ]);
   });
 
+  it("rebuilds route catalog from current targets instead of keeping stale fallback models", () => {
+    const qwen: Provider = {
+      id: "codex-qwen-local",
+      name: "Qwen Local vLLM",
+      category: "custom",
+      settingsConfig: {
+        modelCatalog: {
+          models: [
+            {
+              model: "qwen3.6",
+              displayName: "Qwen 3.6",
+              contextWindow: 262144,
+            },
+          ],
+        },
+      },
+    };
+    const plan = createDraftRoutingPlan([], []);
+    const stalePlan: Provider = {
+      ...plan,
+      settingsConfig: {
+        ...plan.settingsConfig,
+        modelCatalog: {
+          models: [
+            { model: "gpt-5.5" },
+            { model: "gpt-5.4" },
+            { model: "gpt-5.4-mini" },
+            { model: "gpt-5.3-codex-spark" },
+          ],
+          spawnAgentModels: ["gpt-5.5", "gpt-5.4"],
+        },
+      },
+    };
+    const routes = [
+      normalizeCodexRouteForSave(
+        {
+          label: qwen.name,
+          targetProviderId: qwen.id,
+          match: { models: ["qwen3.6"], prefixes: ["qwen"] },
+        },
+        0,
+        new Set<string>(),
+      ),
+    ];
+
+    const rebuilt = buildModelCatalogForRoutes(
+      stalePlan,
+      routes,
+      new Map([[qwen.id, qwen]]),
+    );
+
+    expect(rebuilt.models).toEqual([
+      {
+        model: "qwen3.6",
+        displayName: "Qwen 3.6",
+        contextWindow: 262144,
+      },
+    ]);
+    expect(rebuilt.spawnAgentModels).toEqual(["qwen3.6"]);
+  });
+
   it("seeds OpenAI/Codex providers without a model catalog with fallback models", () => {
     const officialBackup: Provider = {
       id: "codex-official-backup",

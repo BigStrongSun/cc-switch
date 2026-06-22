@@ -196,6 +196,47 @@ function catalogRowsMatchModels(
   });
 }
 
+// 将远端 /models 返回合并进 Codex 模型映射；已有行保留用户显示名，只补空上下文和新增模型。
+function mergeFetchedModelsIntoCatalogRows(
+  rows: CodexCatalogRow[],
+  fetchedModels: FetchedModel[],
+): CodexCatalogRow[] {
+  const next = [...rows];
+  const rowByModel = new Map(
+    next
+      .map((row, index) => [row.model.trim(), { row, index }] as const)
+      .filter(([model]) => Boolean(model)),
+  );
+
+  for (const fetched of fetchedModels) {
+    const model = fetched.id.trim();
+    if (!model) continue;
+    const contextWindow =
+      typeof fetched.contextWindow === "number" && fetched.contextWindow > 0
+        ? String(fetched.contextWindow)
+        : undefined;
+    const existing = rowByModel.get(model);
+    if (existing) {
+      if (!existing.row.contextWindow && contextWindow) {
+        next[existing.index] = {
+          ...existing.row,
+          contextWindow,
+        };
+      }
+      continue;
+    }
+    const row = createCatalogRow({
+      model,
+      displayName: model,
+      ...(contextWindow ? { contextWindow } : {}),
+    });
+    rowByModel.set(model, { row, index: next.length });
+    next.push(row);
+  }
+
+  return next;
+}
+
 export function CodexFormFields({
   providerId,
   codexApiKey,
@@ -406,6 +447,18 @@ export function CodexFormFields({
     )
       .then((models) => {
         setFetchedModels(models);
+        if (onCatalogModelsChange && models.length > 0) {
+          setCatalogRows((current) =>
+            mergeFetchedModelsIntoCatalogRows(current, models),
+          );
+          const autoSelected = models
+            .map((model) => model.id.trim())
+            .filter(Boolean)
+            .slice(0, 5);
+          if (onSpawnAgentModelsChange && spawnAgentModels.length === 0) {
+            onSpawnAgentModelsChange(autoSelected);
+          }
+        }
         if (models.length === 0) {
           toast.info(t("providerForm.fetchModelsEmpty"));
         } else {
@@ -419,7 +472,16 @@ export function CodexFormFields({
         showFetchModelsError(err, t);
       })
       .finally(() => setIsFetchingModels(false));
-  }, [codexBaseUrl, codexApiKey, isFullUrl, customUserAgent, t]);
+  }, [
+    codexBaseUrl,
+    codexApiKey,
+    isFullUrl,
+    customUserAgent,
+    onCatalogModelsChange,
+    onSpawnAgentModelsChange,
+    spawnAgentModels.length,
+    t,
+  ]);
 
   const handleAddCatalogRow = useCallback(() => {
     if (!onCatalogModelsChange) return;
