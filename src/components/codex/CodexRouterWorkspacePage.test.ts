@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Provider } from "@/types";
 import {
   applyMultiRouterSettingsDraft,
+  buildMultiRouterRuntimeStatus,
   buildCodexProxyBaseUrl,
   buildModelCatalogForRoutes,
   createDraftRoutingPlan,
@@ -281,6 +282,47 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
     expect(validateProxyListenDraft("127.0.0.1", "abc")).toEqual({
       ok: false,
       error: "监听端口必须是 1024-65535 之间的数字。",
+    });
+  });
+
+  it("reports multirouter runtime state from current provider and takeover status", () => {
+    const plan = createDraftRoutingPlan([], []);
+
+    expect(
+      buildMultiRouterRuntimeStatus({
+        selectedPlan: plan,
+        selectedRouting: readCodexRouting(plan),
+        selectedRouteCount: 1,
+        isProxyRunning: true,
+        isCodexTakeoverActive: true,
+        activeProviderId: "other-router",
+      }).label,
+    ).toBe("未发布");
+
+    expect(
+      buildMultiRouterRuntimeStatus({
+        selectedPlan: plan,
+        selectedRouting: readCodexRouting(plan),
+        selectedRouteCount: 1,
+        isProxyRunning: false,
+        isCodexTakeoverActive: true,
+        activeProviderId: plan.id,
+      }).label,
+    ).toBe("代理未启动");
+
+    expect(
+      buildMultiRouterRuntimeStatus({
+        selectedPlan: plan,
+        selectedRouting: readCodexRouting(plan),
+        selectedRouteCount: 1,
+        isProxyRunning: true,
+        isCodexTakeoverActive: true,
+        activeProviderId: plan.id,
+      }),
+    ).toMatchObject({
+      running: true,
+      label: "运行中",
+      tone: "ok",
     });
   });
 });

@@ -156,6 +156,13 @@ type RouteTrafficTarget = {
   providerName: string;
 };
 
+type MultiRouterRuntimeStatus = {
+  running: boolean;
+  label: string;
+  detail: string;
+  tone: "ok" | "warn";
+};
+
 type RouteCandidate = {
   id: string;
   route: CodexRoute;
@@ -246,6 +253,79 @@ export function validateProxyListenDraft(
     listenAddress: address,
     listenPort: port,
     baseUrl: buildCodexProxyBaseUrl(address, port),
+  };
+}
+
+/// 汇总当前 MultiRouter 的运行态；只有当前方案已发布为 Codex provider 且代理/接管/入口/规则齐全才算运行中。
+export function buildMultiRouterRuntimeStatus({
+  selectedPlan,
+  selectedRouting,
+  selectedRouteCount,
+  isProxyRunning,
+  isCodexTakeoverActive,
+  activeProviderId,
+}: {
+  selectedPlan: Provider | null;
+  selectedRouting: CodexRouting | null;
+  selectedRouteCount: number;
+  isProxyRunning: boolean;
+  isCodexTakeoverActive: boolean;
+  activeProviderId?: string;
+}): MultiRouterRuntimeStatus {
+  if (!selectedPlan) {
+    return {
+      running: false,
+      label: "未选择",
+      detail: "当前没有选中的 MultiRouter。",
+      tone: "warn",
+    };
+  }
+  if (activeProviderId !== selectedPlan.id) {
+    return {
+      running: false,
+      label: "未发布",
+      detail: `当前 Codex provider 是 ${activeProviderId || "未设置"}，不是 ${selectedPlan.id}。`,
+      tone: "warn",
+    };
+  }
+  if (!isProxyRunning) {
+    return {
+      running: false,
+      label: "代理未启动",
+      detail: "本地 15721 接管代理未监听，Codex 请求不会进入 MultiRouter。",
+      tone: "warn",
+    };
+  }
+  if (!isCodexTakeoverActive) {
+    return {
+      running: false,
+      label: "Codex 未接管",
+      detail: "Codex live config 尚未指向本地代理。",
+      tone: "warn",
+    };
+  }
+  if (selectedRouting?.enabled === false) {
+    return {
+      running: false,
+      label: "入口关闭",
+      detail: "当前 MultiRouter 入口已关闭，规则会保留但不参与分流。",
+      tone: "warn",
+    };
+  }
+  if (selectedRouteCount === 0) {
+    return {
+      running: false,
+      label: "无规则",
+      detail: "当前 MultiRouter 没有启用规则，无法按 model 分流。",
+      tone: "warn",
+    };
+  }
+  return {
+    running: true,
+    label: "运行中",
+    detail:
+      "当前 MultiRouter 已作为 Codex provider 启动，Codex 请求会进入本地代理分流。",
+    tone: "ok",
   };
 }
 
@@ -1500,7 +1580,12 @@ export function CodexRouterWorkspacePage({
               onSaveRoutes={handleSaveRoutingRoutes}
               onSelectPlan={handleSelectPlan}
               onSelectRoute={handleSelectRoute}
+              onEditPlan={handleEditPlan}
               providersById={providersById}
+              proxyStatus={proxyStatus}
+              isProxyRunning={isProxyRunning}
+              isCodexTakeoverActive={isCodexTakeoverActive}
+              activeProviderId={activeProviderId}
               isRoutePickerOpen={isRoutePickerOpen}
               isSavingRoutes={isSavingRoutes}
               isPlanSettingsOpen={isPlanSettingsOpen}
@@ -1898,6 +1983,11 @@ function RoutesTab({
   onSaveRoutes,
   onSelectPlan,
   onSelectRoute,
+  onEditPlan,
+  proxyStatus,
+  isProxyRunning,
+  isCodexTakeoverActive,
+  activeProviderId,
   isRoutePickerOpen,
   isSavingRoutes,
   isPlanSettingsOpen,
@@ -1920,6 +2010,11 @@ function RoutesTab({
   onSaveRoutes: (plan: Provider, routes: CodexRoute[]) => Promise<void>;
   onSelectPlan: (provider: Provider) => void;
   onSelectRoute: (entry: RouteEntry) => void;
+  onEditPlan: (provider: Provider, detail?: string) => void;
+  proxyStatus?: ProxyStatus;
+  isProxyRunning: boolean;
+  isCodexTakeoverActive: boolean;
+  activeProviderId?: string;
   isRoutePickerOpen: boolean;
   isSavingRoutes: boolean;
   isPlanSettingsOpen: boolean;
@@ -1937,9 +2032,29 @@ function RoutesTab({
   const selectedPlanRoutes = selectedPlan
     ? routeEntries.filter(({ provider }) => provider.id === selectedPlan.id)
     : routeEntries;
+  const selectedRouting = selectedPlan ? readCodexRouting(selectedPlan) : null;
+  const effectiveActiveProviderId =
+    activeProviderId ?? proxyStatus?.current_provider_id ?? undefined;
+  const runtimeStatus = buildMultiRouterRuntimeStatus({
+    selectedPlan,
+    selectedRouting,
+    selectedRouteCount: selectedPlanRoutes.length,
+    isProxyRunning,
+    isCodexTakeoverActive,
+    activeProviderId: effectiveActiveProviderId,
+  });
 
   return (
     <div className="space-y-4">
+      <MultiRouterCurrentStatus
+        selectedPlan={selectedPlan}
+        selectedRouteCount={selectedPlanRoutes.length}
+        runtimeStatus={runtimeStatus}
+        proxyStatus={proxyStatus}
+        isProxyRunning={isProxyRunning}
+        isCodexTakeoverActive={isCodexTakeoverActive}
+        activeProviderId={effectiveActiveProviderId}
+      />
       <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
         <section className="rounded-lg border border-blue-700/40 bg-blue-950/15 p-4">
           <SectionHeader
@@ -1961,10 +2076,8 @@ function RoutesTab({
             {routingPlans.map((provider) => {
               const active = selectedPlan?.id === provider.id;
               return (
-                <button
+                <div
                   key={provider.id}
-                  type="button"
-                  onClick={() => onSelectPlan(provider)}
                   className={cn(
                     "rounded-lg border p-3 text-left transition",
                     active
@@ -1973,7 +2086,32 @@ function RoutesTab({
                   )}
                 >
                   <PlanCardContent provider={provider} compact />
-                </button>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={active ? "default" : "outline"}
+                      onClick={() => onSelectPlan(provider)}
+                      className={cn(
+                        "gap-2",
+                        active ? "bg-blue-600 hover:bg-blue-500" : "",
+                      )}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      {active ? "当前选中" : "选择"}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onEditPlan(provider, "重命名多路路由")}
+                      className="gap-2"
+                    >
+                      <Pencil className="h-4 w-4" />
+                      改名
+                    </Button>
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -2074,6 +2212,114 @@ function RoutesTab({
         selectedPlan={selectedPlan}
         selectedRoutes={selectedPlanRoutes}
       />
+    </div>
+  );
+}
+
+/// 路由页顶部的当前 MultiRouter 状态带，明确区分“页面选中”和“已经作为 Codex provider 运行”。
+function MultiRouterCurrentStatus({
+  selectedPlan,
+  selectedRouteCount,
+  runtimeStatus,
+  proxyStatus,
+  isProxyRunning,
+  isCodexTakeoverActive,
+  activeProviderId,
+}: {
+  selectedPlan: Provider | null;
+  selectedRouteCount: number;
+  runtimeStatus: MultiRouterRuntimeStatus;
+  proxyStatus?: ProxyStatus;
+  isProxyRunning: boolean;
+  isCodexTakeoverActive: boolean;
+  activeProviderId?: string;
+}) {
+  const listenAddress = proxyStatus
+    ? `${proxyStatus.address}:${proxyStatus.port}`
+    : "未监听";
+  const runtimeClass =
+    runtimeStatus.tone === "ok"
+      ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-100"
+      : "border-amber-500/50 bg-amber-500/15 text-amber-100";
+  return (
+    <section className="rounded-lg border border-blue-700/40 bg-slate-950/55 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <RadioTower className="h-4 w-4 text-blue-300" />
+            <span className="text-sm font-semibold text-slate-100">
+              当前 MultiRouter
+            </span>
+            <Badge className={cn("border", runtimeClass)}>
+              {runtimeStatus.label}
+            </Badge>
+          </div>
+          <div className="mt-2 truncate text-lg font-semibold text-slate-50">
+            {selectedPlan?.name ?? "未选择多路路由"}
+          </div>
+          <div className="mt-1 text-xs leading-5 text-slate-400">
+            {runtimeStatus.detail}
+          </div>
+        </div>
+        <div className="grid min-w-[280px] gap-2 text-xs sm:grid-cols-2">
+          <StatusInlineItem
+            label="选中方案"
+            value={selectedPlan?.id ?? "无"}
+            ok={Boolean(selectedPlan)}
+          />
+          <StatusInlineItem
+            label="当前 Provider"
+            value={activeProviderId ?? "未设置"}
+            ok={Boolean(selectedPlan && activeProviderId === selectedPlan.id)}
+          />
+          <StatusInlineItem
+            label="本地监听"
+            value={listenAddress}
+            ok={isProxyRunning}
+          />
+          <StatusInlineItem
+            label="Codex 接管"
+            value={isCodexTakeoverActive ? "已接管" : "未接管"}
+            ok={isCodexTakeoverActive}
+          />
+          <StatusInlineItem
+            label="规则数量"
+            value={`${selectedRouteCount} 条`}
+            ok={selectedRouteCount > 0}
+          />
+          <StatusInlineItem
+            label="入口状态"
+            value={selectedPlan ? runtimeStatus.label : "未选择"}
+            ok={runtimeStatus.running}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/// 状态带内的短字段，避免把关键运行信号藏进长说明文本。
+function StatusInlineItem({
+  label,
+  value,
+  ok,
+}: {
+  label: string;
+  value: string;
+  ok: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div
+        className={cn(
+          "mt-1 truncate font-mono text-xs",
+          ok ? "text-emerald-200" : "text-amber-200",
+        )}
+        title={value}
+      >
+        {value}
+      </div>
     </div>
   );
 }
