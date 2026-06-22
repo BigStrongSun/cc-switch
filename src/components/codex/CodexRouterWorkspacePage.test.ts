@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import React from "react";
+import { describe, expect, it, vi } from "vitest";
 import type { Provider } from "@/types";
 import {
   applyMultiRouterSettingsDraft,
   buildMultiRouterRuntimeStatus,
   buildCodexProxyBaseUrl,
   buildModelCatalogForRoutes,
+  CodexRouterWorkspacePage,
   createDraftRoutingPlan,
   isRoutingPlan,
   mergeRoutePickerDraftIds,
@@ -13,7 +18,96 @@ import {
   validateProxyListenDraft,
 } from "./CodexRouterWorkspacePage";
 
+vi.mock("@/lib/api/proxy", () => ({
+  proxyApi: {
+    getGlobalProxyConfig: vi.fn().mockResolvedValue({
+      listenAddress: "127.0.0.1",
+      listenPort: 15721,
+    }),
+    diagnoseCodexMultiRouter: vi.fn(),
+    unlockCodexModelPicker: vi.fn(),
+  },
+}));
+
+vi.mock("@/lib/query/usage", () => ({
+  useRequestLogs: () => ({ data: [], isLoading: false }),
+}));
+
+vi.mock("@/lib/api", () => ({
+  providersApi: {
+    add: vi.fn(),
+    update: vi.fn(),
+  },
+}));
+
+function renderWorkspace(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    React.createElement(QueryClientProvider, { client: queryClient }, ui),
+  );
+}
+
 describe("Codex MultiRouter workspace route persistence helpers", () => {
+  it("does not force the workspace back to routes after the initial jump is consumed", async () => {
+    const source: Provider = {
+      id: "codex-qwen",
+      name: "Qwen Local",
+      category: "custom",
+      settingsConfig: {
+        modelCatalog: { models: [{ model: "qwen3.6" }] },
+      },
+    };
+    const plan = createDraftRoutingPlan([source], [source]);
+    const providers = [source, plan];
+    const props = {
+      providers,
+      isProxyRunning: true,
+      isCodexTakeoverActive: true,
+      activeProviderId: plan.id,
+      initialProviderId: plan.id,
+      initialTab: "routes" as const,
+      onEditProvider: vi.fn(),
+      onCreateProvider: vi.fn(),
+    };
+
+    const { rerender } = renderWorkspace(
+      React.createElement(CodexRouterWorkspacePage, props),
+    );
+
+    expect(screen.getByRole("tab", { name: "路由规则" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+
+    const user = userEvent.setup();
+    const statusTab = screen.getByRole("tab", { name: "状态" });
+    await user.click(statusTab);
+    await waitFor(() =>
+      expect(statusTab).toHaveAttribute("data-state", "active"),
+    );
+
+    rerender(
+      React.createElement(
+        QueryClientProvider,
+        {
+          client: new QueryClient({
+            defaultOptions: { queries: { retry: false } },
+          }),
+        },
+        React.createElement(CodexRouterWorkspacePage, {
+          ...props,
+          providers: [...providers],
+        }),
+      ),
+    );
+
+    await waitFor(() =>
+      expect(statusTab).toHaveAttribute("data-state", "active"),
+    );
+  });
+
   it("creates a real routing plan instead of a plain model source", () => {
     const openai: Provider = {
       id: "codex-openai",

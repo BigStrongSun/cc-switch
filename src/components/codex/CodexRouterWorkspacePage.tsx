@@ -1202,6 +1202,7 @@ export function CodexRouterWorkspacePage({
   const [routePickerSelectAll, setRoutePickerSelectAll] = useState(false);
   const [optimisticRoutingPlan, setOptimisticRoutingPlan] =
     useState<Provider | null>(null);
+  const appliedInitialNavigationRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
 
   const effectiveProviders = useMemo(() => {
@@ -1220,6 +1221,10 @@ export function CodexRouterWorkspacePage({
   const routingPlans = useMemo(
     () => effectiveProviders.filter(isRoutingPlan),
     [effectiveProviders],
+  );
+  const routingPlanIdSet = useMemo(
+    () => new Set(routingPlans.map((provider) => provider.id)),
+    [routingPlans],
   );
   const modelSources = useMemo(
     () => effectiveProviders.filter((provider) => !isRoutingPlan(provider)),
@@ -1258,14 +1263,14 @@ export function CodexRouterWorkspacePage({
   // 从主页或 Provider 列表跳转进来时，直接定位到指定 MultiRouter 和目标功能页。
   useEffect(() => {
     if (!initialProviderId) return;
-    const exists = routingPlans.some(
-      (provider) => provider.id === initialProviderId,
-    );
-    if (!exists) return;
+    const navigationKey = `${initialProviderId}:${initialTab}`;
+    if (appliedInitialNavigationRef.current === navigationKey) return;
+    if (!routingPlanIdSet.has(initialProviderId)) return;
     setSelectedPlanId(initialProviderId);
     setSelectedRouteKey(null);
     setActiveTab(initialTab);
-  }, [initialProviderId, initialTab, routingPlans]);
+    appliedInitialNavigationRef.current = navigationKey;
+  }, [initialProviderId, initialTab, routingPlanIdSet]);
 
   useEffect(() => {
     const persistedPlan = optimisticRoutingPlan
