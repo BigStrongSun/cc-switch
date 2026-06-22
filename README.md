@@ -31,6 +31,14 @@ CCSwitchMulti 是基于官方 [CC Switch](https://github.com/farion1231/cc-switc
 
 后面的 README 仍然保留了上游 CC Switch 的原始说明。使用 `BigStrongSun/cc-switch` 发布版本时，请先阅读本节，因为这里记录的是 CCSwitchMulti 分支相对官方版本新增的能力、实现边界和使用注意事项。
 
+### Codex 多路由配置说明书
+
+如果你是第一次配置 Codex MultiRouter，请先看这份中文说明书：
+
+**[CCSwitchMulti Codex 多路由使用说明](docs/guides/codex-multirouter-guide-zh.md)**
+
+它按实际操作顺序覆盖 Codex Desktop 登录、CCSwitchMulti OAuth 授权、添加 DeepSeek / GLM / 本地模型源、开启 `需要本地路由映射`、获取模型列表、配置上下文窗口、创建多模型路由、设置子 Agent 前 5 个候选模型、启动 Codex 路由、Debug 检查、重启 Codex Desktop，以及历史记录修复。
+
 ### 适合谁使用
 
 这个分支特别适合已经有 ChatGPT Pro、Plus 或 Team 订阅，并且希望把 GPT 系列最新、最强模型作为主 Agent 来做规划、决策和质量把关的用户。你可以让主 Agent 继续使用官方 GPT/Codex 能力，同时把大量可拆分的执行任务路由到自己的廉价 API、本地部署模型，或 DeepSeek V4、Qwen 等国产/开源模型上，从而降低 Codex 官方额度消耗。
