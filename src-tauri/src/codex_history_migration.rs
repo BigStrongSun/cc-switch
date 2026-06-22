@@ -532,7 +532,8 @@ pub fn sync_codex_history_provider_bucket_to_multirouter(
 
 /// 修复当前 Codex Desktop 历史侧边栏可见性。
 ///
-/// 该路径专门覆盖 Codex Desktop 26.609 以后读取 `~/.codex/sqlite/state_5.sqlite` 的实现，
+/// 该路径会自动识别 Codex 当前使用的 state DB，默认覆盖 `~/.codex/state_5.sqlite`，
+/// 并兼容显式 `sqlite_home`、`CODEX_SQLITE_HOME` 与旧版 `~/.codex/sqlite/state_5.sqlite`，
 /// 同时处理 provider 桶、`has_user_event`、`session_index.jsonl`、全局工作区提示和项目聚焦。
 pub fn repair_codex_history_visibility_for_multirouter(
     db: &Database,
@@ -1317,18 +1318,15 @@ fn default_history_visibility_source_provider_ids() -> Vec<String> {
     .collect()
 }
 
-/// 解析当前 Codex Desktop 真正使用的 state DB，优先新版 `sqlite/state_5.sqlite`。
+/// 解析当前 Codex Desktop 真正使用的 state DB。
+///
+/// 显式 `sqlite_home`/`CODEX_SQLITE_HOME` 代表用户或 Codex 配置的迁移位置，优先级最高。
+/// 未配置时，当前 Codex Desktop/CLI 默认使用 `~/.codex/state_5.sqlite`；`sqlite/` 子目录
+/// 只作为旧版兼容兜底，避免 macOS 用户被旧路径误导到空库或过期库。
 fn resolve_active_codex_state_db(
     codex_dir: &Path,
     config_text: &str,
 ) -> Option<ActiveCodexStateDb> {
-    let sqlite_default = codex_dir.join("sqlite").join(CODEX_STATE_DB_FILENAME);
-    if sqlite_default.exists() {
-        return Some(ActiveCodexStateDb {
-            path: sqlite_default,
-            kind: "sqlite_subdir".to_string(),
-        });
-    }
     if let Some(sqlite_home) = sqlite_home_from_codex_config(config_text) {
         let configured = sqlite_home.join(CODEX_STATE_DB_FILENAME);
         if configured.exists() {
@@ -1346,11 +1344,18 @@ fn resolve_active_codex_state_db(
             });
         }
     }
-    let legacy = codex_dir.join(CODEX_STATE_DB_FILENAME);
-    if legacy.exists() {
+    let codex_root = codex_dir.join(CODEX_STATE_DB_FILENAME);
+    if codex_root.exists() {
         return Some(ActiveCodexStateDb {
-            path: legacy,
-            kind: "legacy_root".to_string(),
+            path: codex_root,
+            kind: "codex_root".to_string(),
+        });
+    }
+    let sqlite_default = codex_dir.join("sqlite").join(CODEX_STATE_DB_FILENAME);
+    if sqlite_default.exists() {
+        return Some(ActiveCodexStateDb {
+            path: sqlite_default,
+            kind: "sqlite_subdir".to_string(),
         });
     }
     None
@@ -3631,9 +3636,17 @@ mod tests {
     }
 
     impl EnvVarGuard {
+        /// 临时设置环境变量，并在测试结束时恢复原值。
         fn set(key: &'static str, value: &Path) -> Self {
             let previous = std::env::var_os(key);
             std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        /// 临时移除环境变量，避免外部开发机环境影响路径优先级断言。
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
             Self { key, previous }
         }
     }
@@ -3675,13 +3688,31 @@ mod tests {
     }
 
     #[test]
-    fn active_state_db_prefers_current_sqlite_subdir() {
+    #[serial]
+    fn active_state_db_prefers_codex_root_over_sqlite_subdir() {
         let dir = tempdir().expect("tempdir");
         let codex_dir = dir.path().join(".codex");
         let sqlite_dir = codex_dir.join("sqlite");
         fs::create_dir_all(&sqlite_dir).expect("create sqlite dir");
-        fs::write(codex_dir.join(CODEX_STATE_DB_FILENAME), b"legacy").expect("legacy db");
-        fs::write(sqlite_dir.join(CODEX_STATE_DB_FILENAME), b"active").expect("active db");
+        fs::write(codex_dir.join(CODEX_STATE_DB_FILENAME), b"root").expect("root db");
+        fs::write(sqlite_dir.join(CODEX_STATE_DB_FILENAME), b"legacy").expect("legacy db");
+        let _guard = EnvVarGuard::remove("CODEX_SQLITE_HOME");
+
+        let active = resolve_active_codex_state_db(&codex_dir, "").expect("active db");
+
+        assert_eq!(active.kind, "codex_root");
+        assert_eq!(active.path, codex_dir.join(CODEX_STATE_DB_FILENAME));
+    }
+
+    #[test]
+    #[serial]
+    fn active_state_db_falls_back_to_sqlite_subdir() {
+        let dir = tempdir().expect("tempdir");
+        let codex_dir = dir.path().join(".codex");
+        let sqlite_dir = codex_dir.join("sqlite");
+        fs::create_dir_all(&sqlite_dir).expect("create sqlite dir");
+        fs::write(sqlite_dir.join(CODEX_STATE_DB_FILENAME), b"legacy").expect("legacy db");
+        let _guard = EnvVarGuard::remove("CODEX_SQLITE_HOME");
 
         let active = resolve_active_codex_state_db(&codex_dir, "").expect("active db");
 

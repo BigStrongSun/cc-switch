@@ -316,7 +316,7 @@ export function CodexHistoryRepairPanel({
   const activeDbLabel =
     historyList?.stateDbPath ||
     normalizedStateDbPath ||
-    "~/.codex/sqlite/state_5.sqlite";
+    "~/.codex/state_5.sqlite";
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border bg-card">
@@ -670,8 +670,11 @@ function RepairSettings({
         <LabeledInput
           label="Active DB"
           value={stateDbPath}
-          placeholder="默认 ~/.codex/sqlite/state_5.sqlite"
-          hint={historyList?.stateDbPath ?? "优先读取 sqlite/state_5.sqlite"}
+          placeholder="默认 ~/.codex/state_5.sqlite"
+          hint={
+            historyList?.stateDbPath ??
+            "自动识别 sqlite_home / CODEX_SQLITE_HOME；默认优先 ~/.codex/state_5.sqlite"
+          }
           onChange={onStateDbPathChange}
         />
         <LabeledInput
