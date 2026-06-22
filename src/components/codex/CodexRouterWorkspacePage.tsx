@@ -2357,7 +2357,7 @@ function RoutesTab({
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <MultiRouterCurrentStatus
         selectedPlan={selectedPlan}
         totalRouteCount={selectedPlanRoutes.length}
@@ -2369,8 +2369,8 @@ function RoutesTab({
         isCodexTakeoverActive={isCodexTakeoverActive}
         activeProviderId={effectiveActiveProviderId}
       />
-      <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
-        <section className="rounded-lg border border-blue-700/40 bg-blue-950/15 p-4">
+      <div className="grid gap-3 xl:grid-cols-[300px_minmax(0,1fr)]">
+        <section className="rounded-lg border border-blue-700/40 bg-blue-950/15 p-3">
           <SectionHeader
             icon={Layers3}
             title="选择多路路由"
@@ -2386,28 +2386,28 @@ function RoutesTab({
               </Button>
             }
           />
-          <div className="mt-3 grid gap-2">
+          <div className="mt-2 grid gap-2">
             {routingPlans.map((provider) => {
               const active = selectedPlan?.id === provider.id;
               return (
                 <div
                   key={provider.id}
                   className={cn(
-                    "rounded-lg border p-3 text-left transition",
+                    "rounded-lg border p-2.5 text-left transition",
                     active
                       ? "border-blue-400 bg-blue-600/20 shadow-[0_0_0_1px_rgba(96,165,250,0.35)]"
                       : "border-slate-700 bg-slate-950/40 hover:border-blue-500 hover:bg-blue-950/20",
                   )}
                 >
                   <PlanCardContent provider={provider} compact />
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <Button
                       type="button"
                       size="sm"
                       variant={active ? "default" : "outline"}
                       onClick={() => onSelectPlan(provider)}
                       className={cn(
-                        "gap-2",
+                        "h-8 gap-1.5 px-2.5",
                         active ? "bg-blue-600 hover:bg-blue-500" : "",
                       )}
                     >
@@ -2419,7 +2419,7 @@ function RoutesTab({
                       size="sm"
                       variant="outline"
                       onClick={() => onEditPlan(provider, "重命名多路路由")}
-                      className="gap-2"
+                      className="h-8 gap-1.5 px-2.5"
                     >
                       <Pencil className="h-4 w-4" />
                       改名
@@ -2431,8 +2431,8 @@ function RoutesTab({
           </div>
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-[1fr_360px]">
-          <div className="rounded-lg border border-emerald-700/40 bg-emerald-950/10 p-4">
+        <section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="rounded-lg border border-emerald-700/40 bg-emerald-950/10 p-3">
             <SectionHeader
               icon={Route}
               title="规则列表"
@@ -2450,7 +2450,7 @@ function RoutesTab({
                 ) : null
               }
             />
-            <div className="mt-3 grid gap-2">
+            <div className="mt-2 grid gap-2">
               {selectedPlanRoutes.map((entry) => (
                 <RouteListButton
                   key={`${entry.provider.id}-${entry.route.id ?? entry.index}`}
@@ -2566,8 +2566,8 @@ function MultiRouterCurrentStatus({
       ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-100"
       : "border-amber-500/50 bg-amber-500/15 text-amber-100";
   return (
-    <section className="rounded-lg border border-blue-700/40 bg-slate-950/55 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <section className="rounded-lg border border-blue-700/40 bg-slate-950/55 p-3">
+      <div className="grid gap-2 xl:grid-cols-[minmax(220px,0.75fr)_minmax(0,1.6fr)]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <RadioTower className="h-4 w-4 text-blue-300" />
@@ -2578,14 +2578,17 @@ function MultiRouterCurrentStatus({
               {runtimeStatus.label}
             </Badge>
           </div>
-          <div className="mt-2 truncate text-lg font-semibold text-slate-50">
+          <div className="mt-1 truncate text-base font-semibold text-slate-50">
             {selectedPlan?.name ?? "未选择多路路由"}
           </div>
-          <div className="mt-1 text-xs leading-5 text-slate-400">
+          <div
+            className="mt-0.5 truncate text-xs text-slate-400"
+            title={runtimeStatus.detail}
+          >
             {runtimeStatus.detail}
           </div>
         </div>
-        <div className="grid min-w-[280px] gap-2 text-xs sm:grid-cols-2">
+        <div className="grid min-w-0 gap-1.5 text-xs sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <StatusInlineItem
             label="选中方案"
             value={selectedPlan?.id ?? "无"}
@@ -2638,11 +2641,11 @@ function StatusInlineItem({
   ok: boolean;
 }) {
   return (
-    <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+    <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 px-2 py-1.5">
       <div className="text-[11px] text-slate-500">{label}</div>
       <div
         className={cn(
-          "mt-1 truncate font-mono text-xs",
+          "mt-0.5 truncate font-mono text-[11px]",
           ok ? "text-emerald-200" : "text-amber-200",
         )}
         title={value}
@@ -2981,12 +2984,12 @@ function ProviderModelRefreshPanel({
   if (visibleRows.length === 0) return null;
 
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-950/45 p-4">
-      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100">
+    <section className="rounded-lg border border-slate-700 bg-slate-950/45 p-3">
+      <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-100">
         <RefreshCw className="h-4 w-4 text-sky-300" />
         候选 provider 模型列表刷新
       </div>
-      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
         {visibleRows.map(({ provider, state }) => {
           const tone =
             state.status === "success"
@@ -2997,7 +3000,7 @@ function ProviderModelRefreshPanel({
           return (
             <div
               key={provider.id}
-              className={cn("rounded-md border p-3", tone)}
+              className={cn("rounded-md border px-2 py-1.5", tone)}
             >
               <div className="flex min-w-0 items-center justify-between gap-2">
                 <span className="truncate text-xs font-semibold">
@@ -3011,7 +3014,9 @@ function ProviderModelRefreshPanel({
                       : "失败"}
                 </Badge>
               </div>
-              <div className="mt-1 text-xs leading-5">{state.message}</div>
+              <div className="mt-1 truncate text-xs" title={state.message}>
+                {state.message}
+              </div>
             </div>
           );
         })}
@@ -3119,7 +3124,7 @@ function RouteCandidatePicker({
   }
 
   return (
-    <section className="rounded-lg border border-emerald-700/50 bg-slate-950/70 p-4 shadow-[0_0_0_1px_rgba(16,185,129,0.15)]">
+    <section className="rounded-lg border border-emerald-700/50 bg-slate-950/70 p-3 shadow-[0_0_0_1px_rgba(16,185,129,0.15)]">
       <SectionHeader
         icon={Route}
         title="选择候选 router"
@@ -3189,7 +3194,7 @@ function RouteCandidatePicker({
         }
       />
 
-      <div className="mt-3 grid gap-2">
+      <div className="mt-2 grid gap-2 md:grid-cols-2">
         {candidates.map((candidate) => {
           const checked = selectedIds.has(candidate.id);
           const enabled = enabledIds.has(candidate.id);
@@ -3204,17 +3209,17 @@ function RouteCandidatePicker({
             <div
               key={candidate.id}
               className={cn(
-                "rounded-lg border p-3 transition",
+                "rounded-lg border p-2.5 transition",
                 checked
                   ? "border-emerald-500/60 bg-emerald-500/10"
                   : "border-slate-700 bg-slate-950/40",
               )}
             >
-              <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
                 <button
                   type="button"
                   onClick={() => toggleSetValue(setSelectedIds, candidate.id)}
-                  className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                  className="flex min-w-0 flex-1 items-start gap-2 text-left"
                 >
                   <span
                     className={cn(
@@ -3248,7 +3253,7 @@ function RouteCandidatePicker({
                             : "已加入但停用"}
                       </Badge>
                     </span>
-                    <span className="mt-1 block truncate text-xs text-slate-400">
+                    <span className="mt-0.5 block truncate text-xs text-slate-400">
                       {targetLabel} ·{" "}
                       {candidate.isExisting ? "已在规则中" : "候选模型源"}
                     </span>
@@ -3260,7 +3265,7 @@ function RouteCandidatePicker({
                   onClick={() => toggleSetValue(setEnabledIds, candidate.id)}
                   disabled={!checked || isSaving}
                   className={cn(
-                    "h-8 min-w-[88px]",
+                    "h-8 min-w-[78px] px-2",
                     enabled
                       ? "border-emerald-500/50 text-emerald-100"
                       : "border-amber-500/50 text-amber-100",
@@ -3269,7 +3274,7 @@ function RouteCandidatePicker({
                   {enabled ? "已启用" : "已停用"}
                 </Button>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+              <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
                 {candidate.matchModels.slice(0, 6).map((model) => (
                   <span
                     key={model}
@@ -3301,7 +3306,7 @@ function RouteCandidatePicker({
               {refreshState && refreshState.status !== "skipped" ? (
                 <div
                   className={cn(
-                    "mt-3 rounded-md border px-3 py-2 text-xs leading-5",
+                    "mt-2 rounded-md border px-2 py-1.5 text-xs leading-5",
                     refreshState.status === "success"
                       ? "border-emerald-700/50 bg-emerald-950/30 text-emerald-100"
                       : refreshState.status === "loading"
@@ -3560,17 +3565,16 @@ function SpawnAgentCandidatesPanel({
   }
 
   return (
-    <section className="rounded-lg border border-violet-700/40 bg-violet-950/15 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <section className="rounded-lg border border-violet-700/40 bg-violet-950/15 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-violet-100">
             <GitBranch className="h-4 w-4" />子 Agent 候选模型
           </div>
-          <p className="mt-1 text-xs leading-5 text-violet-200/80">
-            前 {spawnAgentVisibleLimit} 个是 Codex 的 spawn_agent 里可用的模型，
-            会按这里的顺序进入子 Agent
-            选择窗口；可以拖拽调整顺序。这里不改变实际路由、历史和统计。
-          </p>
+          <div className="mt-0.5 text-xs text-violet-200/80">
+            前 {spawnAgentVisibleLimit} 个进入
+            spawn_agent；拖拽只改候选顺序，不改实际路由。
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -3605,25 +3609,25 @@ function SpawnAgentCandidatesPanel({
         </div>
       </div>
 
-      <div className="mt-3 grid items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
-        <div className="space-y-3">
+      <div className="mt-2 grid items-stretch gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.65fr)]">
+        <div className="space-y-2">
           <div>
-            <div className="mb-2 text-xs font-semibold text-violet-100">
+            <div className="mb-1.5 text-xs font-semibold text-violet-100">
               Codex spawn_agent 前五可用模型
             </div>
-            <div className="grid gap-2 md:grid-cols-5">
+            <div className="grid gap-1.5 md:grid-cols-5">
               {previewVisibleModels.length > 0 ? (
                 previewVisibleModels.map((model, index) => (
                   <div
                     key={`${model.model ?? index}-${index}`}
-                    className="min-w-0 rounded-md border border-amber-400/70 bg-amber-500/15 px-2 py-2 shadow-[0_0_0_1px_rgba(251,191,36,0.18)]"
+                    className="min-w-0 rounded-md border border-amber-400/70 bg-amber-500/15 px-2 py-1.5 shadow-[0_0_0_1px_rgba(251,191,36,0.18)]"
                   >
-                    <div className="flex items-center justify-between gap-2 text-[11px] text-amber-200">
+                    <div className="flex items-center justify-between gap-2 text-[10px] text-amber-200">
                       <span>#{index + 1}</span>
                       <span>spawn</span>
                     </div>
                     <div
-                      className="mt-1 truncate font-mono text-xs text-slate-50"
+                      className="mt-0.5 truncate font-mono text-[11px] text-slate-50"
                       title={catalogModelLabel(model)}
                     >
                       {catalogModelLabel(model)}
@@ -3641,7 +3645,7 @@ function SpawnAgentCandidatesPanel({
           </div>
 
           <div>
-            <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
               <div className="text-xs font-semibold text-violet-100">
                 可拖拽排序的前五候选
               </div>
@@ -3658,7 +3662,7 @@ function SpawnAgentCandidatesPanel({
                 items={draftSpawnAgentModels}
                 strategy={verticalListSortingStrategy}
               >
-                <div className="grid gap-2">
+                <div className="grid gap-1.5">
                   {draftVisibleModels.length > 0 ? (
                     draftVisibleModels.map((model, index) => (
                       <SortableSpawnAgentCandidate
@@ -3680,7 +3684,7 @@ function SpawnAgentCandidatesPanel({
           </div>
         </div>
 
-        <div className="flex h-full min-h-0 flex-col rounded-md border border-violet-800/50 bg-slate-950/35 p-3">
+        <div className="flex h-full min-h-0 flex-col rounded-md border border-violet-800/50 bg-slate-950/35 p-2">
           <Tabs
             value={candidateView}
             onValueChange={(value) =>
@@ -3699,9 +3703,9 @@ function SpawnAgentCandidatesPanel({
                 <TabsContent
                   key={view}
                   value={view}
-                  className="mt-3 min-h-0 flex-1"
+                  className="mt-2 min-h-0 flex-1"
                 >
-                  <div className="h-full min-h-[220px] space-y-2 overflow-y-auto pr-1">
+                  <div className="max-h-[220px] min-h-[132px] space-y-1.5 overflow-y-auto pr-1 xl:max-h-[260px]">
                     {candidateSourceModels[view].length > 0 ? (
                       candidateSourceModels[view].map((model) => {
                         const catalogModel = selectedCatalogByModel.get(
@@ -3721,7 +3725,7 @@ function SpawnAgentCandidatesPanel({
                                 spawnAgentVisibleLimit
                             }
                             className={cn(
-                              "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-2 text-left text-xs transition",
+                              "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition",
                               isSelected
                                 ? "border-amber-400/70 bg-amber-500/15 text-amber-50"
                                 : "border-slate-700 bg-slate-950/45 text-slate-200 hover:border-violet-500/60 hover:bg-violet-500/10",
@@ -3763,7 +3767,7 @@ function SpawnAgentCandidatesPanel({
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-violet-200/80">
+      <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-violet-200/80">
         <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
           catalog: {selectedCatalog.models.length}
         </Badge>
@@ -5065,7 +5069,7 @@ function RouteListButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "group rounded-lg border p-3 text-left transition",
+        "group rounded-lg border px-3 py-2 text-left transition",
         active
           ? "border-emerald-400 bg-emerald-600/20 shadow-[0_0_0_1px_rgba(52,211,153,0.3)]"
           : "border-slate-700 bg-slate-950/40 hover:border-emerald-400 hover:bg-emerald-950/20",
@@ -5091,7 +5095,7 @@ function RouteListButton({
           {entry.route.enabled === false ? "已停用" : "已启用"}
         </Badge>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2 text-xs">
+      <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
         <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-0.5 text-blue-100">
           {targetProvider ? "复用供应商配置" : apiFormatLabel(format)}
         </span>
@@ -5101,7 +5105,7 @@ function RouteListButton({
             : authSourceLabel(entry.route.upstream?.auth?.source)}
         </span>
       </div>
-      <div className="mt-2 truncate text-xs text-slate-400">
+      <div className="mt-1.5 truncate text-xs text-slate-400">
         {routeMatchSummary(entry.route)}
       </div>
     </button>
@@ -5122,7 +5126,7 @@ function RouteDetailPanel({
 }) {
   if (!selectedRoute) {
     return (
-      <section className="rounded-lg border border-slate-700 bg-slate-950/40 p-4">
+      <section className="rounded-lg border border-slate-700 bg-slate-950/40 p-3">
         <EmptyState
           icon={Route}
           title="请选择一条规则"
@@ -5140,7 +5144,7 @@ function RouteDetailPanel({
   const targetProvider = routeTargetProvider(route, providersById);
 
   return (
-    <section className="rounded-lg border border-emerald-700/40 bg-slate-950/50 p-4">
+    <section className="rounded-lg border border-emerald-700/40 bg-slate-950/50 p-3">
       <SectionHeader
         icon={Database}
         title={route.label || route.id || "规则详情"}
@@ -5156,7 +5160,7 @@ function RouteDetailPanel({
           </Button>
         }
       />
-      <div className="mt-4 space-y-3 text-sm">
+      <div className="mt-3 space-y-2 text-sm">
         <DetailRow label="匹配条件" value={routeMatchSummary(route)} />
         {targetProviderId ? (
           <DetailRow
@@ -5198,7 +5202,7 @@ function RouteDetailPanel({
             .join(" / ")}
         />
       </div>
-      <div className="mt-4 grid gap-2">
+      <div className="mt-3 grid gap-2">
         <Button
           variant="outline"
           className="justify-start gap-2"
