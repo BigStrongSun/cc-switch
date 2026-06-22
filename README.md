@@ -17,6 +17,16 @@ English | [中文](README_ZH.md) | [日本語](README_JA.md) | [Deutsch](README_
 
 </div>
 
+<div align="center">
+
+<img src="assets/xiaohongshu-discussion-qr.png" alt="小红书讨论群二维码" width="180" />
+
+**Need help or want to share feedback?** You can open a GitHub Issue, or scan the QR code to join the Xiaohongshu discussion group.
+
+求助和反馈除了提交 GitHub Issue，也可以扫码加入小红书讨论群一起讨论。（二维码有效期至 2026-07-20）
+
+</div>
+
 ## CCSwitchMulti Branch Notice
 
 CCSwitchMulti is a downstream branch of the official [CC Switch](https://github.com/farion1231/cc-switch). It keeps the upstream desktop manager, provider database, local proxy, MCP/Skills sync, session management, cloud sync, and cross-platform Tauri app structure, while adding a Codex-focused MultiRouter workflow for running several model sources behind one Codex provider.
