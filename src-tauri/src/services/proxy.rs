@@ -6148,8 +6148,10 @@ command = "shared-command"
         )
         .expect("set common config snippet");
 
-        let mut proxy_config = ProxyConfig::default();
-        proxy_config.listen_port = 0;
+        let proxy_config = ProxyConfig {
+            listen_port: 0,
+            ..Default::default()
+        };
         db.update_proxy_config(proxy_config)
             .await
             .expect("set test proxy config");
@@ -6421,8 +6423,10 @@ supports_websockets = false
         let db = Arc::new(Database::memory().expect("init db"));
         let state = crate::store::AppState::new(db.clone());
 
-        let mut proxy_config = ProxyConfig::default();
-        proxy_config.listen_port = 0;
+        let proxy_config = ProxyConfig {
+            listen_port: 0,
+            ..Default::default()
+        };
         db.update_proxy_config(proxy_config)
             .await
             .expect("set test proxy config");
