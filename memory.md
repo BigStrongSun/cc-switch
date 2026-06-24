@@ -42,10 +42,9 @@
 ## 2026-06-24 Qwen Local Context Window Fetch Fix
 
 - 用户现场把问题边界收紧到“获取模型列表阶段没拿到 `qwen3.6=262144`，导致 Codex catalog/压缩阈值先错了”，而不是单纯的 `/responses -> chat` 输出预算裁剪。上游报错里出现的 `262144` 只是运行时错误文本，本地之前不会把它自动回写到 provider catalog。
-- 旧链路里 `src-tauri/src/services/model_fetch.rs::fetch_models` 只会从远端 `/models` 解析 `context_window/max_context_window/contextWindow/maxContextWindow`。当本地 vLLM / relay 只返回 `id=qwen3.6` 而不带窗口时，前端只能靠 `src/utils/codexModelContext.ts` 的兜底推断。
-- 之前这套兜底只显式覆盖了 DeepSeek 别名，没覆盖 `qwen3.6`，于是“获取模型列表”写回 provider catalog 时会留下空上下文，后续 `src-tauri/src/codex_config.rs::codex_catalog_model_specs` 就把它回退成默认 `model_context_window` / `128000`。
-- 当前修复把兜底提升成通用 `KNOWN_MODEL_CONTEXT_WINDOWS`，先补上 `qwen3.6 = 262144`；同时 `src/utils/codexSpawnAgentCandidates.ts::readCodexModelCatalog` 读取已有 catalog 时也会对缺失上下文的已知模型做同样推断，避免老配置只有模型名、重新进路由页后仍继续带着错误的 `128000`。
-- 回归验证：`tests/utils/codexModelContext.test.ts` 新增 `qwen3.6` 用例，`tests/utils/codexSpawnAgentCandidates.test.ts` 新增“读取已有 catalog 也会补 262144”用例；`pnpm test:unit -- tests/utils/codexModelContext.test.ts tests/utils/codexSpawnAgentCandidates.test.ts`、`pnpm typecheck`、`cargo test --manifest-path src-tauri/Cargo.toml switching_codex_router_provider_auto_enables_dedicated_local_takeover --lib` 全部通过。
+- 直接探测用户这条 vLLM 端点 `https://www.matrixminecraft.cn:24443/vllm/v1/models` 后确认：远端其实已经返回了 `max_model_len: 262144`，并不是“vLLM 没给上下文窗口”。根因是 `src-tauri/src/services/model_fetch.rs::extract_context_window` 只识别 `context_window/max_context_window/contextWindow/maxContextWindow`，没识别 vLLM 的 `max_model_len/maxModelLen`。
+- 因此正确修复不是给 `qwen3.6` 做应用级静态兜底，而是在配置阶段的真实 `/models` 读取里补上 vLLM 字段解析。这样点“获取模型列表”时就能直接把 `262144` 写进 provider catalog，MultiRouter 和 Codex picker 后续都读取真实值。
+- 回归测试改为覆盖 `max_model_len` 和 `maxModelLen` 两种 vLLM 风格字段；`pnpm test:unit -- tests/utils/codexModelContext.test.ts tests/utils/codexSpawnAgentCandidates.test.ts`、`pnpm typecheck`、`cargo test --manifest-path src-tauri/Cargo.toml switching_codex_router_provider_auto_enables_dedicated_local_takeover --lib` 全部通过。
 
 ## 2026-06-24 Codex Provider Model Context Window Fallback
 

@@ -19,13 +19,9 @@ interface ExistingModelLike {
   context_window?: string | number;
 }
 
-// 这些模型 ID 在不同 OpenAI-compatible 平台上通常稳定复用同一上下文窗口；
-// 当远端 /models 只返回 id、且当前 provider 又不是内置预设时，用它们兜底避免
-// MultiRouter/Codex catalog 回退到默认 128k。
-const KNOWN_MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+const DEEPSEEK_ALIAS_CONTEXT_WINDOWS: Record<string, number> = {
   "deepseek-chat": 1000000,
   "deepseek-reasoner": 1000000,
-  "qwen3.6": 262144,
 };
 
 // 解析 UI/配置里可能出现的上下文窗口，允许保留旧数据中的 "128000 tokens" 形态。
@@ -108,9 +104,9 @@ export function inferCodexModelContextWindow(
     }
   }
 
-  const knownModelContext = KNOWN_MODEL_CONTEXT_WINDOWS[lowerModel];
-  if (knownModelContext) {
-    return knownModelContext;
+  const deepseekAliasContext = DEEPSEEK_ALIAS_CONTEXT_WINDOWS[lowerModel];
+  if (deepseekAliasContext) {
+    return deepseekAliasContext;
   }
 
   for (const preset of codexProviderPresets) {

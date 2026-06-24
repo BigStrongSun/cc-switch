@@ -43,18 +43,6 @@ describe("Codex model context inference", () => {
     ).toBe(1000000);
   });
 
-  it("fills Qwen local context when the remote /models endpoint only returns the model id", () => {
-    expect(
-      resolveFetchedCodexModelContextWindow(
-        { id: "qwen3.6" },
-        {
-          providerName: "Qwen Local",
-          baseUrl: "https://www.matrixminecraft.cn:24443/vllm/v1",
-        },
-      ),
-    ).toBe(262144);
-  });
-
   it("does not invent a context window for unknown third-party models", () => {
     expect(
       resolveFetchedCodexModelContextWindow(

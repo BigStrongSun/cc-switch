@@ -1,5 +1,4 @@
 import type { Provider } from "@/types";
-import { inferCodexModelContextWindow } from "@/utils/codexModelContext";
 
 export interface CodexCatalogModel {
   model?: string;
@@ -73,7 +72,7 @@ export function normalizeCodexSpawnAgentModels(
 
 // 读取 MultiRouter provider 私有配置中的模型目录和 spawn_agent 候选顺序。
 export function readCodexModelCatalog(
-  provider: Pick<Provider, "id" | "name" | "settingsConfig"> | null,
+  provider: Pick<Provider, "settingsConfig"> | null,
 ): CodexModelCatalog {
   const catalog = provider?.settingsConfig?.modelCatalog;
   if (!catalog || typeof catalog !== "object") {
@@ -84,33 +83,12 @@ export function readCodexModelCatalog(
   const rawModels: unknown[] = Array.isArray(catalogObject.models)
     ? catalogObject.models
     : [];
-  const baseUrl =
-    provider?.settingsConfig?.base_url ??
-    provider?.settingsConfig?.baseURL ??
-    provider?.settingsConfig?.baseUrl;
   const models = rawModels
     .filter(
       (item: unknown): item is CodexCatalogModel =>
         !!item && typeof item === "object",
     )
-    .filter((item) => typeof item.model === "string" && item.model.trim())
-    .map((item) => {
-      if (item.contextWindow ?? item.context_window) {
-        return item;
-      }
-      const inferredContextWindow = inferCodexModelContextWindow(
-        item.model?.trim() ?? "",
-        {
-          providerId: provider?.id,
-          providerName: provider?.name,
-          baseUrl,
-          existingModels: rawModels as CodexCatalogModel[],
-        },
-      );
-      return inferredContextWindow
-        ? { ...item, contextWindow: inferredContextWindow }
-        : item;
-    });
+    .filter((item) => typeof item.model === "string" && item.model.trim());
   const rawSpawnAgentModels: unknown[] = Array.isArray(
     catalogObject.spawnAgentModels,
   )

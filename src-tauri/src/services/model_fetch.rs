@@ -145,6 +145,8 @@ fn extract_context_window(obj: &serde_json::Map<String, serde_json::Value>) -> O
         "max_context_window",
         "contextWindow",
         "maxContextWindow",
+        "max_model_len",
+        "maxModelLen",
     ];
 
     KEYS.iter()
@@ -504,7 +506,7 @@ mod tests {
 
     #[test]
     fn test_parse_response_extracts_context_window() {
-        let json = r#"{"object":"list","data":[{"id":"model-a","context_window":262144},{"id":"model-b","maxContextWindow":"1000000"},{"id":"model-c","contextWindow":"128000 tokens"}]}"#;
+        let json = r#"{"object":"list","data":[{"id":"model-a","context_window":262144},{"id":"model-b","maxContextWindow":"1000000"},{"id":"model-c","max_model_len":262144},{"id":"model-d","maxModelLen":"131072"},{"id":"model-e","contextWindow":"128000 tokens"}]}"#;
         let resp: ModelsResponse = serde_json::from_str(json).unwrap();
         let data = resp
             .data
@@ -519,7 +521,9 @@ mod tests {
 
         assert_eq!(data[0].context_window, Some(262_144));
         assert_eq!(data[1].context_window, Some(1_000_000));
-        assert_eq!(data[2].context_window, None);
+        assert_eq!(data[2].context_window, Some(262_144));
+        assert_eq!(data[3].context_window, Some(131_072));
+        assert_eq!(data[4].context_window, None);
     }
 
     #[test]
