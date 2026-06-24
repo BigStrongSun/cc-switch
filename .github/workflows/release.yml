@@ -42,6 +42,19 @@ jobs:
         run: |
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
+      - name: Build macOS universal history repair sidecar
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cargo build --manifest-path src-tauri/Cargo.toml --bin codex-history-repairer --features history-repairer --target aarch64-apple-darwin --release
+          cargo build --manifest-path src-tauri/Cargo.toml --bin codex-history-repairer --features history-repairer --target x86_64-apple-darwin --release
+          mkdir -p src-tauri/target/universal-apple-darwin/release
+          lipo -create \
+            src-tauri/target/aarch64-apple-darwin/release/codex-history-repairer \
+            src-tauri/target/x86_64-apple-darwin/release/codex-history-repairer \
+            -output src-tauri/target/universal-apple-darwin/release/codex-history-repairer
+
       - name: Install Linux system deps
         if: runner.os == 'Linux'
         shell: bash
