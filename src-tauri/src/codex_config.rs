@@ -344,7 +344,7 @@ fn parse_codex_positive_u64(value: Option<&Value>) -> Option<u64> {
 /// CC Switch 代码或用户 DB 中。读取失败时静默回退到后续默认值。
 fn codex_cached_model_context_windows() -> std::collections::HashMap<String, u64> {
     let Ok(Some(cache)) = read_json_file_if_exists(&get_codex_models_cache_path()) else {
-        return std::collections::HashMap::new();
+        return codex_oauth_model_context_windows_from_live_auth();
     };
     let mut windows = std::collections::HashMap::new();
 
@@ -394,7 +394,80 @@ fn codex_cached_model_context_windows() -> std::collections::HashMap<String, u64
         }
     }
 
+    if windows.is_empty() {
+        codex_oauth_model_context_windows_from_live_auth()
+    } else {
+        windows
+    }
+}
+
+/// 当官方 models_cache 缺失时，尝试直接用本机保存的 Codex OAuth 账号拉取当前模型元数据。
+///
+/// 这是第一次配置官方、多机首次切换或用户清理了 `models_cache.json` 后的补强路径。
+/// 失败时静默回退为空，让调用方继续使用后续默认值，不阻断 provider 切换。
+fn codex_oauth_model_context_windows_from_live_auth() -> std::collections::HashMap<String, u64> {
+    use crate::proxy::providers::codex_oauth_auth::CodexOAuthManager;
+
+    #[cfg(test)]
+    if let Some(override_windows) = take_test_codex_oauth_context_window_override() {
+        return override_windows;
+    }
+
+    let app_config_dir = crate::config::get_app_config_dir();
+    let storage_path = app_config_dir.join("codex_oauth_auth.json");
+    if !storage_path.exists() {
+        return std::collections::HashMap::new();
+    }
+
+    let resolved = std::thread::spawn(move || {
+        tauri::async_runtime::block_on(async move {
+            let manager = CodexOAuthManager::new(app_config_dir);
+            let Some(account_id) = manager.default_account_id().await else {
+                return None;
+            };
+            let token = manager
+                .get_valid_token_for_account(&account_id)
+                .await
+                .ok()?;
+            let models =
+                crate::services::codex_oauth_models::fetch_models_with_token(&token, &account_id)
+                    .await
+                    .ok()?;
+            Some(models)
+        })
+    })
+    .join()
+    .ok()
+    .flatten();
+
+    let mut windows = std::collections::HashMap::new();
+    if let Some(models) = resolved {
+        for model in models {
+            if let Some(context_window) = model.context_window {
+                let id = model.id.trim();
+                if !id.is_empty() {
+                    windows.insert(id.to_string(), context_window);
+                }
+            }
+        }
+    }
     windows
+}
+
+#[cfg(test)]
+static CODEX_TEST_OAUTH_CONTEXT_WINDOW_OVERRIDE: std::sync::OnceLock<
+    std::sync::Mutex<Option<std::collections::HashMap<String, u64>>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+/// 读取并清空测试专用的官方上下文窗口覆盖值，避免真实网络请求污染单测。
+fn take_test_codex_oauth_context_window_override() -> Option<std::collections::HashMap<String, u64>>
+{
+    CODEX_TEST_OAUTH_CONTEXT_WINDOW_OVERRIDE
+        .get_or_init(|| std::sync::Mutex::new(None))
+        .lock()
+        .expect("lock oauth context override")
+        .take()
 }
 
 fn extract_codex_top_level_u64(config_text: &str, field: &str) -> Option<u64> {
@@ -2470,6 +2543,19 @@ mod tests {
         )
         .expect("seed models cache");
     }
+
+    /// 注入一次性的官方 OAuth 模型上下文覆盖值，供缺缓存场景的单测使用。
+    fn seed_test_codex_oauth_context_windows(windows: &[(&str, u64)]) {
+        let override_windows = windows
+            .iter()
+            .map(|(model, context_window)| (model.to_string(), *context_window))
+            .collect::<std::collections::HashMap<_, _>>();
+
+        *CODEX_TEST_OAUTH_CONTEXT_WINDOW_OVERRIDE
+            .get_or_init(|| std::sync::Mutex::new(None))
+            .lock()
+            .expect("lock oauth context override") = Some(override_windows);
+    }
     use serde_json::json;
 
     #[test]
@@ -3664,6 +3750,80 @@ openai_base_url = "http://127.0.0.1:15721/v1"
         assert_eq!(
             specs[0].context_window, 272_000,
             "user/provider explicit catalog context should still override cached official metadata"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn codex_model_catalog_uses_live_oauth_context_when_cache_missing() {
+        let _home = TestHomeGuard::new();
+        seed_test_codex_oauth_context_windows(&[("gpt-5.5", 512000)]);
+        let settings = json!({
+            "modelCatalog": {
+                "models": [
+                    { "model": "gpt-5.5", "displayName": "GPT-5.5" }
+                ]
+            }
+        });
+
+        let specs = codex_catalog_model_specs(&settings, r#"model_context_window = 128000"#);
+
+        assert_eq!(specs.len(), 1);
+        assert_eq!(
+            specs[0].context_window, 512_000,
+            "when models_cache.json is absent, live official OAuth metadata should fill the context window"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn codex_model_catalog_uses_live_oauth_context_when_cache_is_invalid() {
+        let _home = TestHomeGuard::new();
+        let cache_path = get_codex_models_cache_path();
+        std::fs::create_dir_all(cache_path.parent().expect("cache parent"))
+            .expect("create cache parent");
+        std::fs::write(&cache_path, "{ invalid json").expect("write invalid cache");
+        seed_test_codex_oauth_context_windows(&[("gpt-5.5", 384000)]);
+        let settings = json!({
+            "modelCatalog": {
+                "models": [
+                    { "model": "gpt-5.5", "displayName": "GPT-5.5" }
+                ]
+            }
+        });
+
+        let specs = codex_catalog_model_specs(&settings, r#"model_context_window = 128000"#);
+
+        assert_eq!(specs.len(), 1);
+        assert_eq!(
+            specs[0].context_window, 384_000,
+            "when models_cache.json is unreadable, the resolver should still fall back to live official metadata"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn codex_model_catalog_uses_live_oauth_context_when_cache_has_no_windows() {
+        let _home = TestHomeGuard::new();
+        seed_codex_models_cache(json!([{
+            "slug": "gpt-5.5",
+            "display_name": "GPT-5.5"
+        }]));
+        seed_test_codex_oauth_context_windows(&[("gpt-5.5", 448000)]);
+        let settings = json!({
+            "modelCatalog": {
+                "models": [
+                    { "model": "gpt-5.5", "displayName": "GPT-5.5" }
+                ]
+            }
+        });
+
+        let specs = codex_catalog_model_specs(&settings, r#"model_context_window = 128000"#);
+
+        assert_eq!(specs.len(), 1);
+        assert_eq!(
+            specs[0].context_window, 448_000,
+            "when cached official models exist but omit context_window, the resolver should retry live official metadata"
         );
     }
 
