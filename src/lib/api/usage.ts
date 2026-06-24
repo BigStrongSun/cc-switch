@@ -12,6 +12,7 @@ import type {
   PaginatedLogs,
   SessionSyncResult,
   DataSourceSummary,
+  CodexSubagentUsageStats,
 } from "@/types/usage";
 import type { UsageResult } from "@/types";
 import type { AppId } from "./types";
@@ -140,6 +141,18 @@ export const usageApi = {
 
   getRequestDetail: async (requestId: string): Promise<RequestLog | null> => {
     return invoke("get_request_detail", { requestId });
+  },
+
+  getCodexSubagentUsageStats: async (
+    startDate?: number,
+    endDate?: number,
+    limit?: number,
+  ): Promise<CodexSubagentUsageStats> => {
+    return invoke("get_codex_subagent_usage_stats", {
+      startDate,
+      endDate,
+      limit,
+    });
   },
 
   clearUsageLogs: async (): Promise<number> => {

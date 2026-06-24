@@ -353,7 +353,7 @@ export function OpenAICompatibleApiPage() {
           onValueChange={(value) => setActiveTab(value as ApiTab)}
         >
           <div className="sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-2 backdrop-blur">
-            <TabsList className="grid w-full grid-cols-4 bg-slate-950/40 p-1">
+            <TabsList className="grid w-full grid-cols-4 bg-muted p-1 dark:bg-slate-950/40">
               <ApiTabTrigger value="source" icon={PlugZap} label="服务来源" />
               <ApiTabTrigger value="access" icon={KeyRound} label="访问凭据" />
               <ApiTabTrigger
@@ -559,14 +559,14 @@ function ApiHero({
   isPreparing: boolean;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950/30">
-      <div className="grid gap-4 border-b border-slate-700/70 bg-gradient-to-r from-emerald-950/50 via-slate-900 to-blue-950/50 p-5 xl:grid-cols-[1fr_auto]">
+    <div className="overflow-hidden rounded-lg border border-border bg-card dark:border-slate-700/80 dark:bg-slate-950/30">
+      <div className="grid gap-4 border-b border-border bg-gradient-to-r from-emerald-50 via-background to-blue-50 p-5 xl:grid-cols-[1fr_auto] dark:border-slate-700/70 dark:from-emerald-950/50 dark:via-slate-900 dark:to-blue-950/50">
         <div>
           <div className="flex items-center gap-2 text-xl font-semibold">
-            <RadioTower className="h-5 w-5 text-emerald-300" />
+            <RadioTower className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
             第三方 Agent API
           </div>
-          <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">
+          <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground dark:text-slate-300">
             对外固定提供 OpenAI v1 compatible API。第三方 agent 只需要填写
             base_url、api_key、model；OAuth、真实上游凭据和路由细节都留在 CC
             Switch 内部。
@@ -656,11 +656,13 @@ function ModelPicker({
   onModelChange: (value: string) => void;
 }) {
   return (
-    <div className="rounded-lg border border-amber-700/40 bg-amber-950/10 p-4">
-      <div className="mb-2 text-sm font-semibold text-slate-100">默认模型</div>
+    <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-700/40 dark:bg-amber-950/10">
+      <div className="mb-2 text-sm font-semibold text-foreground dark:text-slate-100">
+        默认模型
+      </div>
       {availableModels.length > 0 ? (
         <Select value={defaultModel} onValueChange={onModelChange}>
-          <SelectTrigger className="border-amber-700/40 bg-slate-950/60">
+          <SelectTrigger className="border-amber-200 bg-background dark:border-amber-700/40 dark:bg-slate-950/60">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -675,10 +677,10 @@ function ModelPicker({
         <input
           value={selectedModel || defaultModel}
           onChange={(event) => onModelChange(event.target.value)}
-          className="h-10 w-full rounded-md border border-amber-700/40 bg-slate-950/60 px-3 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-500/20"
+          className="h-10 w-full rounded-md border border-amber-200 bg-background px-3 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-500/20 dark:border-amber-700/40 dark:bg-slate-950/60"
         />
       )}
-      <p className="mt-2 text-xs leading-5 text-slate-400">
+      <p className="mt-2 text-xs leading-5 text-muted-foreground dark:text-slate-400">
         第三方 agent 请求里也可以显式传
         model；这里是默认值和配置示例使用的模型。
       </p>
@@ -698,15 +700,15 @@ function ApiKeyList({
   onDelete: (keyId: string, apiKey?: string | null) => void;
 }) {
   return (
-    <div className="mt-4 rounded-lg border border-emerald-700/40 bg-slate-950/30 p-3">
+    <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-700/40 dark:bg-slate-950/30">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="text-sm font-semibold text-emerald-100">
+        <div className="text-sm font-semibold text-emerald-800 dark:text-emerald-100">
           当前可用 Key
         </div>
         <Badge variant="outline">{keys.length}</Badge>
       </div>
       {keys.length === 0 ? (
-        <div className="rounded-md border border-dashed border-emerald-700/40 px-3 py-4 text-sm text-slate-400">
+        <div className="rounded-md border border-dashed border-emerald-200 px-3 py-4 text-sm text-muted-foreground dark:border-emerald-700/40 dark:text-slate-400">
           还没有生成本地 API Key。
         </div>
       ) : (
@@ -714,9 +716,9 @@ function ApiKeyList({
           {keys.map((key) => (
             <div
               key={key.id}
-              className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-900/60 bg-black/20 px-3 py-2"
+              className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-background/70 px-3 py-2 dark:border-emerald-900/60 dark:bg-black/20"
             >
-              <code className="min-w-0 flex-1 truncate text-xs text-slate-100">
+              <code className="min-w-0 flex-1 truncate text-xs text-foreground dark:text-slate-100">
                 {key.apiKey ?? `${key.prefix}...`}
               </code>
               {key.legacy ? (
@@ -727,7 +729,7 @@ function ApiKeyList({
                   旧版
                 </Badge>
               ) : null}
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-muted-foreground dark:text-slate-500">
                 {formatKeyCreatedAt(key.createdAt)}
               </span>
               <Button
@@ -785,14 +787,14 @@ function ListenerSettings({
   const isPublicBind = listenAddress === "0.0.0.0" || listenAddress === "::";
 
   return (
-    <div className="mt-4 rounded-lg border border-cyan-700/40 bg-cyan-950/10 p-4">
+    <div className="mt-4 rounded-lg border border-cyan-200 bg-cyan-50/70 p-4 dark:border-cyan-700/40 dark:bg-cyan-950/10">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-cyan-100">
-            <RadioTower className="h-4 w-4 text-cyan-300" />
+          <div className="flex items-center gap-2 text-sm font-semibold text-cyan-800 dark:text-cyan-100">
+            <RadioTower className="h-4 w-4 text-cyan-600 dark:text-cyan-300" />
             监听地址和端口
           </div>
-          <p className="mt-1 text-xs leading-5 text-slate-400">
+          <p className="mt-1 text-xs leading-5 text-muted-foreground dark:text-slate-400">
             默认只允许本机访问；需要给局域网或公网 Agent
             使用时，可以改成全网监听或指定网卡地址。
           </p>
@@ -813,7 +815,7 @@ function ListenerSettings({
       </div>
       <div className="grid gap-3 md:grid-cols-[220px_140px_1fr]">
         <Select value={listenAddress} onValueChange={onAddressChange}>
-          <SelectTrigger className="border-cyan-700/40 bg-slate-950/60">
+          <SelectTrigger className="border-cyan-200 bg-background dark:border-cyan-700/40 dark:bg-slate-950/60">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -827,31 +829,31 @@ function ListenerSettings({
           onChange={(event) => onPortChange(event.target.value)}
           inputMode="numeric"
           placeholder="15722"
-          className="border-cyan-700/40 bg-slate-950/60"
+          className="border-cyan-200 bg-background dark:border-cyan-700/40 dark:bg-slate-950/60"
         />
         <Input
           value={listenAddress}
           onChange={(event) => onAddressChange(event.target.value)}
           placeholder="自定义地址，例如 192.168.1.20"
-          className="border-cyan-700/40 bg-slate-950/60"
+          className="border-cyan-200 bg-background dark:border-cyan-700/40 dark:bg-slate-950/60"
         />
       </div>
       <div className="mt-3 grid gap-2 md:grid-cols-2">
-        <code className="rounded-md border border-cyan-700/30 bg-black/20 px-3 py-2 text-xs text-cyan-100">
+        <code className="rounded-md border border-cyan-200 bg-background/70 px-3 py-2 text-xs text-cyan-800 dark:border-cyan-700/30 dark:bg-black/20 dark:text-cyan-100">
           本机: {baseUrl}
         </code>
-        <code className="rounded-md border border-cyan-700/30 bg-black/20 px-3 py-2 text-xs text-cyan-100">
+        <code className="rounded-md border border-cyan-200 bg-background/70 px-3 py-2 text-xs text-cyan-800 dark:border-cyan-700/30 dark:bg-black/20 dark:text-cyan-100">
           外部 Agent: {reachableBaseUrl}
         </code>
       </div>
       {isPublicBind && (
-        <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
           全网监听会让同网段或公网转发进来的客户端访问这个
           API。请配合防火墙、强随机 ccsw_ Key 和可信网络使用。
         </div>
       )}
       {isRunning && (
-        <div className="mt-2 text-xs text-slate-400">
+        <div className="mt-2 text-xs text-muted-foreground dark:text-slate-400">
           服务运行中修改监听地址或端口后，需要停止并重新启动本地 API
           才会绑定到新地址。
         </div>
@@ -906,7 +908,7 @@ function CheckTab({
   onRefresh: () => void;
 }) {
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-950/40 p-4">
+    <section className="rounded-lg border border-border bg-card p-4 dark:border-slate-700 dark:bg-slate-950/40">
       <SectionHeader
         icon={ShieldCheck}
         title="接入检查"
@@ -968,10 +970,12 @@ function HeroMetric({
   detail: string;
 }) {
   const styles = {
-    emerald: "border-emerald-500/40 bg-emerald-500/10 text-emerald-200",
-    blue: "border-blue-500/40 bg-blue-500/10 text-blue-200",
-    amber: "border-amber-500/40 bg-amber-500/10 text-amber-200",
-    rose: "border-rose-500/40 bg-rose-500/10 text-rose-200",
+    emerald:
+      "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200",
+    blue: "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200",
+    amber:
+      "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200",
+    rose: "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200",
   }[color];
 
   return (
@@ -980,7 +984,7 @@ function HeroMetric({
         <span className="text-xs opacity-80">{label}</span>
         <Icon className="h-4 w-4 opacity-80" />
       </div>
-      <div className="mt-2 truncate text-lg font-semibold text-white">
+      <div className="mt-2 truncate text-lg font-semibold text-foreground dark:text-white">
         {value}
       </div>
       <div className="mt-1 truncate text-xs opacity-75">{detail}</div>
@@ -1003,11 +1007,13 @@ function SectionHeader({
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
-        <div className="flex items-center gap-2 text-base font-semibold text-slate-100">
-          <Icon className="h-4 w-4 text-blue-300" />
+        <div className="flex items-center gap-2 text-base font-semibold text-foreground dark:text-slate-100">
+          <Icon className="h-4 w-4 text-blue-600 dark:text-blue-300" />
           {title}
         </div>
-        <p className="mt-1 text-xs leading-5 text-slate-400">{detail}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground dark:text-slate-400">
+          {detail}
+        </p>
       </div>
       {action}
     </div>
@@ -1028,15 +1034,15 @@ function ConfigValue({
 }) {
   const toneClass =
     tone === "emerald"
-      ? "border-emerald-700/40 bg-emerald-950/20"
-      : "border-amber-700/40 bg-amber-950/20";
+      ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-700/40 dark:bg-emerald-950/20"
+      : "border-amber-200 bg-amber-50/70 dark:border-amber-700/40 dark:bg-amber-950/20";
   return (
     <div className={cn("min-w-0 rounded-lg border p-3", toneClass)}>
-      <div className="mb-2 text-xs font-medium uppercase text-slate-400">
+      <div className="mb-2 text-xs font-medium uppercase text-muted-foreground dark:text-slate-400">
         {label}
       </div>
       <div className="flex items-center gap-2">
-        <code className="min-w-0 flex-1 truncate text-sm text-slate-100">
+        <code className="min-w-0 flex-1 truncate text-sm text-foreground dark:text-slate-100">
           {value}
         </code>
         <Button
@@ -1063,10 +1069,10 @@ function SnippetPanel({
   onCopy: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-950/40 p-4">
+    <div className="rounded-lg border border-border bg-card p-4 dark:border-slate-700 dark:bg-slate-950/40">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
-          <Clipboard className="h-4 w-4 text-blue-300" />
+        <div className="flex items-center gap-2 text-sm font-semibold text-foreground dark:text-slate-100">
+          <Clipboard className="h-4 w-4 text-blue-600 dark:text-blue-300" />
           {title}
         </div>
         <Button
@@ -1078,7 +1084,7 @@ function SnippetPanel({
           <Copy className="h-4 w-4" />
         </Button>
       </div>
-      <pre className="max-h-96 overflow-auto rounded-lg bg-black/30 p-4 text-xs leading-relaxed text-slate-100">
+      <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-4 text-xs leading-relaxed text-foreground dark:bg-black/30 dark:text-slate-100">
         <code>{value}</code>
       </pre>
     </div>
@@ -1087,7 +1093,7 @@ function SnippetPanel({
 
 function BoundaryItem({ ok, text }: { ok: boolean; text: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-md border border-blue-700/30 bg-slate-950/40 p-2 text-sm text-slate-200">
+    <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50/70 p-2 text-sm text-foreground dark:border-blue-700/30 dark:bg-slate-950/40 dark:text-slate-200">
       {ok ? (
         <CheckCircle2 className="h-4 w-4 text-emerald-300" />
       ) : (
@@ -1104,8 +1110,8 @@ function ChecklistItem({ ok, label }: { ok: boolean; label: string }) {
       className={cn(
         "flex items-center gap-2 rounded-md border p-3 text-sm",
         ok
-          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
-          : "border-amber-500/40 bg-amber-500/10 text-amber-100",
+          ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100"
+          : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100",
       )}
     >
       {ok ? (

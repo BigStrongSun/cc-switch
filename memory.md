@@ -1,5 +1,13 @@
 # CC Switch Repository Memory
 
+## 2026-06-24 MultiRouter Subagent Usage And Light Theme Readability
+
+- MultiRouter 状态页的子 Agent 流量监控不能从真实代理转发日志里直接推断身份；真实代理日志只回答 route/provider/model 的出站归属。子 Agent 监控的来源应固定为 Codex 本地历史 SQLite/JSONL：先用 `thread_source="subagent"` 或 JSONL `session_meta.payload.source.subagent.thread_spawn` 确认子 Agent，再只聚合 `proxy_request_logs` 中 `app_type='codex'`、`data_source='codex_session'`、`session_id IN (subagent session ids)` 的同步用量行。
+- 子 Agent 监控的 UI 口径是“本地 Codex 会话 token_count 同步后的用量”，不是代理层实际请求转发次数；因此页面需要保留“今日子 Provider / Model 流量”和“今日子 Agent 会话流量”两个分区，前者看真实出站，后者看子 Agent/模型消耗。
+- MultiRouter 页面和第三方 Agent API 页面浅色模式修复应优先使用 `bg-card`、`bg-muted`、`bg-background`、`text-foreground`、`text-muted-foreground`、`border-border` 等语义 token，再把原来的深色透明样式放进 `dark:` 变体。不要在浅色主类里继续使用 `bg-slate-950/*`、`text-slate-100`、`text-white` 或深色半透明卡片。
+- 子 Agent 会话统计查询 `session_id IN (...)` 时必须分块，当前保守批量是 500；`get_codex_subagent_usage_stats` 默认会为了状态页读取最多 1600 条历史、最多 5000 条只读候选，因此不要把所有 session_id 一次塞进 SQLite 变量绑定。
+- 本轮验证基线：`pnpm typecheck`、`pnpm build:renderer`、`cargo fmt --manifest-path src-tauri/Cargo.toml --check`、`cargo test --manifest-path src-tauri/Cargo.toml test_codex_subagent_usage_stats_only_counts_subagent_session_rows --lib`、`cargo check --manifest-path src-tauri/Cargo.toml`。Rust 只剩既有 `commands/misc.rs` unused 警告；renderer build 只剩既有 browserslist/baseline 和大 chunk 警告。
+
 ## 2026-06-24 CCSwitchMulti v3.16.3-18 GitHub Release
 
 - 远端 `BigStrongSun/ccswitchmulti` 已经存在 `v3.16.3-17` prerelease（含本地 Windows/Linux 资产），因此这次不能复用旧 tag；新的正式 release 需要前进到 `v3.16.3-18`。版本面同步点仍是四处：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`。

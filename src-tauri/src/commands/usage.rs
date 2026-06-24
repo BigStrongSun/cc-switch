@@ -120,6 +120,21 @@ pub fn get_request_detail(
     state.db.get_request_detail(&request_id)
 }
 
+/// 获取 Codex 子 Agent 的本地会话流量统计。
+///
+/// 该统计来自 Codex JSONL/SQLite 会话同步数据，不混入真实代理转发日志。
+#[tauri::command]
+pub fn get_codex_subagent_usage_stats(
+    state: State<'_, AppState>,
+    start_date: Option<i64>,
+    end_date: Option<i64>,
+    limit: Option<usize>,
+) -> Result<CodexSubagentUsageStats, AppError> {
+    state
+        .db
+        .get_codex_subagent_usage_stats(start_date, end_date, limit)
+}
+
 /// 清空本地使用统计日志和日汇总。
 ///
 /// 只删除由代理和会话同步生成的统计数据，不触碰 provider、定价表、登录态或应用配置。

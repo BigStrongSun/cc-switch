@@ -56,7 +56,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { providersApi } from "@/lib/api";
 import { fetchModelsForConfig, type FetchedModel } from "@/lib/api/model-fetch";
 import { proxyApi } from "@/lib/api/proxy";
-import { useRequestLogs } from "@/lib/query/usage";
+import { usageApi } from "@/lib/api/usage";
+import {
+  usageKeys,
+  useCodexSubagentUsageStats,
+  useRequestLogs,
+} from "@/lib/query/usage";
 import { cn } from "@/lib/utils";
 import { resolveFetchedCodexModelContextWindow } from "@/utils/codexModelContext";
 import {
@@ -74,7 +79,7 @@ import {
   getCodexBaseUrl,
 } from "@/utils/providerConfigUtils";
 import type { Provider } from "@/types";
-import type { RequestLog } from "@/types/usage";
+import type { CodexSubagentUsageAgent, RequestLog } from "@/types/usage";
 import type {
   CodexDiagnosticCheck,
   CodexDiagnosticStatus,
@@ -1705,11 +1710,14 @@ function buildRouteTrafficRows({
     );
   }
 
-  for (const event of routerEvents.filter((entry) => Boolean(entry.actualProtocol))) {
+  for (const event of routerEvents.filter((entry) =>
+    Boolean(entry.actualProtocol),
+  )) {
     const matchedRoute = routeEntryForRouterEvent(event, selectedRoutes);
     if (!matchedRoute) continue;
     const target = routeTrafficTarget(matchedRoute, providersById);
-    const model = event.model || matchedRoute.route.match?.models?.[0] || "unknown";
+    const model =
+      event.model || matchedRoute.route.match?.models?.[0] || "unknown";
     const key = `${target.providerId}::${model}`;
     const current =
       buckets.get(key) ??
@@ -2261,7 +2269,7 @@ export function CodexRouterWorkspacePage({
           onValueChange={(value) => setActiveTab(value as WorkspaceTab)}
         >
           <div className="sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-2 backdrop-blur">
-            <TabsList className="grid w-full grid-cols-5 bg-slate-950/40 p-1">
+            <TabsList className="grid w-full grid-cols-5 bg-muted p-1 dark:bg-slate-950/40">
               <WorkspaceTabTrigger
                 value="overview"
                 icon={Layers3}
@@ -2386,14 +2394,14 @@ function HeaderPanel({
   onJump: (tab: WorkspaceTab) => void;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950/30">
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-blue-950/45 via-slate-900 to-emerald-950/30 px-4 py-3">
+    <div className="overflow-hidden rounded-lg border border-border bg-card dark:border-slate-700/80 dark:bg-slate-950/30">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-blue-50 via-background to-emerald-50 px-4 py-3 dark:from-blue-950/45 dark:via-slate-900 dark:to-emerald-950/30">
         <div className="min-w-0 space-y-2">
           <div className="flex items-center gap-2 text-base font-semibold">
-            <GitBranch className="h-4 w-4 text-blue-300" />
+            <GitBranch className="h-4 w-4 text-blue-600 dark:text-blue-300" />
             Codex 多模型路由工作台
           </div>
-          <p className="max-w-4xl text-xs leading-5 text-slate-400">
+          <p className="max-w-4xl text-xs leading-5 text-muted-foreground dark:text-slate-400">
             这里配置的是“Codex 自己怎么按 model 选择多个上游模型”。Codex
             仍然只连接一个 CC Switch 本地代理；路由规则负责把
             gpt、qwen、deepseek 等模型名分流到不同上游。
@@ -2476,7 +2484,7 @@ function OverviewTab({
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-      <section className="rounded-lg border border-blue-700/40 bg-blue-950/15 p-4">
+      <section className="rounded-lg border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-700/40 dark:bg-blue-950/15">
         <SectionHeader
           icon={Layers3}
           title="多路路由"
@@ -2505,7 +2513,7 @@ function OverviewTab({
             routingPlans.map((provider) => (
               <div
                 key={provider.id}
-                className="group rounded-lg border border-blue-600/40 bg-slate-950/40 p-4 text-left transition hover:border-blue-400 hover:bg-blue-950/30 hover:shadow-[0_0_0_1px_rgba(96,165,250,0.35)]"
+                className="group rounded-lg border border-blue-200 bg-card p-4 text-left transition hover:border-blue-400 hover:bg-blue-50 hover:shadow-[0_0_0_1px_rgba(96,165,250,0.25)] dark:border-blue-600/40 dark:bg-slate-950/40 dark:hover:bg-blue-950/30 dark:hover:shadow-[0_0_0_1px_rgba(96,165,250,0.35)]"
               >
                 <PlanCardContent provider={provider} />
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -2534,7 +2542,7 @@ function OverviewTab({
                     size="sm"
                     variant="outline"
                     onClick={() => onDeletePlan(provider)}
-                    className="gap-2 border-rose-500/50 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20"
+                    className="gap-2 border-rose-300 bg-background/70 text-rose-700 hover:bg-rose-50 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-100 dark:hover:bg-rose-500/20"
                   >
                     <Trash2 className="h-4 w-4" />
                     删除
@@ -2546,7 +2554,7 @@ function OverviewTab({
         </div>
       </section>
 
-      <section className="rounded-lg border border-emerald-700/40 bg-emerald-950/10 p-4">
+      <section className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-700/40 dark:bg-emerald-950/10">
         <SectionHeader
           icon={Route}
           title="最近路由规则"
@@ -2584,7 +2592,7 @@ function OverviewTab({
         </div>
       </section>
 
-      <section className="rounded-lg border border-amber-700/40 bg-amber-950/10 p-4 xl:col-span-2">
+      <section className="rounded-lg border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-700/40 dark:bg-amber-950/10 xl:col-span-2">
         <SectionHeader
           icon={Server}
           title="可接入模型源"
@@ -2625,7 +2633,7 @@ function SourcesTab({
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
-      <section className="rounded-lg border border-blue-700/40 bg-blue-950/15 p-4">
+      <section className="rounded-lg border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-700/40 dark:bg-blue-950/15">
         <SectionHeader
           icon={Layers3}
           title="多路路由方案"
@@ -2645,7 +2653,7 @@ function SourcesTab({
           {routingPlans.map((provider) => (
             <div
               key={provider.id}
-              className="rounded-lg border border-blue-700/40 bg-slate-950/40 p-3 text-left transition hover:border-blue-400 hover:bg-blue-950/30"
+              className="rounded-lg border border-blue-200 bg-card p-3 text-left transition hover:border-blue-400 hover:bg-blue-50 dark:border-blue-700/40 dark:bg-slate-950/40 dark:hover:bg-blue-950/30"
             >
               <PlanCardContent provider={provider} compact />
               <div className="mt-3 flex flex-wrap gap-2">
@@ -2684,7 +2692,7 @@ function SourcesTab({
         </div>
       </section>
 
-      <section className="rounded-lg border border-amber-700/40 bg-amber-950/10 p-4">
+      <section className="rounded-lg border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-700/40 dark:bg-amber-950/10">
         <SectionHeader
           icon={Server}
           title="选择模型源"
@@ -2698,24 +2706,26 @@ function SourcesTab({
               onClick={() =>
                 onEditPlan(provider, "选择并编辑模型源，准备接入多路路由")
               }
-              className="group rounded-lg border border-amber-700/40 bg-slate-950/40 p-4 text-left transition hover:border-amber-400 hover:bg-amber-950/20 hover:shadow-[0_0_0_1px_rgba(251,191,36,0.25)]"
+              className="group rounded-lg border border-amber-200 bg-card p-4 text-left transition hover:border-amber-400 hover:bg-amber-50 hover:shadow-[0_0_0_1px_rgba(251,191,36,0.18)] dark:border-amber-700/40 dark:bg-slate-950/40 dark:hover:bg-amber-950/20 dark:hover:shadow-[0_0_0_1px_rgba(251,191,36,0.25)]"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-slate-100">
+                  <div className="truncate text-sm font-semibold text-foreground dark:text-slate-100">
                     {provider.name}
                   </div>
-                  <div className="mt-1 truncate text-xs text-slate-400">
+                  <div className="mt-1 truncate text-xs text-muted-foreground dark:text-slate-400">
                     ID：{provider.id}
                   </div>
                 </div>
-                <Badge className="border-amber-500/50 bg-amber-500/15 text-amber-100">
+                <Badge className="border-amber-200 bg-amber-100 text-amber-800 dark:border-amber-500/50 dark:bg-amber-500/15 dark:text-amber-100">
                   可选
                 </Badge>
               </div>
               <div className="mt-4 flex items-center justify-between text-xs">
-                <span className="text-slate-400">选择这个模型源</span>
-                <span className="inline-flex items-center gap-1 text-amber-200 opacity-80 group-hover:opacity-100">
+                <span className="text-muted-foreground dark:text-slate-400">
+                  选择这个模型源
+                </span>
+                <span className="inline-flex items-center gap-1 text-amber-700 opacity-80 group-hover:opacity-100 dark:text-amber-200">
                   选择
                   <Pencil className="h-3.5 w-3.5" />
                 </span>
@@ -2830,7 +2840,7 @@ function RoutesTab({
         activeProviderId={effectiveActiveProviderId}
       />
       <div className="grid gap-3 xl:grid-cols-[300px_minmax(0,1fr)]">
-        <section className="rounded-lg border border-blue-700/40 bg-blue-950/15 p-3">
+        <section className="rounded-lg border border-blue-200 bg-blue-50/70 p-3 dark:border-blue-700/40 dark:bg-blue-950/15">
           <SectionHeader
             icon={Layers3}
             title="选择多路路由"
@@ -2855,8 +2865,8 @@ function RoutesTab({
                   className={cn(
                     "rounded-lg border p-2.5 text-left transition",
                     active
-                      ? "border-blue-400 bg-blue-600/20 shadow-[0_0_0_1px_rgba(96,165,250,0.35)]"
-                      : "border-slate-700 bg-slate-950/40 hover:border-blue-500 hover:bg-blue-950/20",
+                      ? "border-blue-400 bg-blue-50 text-blue-900 shadow-[0_0_0_1px_rgba(96,165,250,0.25)] dark:bg-blue-600/20 dark:text-blue-100 dark:shadow-[0_0_0_1px_rgba(96,165,250,0.35)]"
+                      : "border-border bg-card text-foreground hover:border-blue-400 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-950/40 dark:hover:border-blue-500 dark:hover:bg-blue-950/20",
                   )}
                 >
                   <PlanCardContent provider={provider} compact />
@@ -2889,7 +2899,7 @@ function RoutesTab({
                       size="sm"
                       variant="outline"
                       onClick={() => onDeletePlan(provider)}
-                      className="h-8 gap-1.5 border-rose-500/50 bg-rose-500/10 px-2.5 text-rose-100 hover:bg-rose-500/20"
+                      className="h-8 gap-1.5 border-rose-300 bg-background/70 px-2.5 text-rose-700 hover:bg-rose-50 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-100 dark:hover:bg-rose-500/20"
                     >
                       <Trash2 className="h-4 w-4" />
                       删除
@@ -2902,7 +2912,7 @@ function RoutesTab({
         </section>
 
         <section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="rounded-lg border border-emerald-700/40 bg-emerald-950/10 p-3">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 dark:border-emerald-700/40 dark:bg-emerald-950/10">
             <SectionHeader
               icon={Route}
               title="规则列表"
@@ -2985,8 +2995,8 @@ function RoutesTab({
           className={cn(
             "rounded-lg border p-3 text-sm",
             routePickerError
-              ? "border-rose-500/40 bg-rose-500/10 text-rose-100"
-              : "border-emerald-500/40 bg-emerald-500/10 text-emerald-100",
+              ? "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100"
+              : "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100",
           )}
         >
           {routePickerError ?? routePickerMessage}
@@ -3033,26 +3043,26 @@ function MultiRouterCurrentStatus({
     : "未监听";
   const runtimeClass =
     runtimeStatus.tone === "ok"
-      ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-100"
-      : "border-amber-500/50 bg-amber-500/15 text-amber-100";
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/50 dark:bg-emerald-500/15 dark:text-emerald-100"
+      : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/50 dark:bg-amber-500/15 dark:text-amber-100";
   return (
-    <section className="rounded-lg border border-blue-700/40 bg-slate-950/55 p-3">
+    <section className="rounded-lg border border-blue-200 bg-blue-50/70 p-3 dark:border-blue-700/40 dark:bg-slate-950/55">
       <div className="grid gap-2 xl:grid-cols-[minmax(220px,0.75fr)_minmax(0,1.6fr)]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <RadioTower className="h-4 w-4 text-blue-300" />
-            <span className="text-sm font-semibold text-slate-100">
+            <RadioTower className="h-4 w-4 text-blue-600 dark:text-blue-300" />
+            <span className="text-sm font-semibold text-foreground dark:text-slate-100">
               当前 MultiRouter
             </span>
             <Badge className={cn("border", runtimeClass)}>
               {runtimeStatus.label}
             </Badge>
           </div>
-          <div className="mt-1 truncate text-base font-semibold text-slate-50">
+          <div className="mt-1 truncate text-base font-semibold text-foreground dark:text-slate-50">
             {selectedPlan?.name ?? "未选择多路路由"}
           </div>
           <div
-            className="mt-0.5 truncate text-xs text-slate-400"
+            className="mt-0.5 truncate text-xs text-muted-foreground dark:text-slate-400"
             title={runtimeStatus.detail}
           >
             {runtimeStatus.detail}
@@ -3111,12 +3121,16 @@ function StatusInlineItem({
   ok: boolean;
 }) {
   return (
-    <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/60 px-2 py-1.5">
-      <div className="text-[11px] text-slate-500">{label}</div>
+    <div className="min-w-0 rounded-md border border-border bg-background/80 px-2 py-1.5 dark:border-slate-800 dark:bg-slate-950/60">
+      <div className="text-[11px] text-muted-foreground dark:text-slate-500">
+        {label}
+      </div>
       <div
         className={cn(
           "mt-0.5 truncate font-mono text-[11px]",
-          ok ? "text-emerald-200" : "text-amber-200",
+          ok
+            ? "text-emerald-700 dark:text-emerald-200"
+            : "text-amber-700 dark:text-amber-200",
         )}
         title={value}
       >
@@ -3271,7 +3285,7 @@ function MultiRouterSettingsPanel({
   ];
 
   return (
-    <section className="rounded-lg border border-blue-700/50 bg-slate-950/70 p-4 shadow-[0_0_0_1px_rgba(59,130,246,0.15)]">
+    <section className="rounded-lg border border-blue-200 bg-card p-4 shadow-[0_0_0_1px_rgba(59,130,246,0.10)] dark:border-blue-700/50 dark:bg-slate-950/70 dark:shadow-[0_0_0_1px_rgba(59,130,246,0.15)]">
       <SectionHeader
         icon={Settings2}
         title="多路路由设置"
@@ -3302,34 +3316,36 @@ function MultiRouterSettingsPanel({
       <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
         <div className="space-y-3">
           <div className="grid gap-2">
-            <label className="text-xs font-semibold text-slate-300">
+            <label className="text-xs font-semibold text-muted-foreground dark:text-slate-300">
               方案名称
             </label>
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              className="h-10 rounded-md border border-blue-700/50 bg-slate-950/80 px-3 text-sm outline-none transition placeholder:text-slate-500 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              className="h-10 rounded-md border border-blue-200 bg-background px-3 text-sm outline-none transition placeholder:text-muted-foreground focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-blue-700/50 dark:bg-slate-950/80 dark:placeholder:text-slate-500 dark:focus:ring-blue-500/30"
               placeholder="例如：Codex MultiRouter"
               disabled={isSaving || isSavingListener}
             />
           </div>
           <div className="grid gap-2">
-            <label className="text-xs font-semibold text-slate-300">备注</label>
+            <label className="text-xs font-semibold text-muted-foreground dark:text-slate-300">
+              备注
+            </label>
             <textarea
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
               rows={3}
-              className="min-h-[84px] resize-y rounded-md border border-blue-700/50 bg-slate-950/80 px-3 py-2 text-sm outline-none transition placeholder:text-slate-500 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              className="min-h-[84px] resize-y rounded-md border border-blue-200 bg-background px-3 py-2 text-sm outline-none transition placeholder:text-muted-foreground focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-blue-700/50 dark:bg-slate-950/80 dark:placeholder:text-slate-500 dark:focus:ring-blue-500/30"
               placeholder="例如：默认 Codex 多模型路由"
               disabled={isSaving || isSavingListener}
             />
           </div>
-          <label className="flex items-start justify-between gap-3 rounded-lg border border-slate-700 bg-slate-950/50 p-3">
+          <label className="flex items-start justify-between gap-3 rounded-lg border border-border bg-muted/40 p-3 dark:border-slate-700 dark:bg-slate-950/50">
             <span>
-              <span className="block text-sm font-semibold text-slate-100">
+              <span className="block text-sm font-semibold text-foreground dark:text-slate-100">
                 MultiRouter 入口
               </span>
-              <span className="mt-1 block text-xs leading-5 text-slate-400">
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground dark:text-slate-400">
                 关闭后该方案不会参与 Codex model 分流，但 routes 会保留。
               </span>
             </span>
@@ -3342,13 +3358,13 @@ function MultiRouterSettingsPanel({
             />
           </label>
           <div className="grid gap-2">
-            <label className="text-xs font-semibold text-slate-300">
+            <label className="text-xs font-semibold text-muted-foreground dark:text-slate-300">
               默认路由
             </label>
             <select
               value={defaultRouteId}
               onChange={(event) => setDefaultRouteId(event.target.value)}
-              className="h-10 rounded-md border border-blue-700/50 bg-slate-950/80 px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+              className="h-10 rounded-md border border-blue-200 bg-background px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-blue-700/50 dark:bg-slate-950/80 dark:focus:ring-blue-500/30"
               disabled={
                 isSaving || isSavingListener || routeOptions.length === 0
               }
@@ -3361,43 +3377,43 @@ function MultiRouterSettingsPanel({
                 </option>
               ))}
             </select>
-            <p className="text-xs leading-5 text-slate-500">
+            <p className="text-xs leading-5 text-muted-foreground dark:text-slate-500">
               没有精确命中 model
               时才会使用默认路由；匹配规则仍在“编辑匹配规则”里选择。
             </p>
           </div>
-          <div className="grid gap-3 rounded-lg border border-blue-700/40 bg-blue-950/10 p-3 sm:grid-cols-[1fr_120px]">
+          <div className="grid gap-3 rounded-lg border border-blue-200 bg-blue-50/70 p-3 dark:border-blue-700/40 dark:bg-blue-950/10 sm:grid-cols-[1fr_120px]">
             <div className="grid gap-2">
-              <label className="text-xs font-semibold text-slate-300">
+              <label className="text-xs font-semibold text-muted-foreground dark:text-slate-300">
                 监听接口
               </label>
               <input
                 value={listenAddress}
                 onChange={(event) => setListenAddress(event.target.value)}
-                className="h-10 rounded-md border border-blue-700/50 bg-slate-950/80 px-3 font-mono text-sm outline-none transition placeholder:text-slate-500 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                className="h-10 rounded-md border border-blue-200 bg-background px-3 font-mono text-sm outline-none transition placeholder:text-muted-foreground focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-blue-700/50 dark:bg-slate-950/80 dark:placeholder:text-slate-500 dark:focus:ring-blue-500/30"
                 placeholder="127.0.0.1"
                 disabled={isSaving || isSavingListener}
               />
             </div>
             <div className="grid gap-2">
-              <label className="text-xs font-semibold text-slate-300">
+              <label className="text-xs font-semibold text-muted-foreground dark:text-slate-300">
                 监听端口
               </label>
               <input
                 value={listenPort}
                 onChange={(event) => setListenPort(event.target.value)}
-                className="h-10 rounded-md border border-blue-700/50 bg-slate-950/80 px-3 font-mono text-sm outline-none transition placeholder:text-slate-500 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/30"
+                className="h-10 rounded-md border border-blue-200 bg-background px-3 font-mono text-sm outline-none transition placeholder:text-muted-foreground focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-blue-700/50 dark:bg-slate-950/80 dark:placeholder:text-slate-500 dark:focus:ring-blue-500/30"
                 placeholder="15721"
                 inputMode="numeric"
                 disabled={isSaving || isSavingListener}
               />
             </div>
             <div className="sm:col-span-2">
-              <p className="break-all text-xs leading-5 text-slate-500">
+              <p className="break-all text-xs leading-5 text-muted-foreground dark:text-slate-500">
                 Codex Desktop 使用：{previewBaseUrl}
               </p>
               {listenerError ? (
-                <p className="mt-1 text-xs leading-5 text-rose-300">
+                <p className="mt-1 text-xs leading-5 text-rose-700 dark:text-rose-300">
                   {listenerError}
                 </p>
               ) : null}
@@ -3405,29 +3421,29 @@ function MultiRouterSettingsPanel({
           </div>
         </div>
 
-        <div className="rounded-lg border border-slate-700 bg-slate-950/45 p-3">
-          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-100">
-            <Info className="h-4 w-4 text-blue-300" />
+        <div className="rounded-lg border border-border bg-muted/40 p-3 dark:border-slate-700 dark:bg-slate-950/45">
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground dark:text-slate-100">
+            <Info className="h-4 w-4 text-blue-600 dark:text-blue-300" />
             自动维护的接管配置
           </div>
           <div className="grid gap-2">
             {autoManagedRows.map((row) => (
               <div
                 key={row.label}
-                className="rounded-md border border-slate-800 bg-slate-950/70 p-3"
+                className="rounded-md border border-border bg-background/80 p-3 dark:border-slate-800 dark:bg-slate-950/70"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-slate-400">
+                  <span className="text-xs font-semibold text-muted-foreground dark:text-slate-400">
                     {row.label}
                   </span>
-                  <Badge className="border-blue-500/50 bg-blue-500/15 text-blue-100">
+                  <Badge className="border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-500/50 dark:bg-blue-500/15 dark:text-blue-100">
                     自动
                   </Badge>
                 </div>
-                <div className="mt-1 break-all font-mono text-xs text-slate-100">
+                <div className="mt-1 break-all font-mono text-xs text-foreground dark:text-slate-100">
                   {row.value}
                 </div>
-                <div className="mt-1 text-xs leading-5 text-slate-500">
+                <div className="mt-1 text-xs leading-5 text-muted-foreground dark:text-slate-500">
                   {row.detail}
                 </div>
               </div>
@@ -3454,19 +3470,19 @@ function ProviderModelRefreshPanel({
   if (visibleRows.length === 0) return null;
 
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-950/45 p-3">
-      <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-100">
-        <RefreshCw className="h-4 w-4 text-sky-300" />
+    <section className="rounded-lg border border-border bg-card p-3 dark:border-slate-700 dark:bg-slate-950/45">
+      <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground dark:text-slate-100">
+        <RefreshCw className="h-4 w-4 text-sky-600 dark:text-sky-300" />
         候选 provider 模型列表刷新
       </div>
       <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
         {visibleRows.map(({ provider, state }) => {
           const tone =
             state.status === "success"
-              ? "border-emerald-700/50 bg-emerald-950/30 text-emerald-100"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-950/30 dark:text-emerald-100"
               : state.status === "loading"
-                ? "border-sky-700/50 bg-sky-950/30 text-sky-100"
-                : "border-rose-700/50 bg-rose-950/30 text-rose-100";
+                ? "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-700/50 dark:bg-sky-950/30 dark:text-sky-100"
+                : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-700/50 dark:bg-rose-950/30 dark:text-rose-100";
           return (
             <div
               key={provider.id}
@@ -3594,7 +3610,7 @@ function RouteCandidatePicker({
   }
 
   return (
-    <section className="rounded-lg border border-emerald-700/50 bg-slate-950/70 p-3 shadow-[0_0_0_1px_rgba(16,185,129,0.15)]">
+    <section className="rounded-lg border border-emerald-200 bg-card p-3 shadow-[0_0_0_1px_rgba(16,185,129,0.10)] dark:border-emerald-700/50 dark:bg-slate-950/70 dark:shadow-[0_0_0_1px_rgba(16,185,129,0.15)]">
       <SectionHeader
         icon={Route}
         title="选择候选 router"
@@ -3681,8 +3697,8 @@ function RouteCandidatePicker({
               className={cn(
                 "rounded-lg border p-2.5 transition",
                 checked
-                  ? "border-emerald-500/60 bg-emerald-500/10"
-                  : "border-slate-700 bg-slate-950/40",
+                  ? "border-emerald-300 bg-emerald-50 dark:border-emerald-500/60 dark:bg-emerald-500/10"
+                  : "border-border bg-background dark:border-slate-700 dark:bg-slate-950/40",
               )}
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -3696,24 +3712,24 @@ function RouteCandidatePicker({
                       "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border",
                       checked
                         ? "border-emerald-300 bg-emerald-500 text-slate-950"
-                        : "border-slate-600 bg-slate-900",
+                        : "border-border bg-muted dark:border-slate-600 dark:bg-slate-900",
                     )}
                   >
                     {checked ? <CheckCircle2 className="h-3.5 w-3.5" /> : null}
                   </span>
                   <span className="min-w-0">
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-semibold text-slate-100">
+                      <span className="truncate text-sm font-semibold text-foreground dark:text-slate-100">
                         {candidate.route.label || targetLabel}
                       </span>
                       <Badge
                         className={cn(
                           "border text-[11px]",
                           !checked
-                            ? "border-slate-600 bg-slate-900 text-slate-300"
+                            ? "border-border bg-muted text-muted-foreground dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300"
                             : enabled
-                              ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-100"
-                              : "border-amber-500/60 bg-amber-500/15 text-amber-100",
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/60 dark:bg-emerald-500/15 dark:text-emerald-100"
+                              : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/60 dark:bg-amber-500/15 dark:text-amber-100",
                         )}
                       >
                         {!checked
@@ -3723,7 +3739,7 @@ function RouteCandidatePicker({
                             : "已加入但停用"}
                       </Badge>
                     </span>
-                    <span className="mt-0.5 block truncate text-xs text-slate-400">
+                    <span className="mt-0.5 block truncate text-xs text-muted-foreground dark:text-slate-400">
                       {targetLabel} ·{" "}
                       {candidate.isExisting ? "已在规则中" : "候选模型源"}
                     </span>
@@ -3737,8 +3753,8 @@ function RouteCandidatePicker({
                   className={cn(
                     "h-8 min-w-[78px] px-2",
                     enabled
-                      ? "border-emerald-500/50 text-emerald-100"
-                      : "border-amber-500/50 text-amber-100",
+                      ? "border-emerald-300 text-emerald-700 dark:border-emerald-500/50 dark:text-emerald-100"
+                      : "border-amber-300 text-amber-700 dark:border-amber-500/50 dark:text-amber-100",
                   )}
                 >
                   {enabled ? "已启用" : "已停用"}
@@ -3748,27 +3764,27 @@ function RouteCandidatePicker({
                 {candidate.matchModels.slice(0, 6).map((model) => (
                   <span
                     key={model}
-                    className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-slate-300"
+                    className="rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
                   >
                     {model}
                   </span>
                 ))}
                 {candidate.matchModels.length > 6 ? (
-                  <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-slate-400">
+                  <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                     +{candidate.matchModels.length - 6}
                   </span>
                 ) : null}
                 {candidate.matchPrefixes.map((prefix) => (
                   <span
                     key={prefix}
-                    className="rounded-full border border-blue-700/60 bg-blue-950/40 px-2 py-0.5 text-blue-100"
+                    className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-blue-800 dark:border-blue-700/60 dark:bg-blue-950/40 dark:text-blue-100"
                   >
                     {prefix}*
                   </span>
                 ))}
                 {candidate.matchModels.length === 0 &&
                 candidate.matchPrefixes.length === 0 ? (
-                  <span className="rounded-full border border-amber-600/60 bg-amber-950/30 px-2 py-0.5 text-amber-100">
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800 dark:border-amber-600/60 dark:bg-amber-950/30 dark:text-amber-100">
                     未发现模型目录，保存后可在模型源补充目录
                   </span>
                 ) : null}
@@ -3778,10 +3794,10 @@ function RouteCandidatePicker({
                   className={cn(
                     "mt-2 rounded-md border px-2 py-1.5 text-xs leading-5",
                     refreshState.status === "success"
-                      ? "border-emerald-700/50 bg-emerald-950/30 text-emerald-100"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-950/30 dark:text-emerald-100"
                       : refreshState.status === "loading"
-                        ? "border-sky-700/50 bg-sky-950/30 text-sky-100"
-                        : "border-rose-700/50 bg-rose-950/30 text-rose-100",
+                        ? "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-700/50 dark:bg-sky-950/30 dark:text-sky-100"
+                        : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-700/50 dark:bg-rose-950/30 dark:text-rose-100",
                   )}
                 >
                   {refreshState.message}
@@ -4035,13 +4051,13 @@ function SpawnAgentCandidatesPanel({
   }
 
   return (
-    <section className="rounded-lg border border-violet-700/40 bg-violet-950/15 p-3">
+    <section className="rounded-lg border border-violet-200 bg-violet-50/70 p-3 dark:border-violet-700/40 dark:bg-violet-950/15">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-violet-100">
+          <div className="flex items-center gap-2 text-sm font-semibold text-violet-800 dark:text-violet-100">
             <GitBranch className="h-4 w-4" />子 Agent 候选模型
           </div>
-          <div className="mt-0.5 text-xs text-violet-200/80">
+          <div className="mt-0.5 text-xs text-violet-700/80 dark:text-violet-200/80">
             前 {spawnAgentVisibleLimit} 个进入
             spawn_agent；拖拽只改候选顺序，不改实际路由。
           </div>
@@ -4052,7 +4068,7 @@ function SpawnAgentCandidatesPanel({
             variant="outline"
             onClick={validateSpawnAgentCandidateWindow}
             disabled={isValidatingCandidates || !selectedPlan}
-            className="gap-2 border-emerald-500/50 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20"
+            className="gap-2 border-emerald-300 bg-background/70 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-100 dark:hover:bg-emerald-500/20"
           >
             {isValidatingCandidates ? (
               <RefreshCw className="h-4 w-4 animate-spin" />
@@ -4082,7 +4098,7 @@ function SpawnAgentCandidatesPanel({
       <div className="mt-2 grid items-stretch gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.65fr)]">
         <div className="space-y-2">
           <div>
-            <div className="mb-1.5 text-xs font-semibold text-violet-100">
+            <div className="mb-1.5 text-xs font-semibold text-violet-800 dark:text-violet-100">
               Codex spawn_agent 前五可用模型
             </div>
             <div className="grid gap-1.5 md:grid-cols-5">
@@ -4090,14 +4106,14 @@ function SpawnAgentCandidatesPanel({
                 previewVisibleModels.map((model, index) => (
                   <div
                     key={`${model.model ?? index}-${index}`}
-                    className="min-w-0 rounded-md border border-amber-400/70 bg-amber-500/15 px-2 py-1.5 shadow-[0_0_0_1px_rgba(251,191,36,0.18)]"
+                    className="min-w-0 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 shadow-[0_0_0_1px_rgba(251,191,36,0.12)] dark:border-amber-400/70 dark:bg-amber-500/15 dark:shadow-[0_0_0_1px_rgba(251,191,36,0.18)]"
                   >
-                    <div className="flex items-center justify-between gap-2 text-[10px] text-amber-200">
+                    <div className="flex items-center justify-between gap-2 text-[10px] text-amber-700 dark:text-amber-200">
                       <span>#{index + 1}</span>
                       <span>spawn</span>
                     </div>
                     <div
-                      className="mt-0.5 truncate font-mono text-[11px] text-slate-50"
+                      className="mt-0.5 truncate font-mono text-[11px] text-foreground dark:text-slate-50"
                       title={catalogModelLabel(model)}
                     >
                       {catalogModelLabel(model)}
@@ -4105,7 +4121,7 @@ function SpawnAgentCandidatesPanel({
                   </div>
                 ))
               ) : (
-                <div className="rounded-md border border-violet-800/60 bg-slate-950/45 px-3 py-2 text-xs text-violet-100 md:col-span-5">
+                <div className="rounded-md border border-violet-200 bg-background/80 px-3 py-2 text-xs text-violet-800 dark:border-violet-800/60 dark:bg-slate-950/45 dark:text-violet-100 md:col-span-5">
                   当前 MultiRouter provider 还没有
                   modelCatalog；请先在模型映射里添加 OpenAI / Qwen / DeepSeek
                   等候选模型。
@@ -4116,10 +4132,10 @@ function SpawnAgentCandidatesPanel({
 
           <div>
             <div className="mb-1.5 flex items-center justify-between gap-2">
-              <div className="text-xs font-semibold text-violet-100">
+              <div className="text-xs font-semibold text-violet-800 dark:text-violet-100">
                 可拖拽排序的前五候选
               </div>
-              <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
+              <Badge className="border border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100">
                 {draftSpawnAgentModels.length} / {spawnAgentVisibleLimit}
               </Badge>
             </div>
@@ -4143,7 +4159,7 @@ function SpawnAgentCandidatesPanel({
                       />
                     ))
                   ) : (
-                    <div className="rounded-md border border-dashed border-violet-700/60 bg-slate-950/30 px-3 py-2 text-xs text-violet-100">
+                    <div className="rounded-md border border-dashed border-violet-200 bg-background/70 px-3 py-2 text-xs text-violet-800 dark:border-violet-700/60 dark:bg-slate-950/30 dark:text-violet-100">
                       还没有选择子 Agent 候选；从右侧候选池添加，最多{" "}
                       {spawnAgentVisibleLimit} 个。
                     </div>
@@ -4154,7 +4170,7 @@ function SpawnAgentCandidatesPanel({
           </div>
         </div>
 
-        <div className="flex h-full min-h-0 flex-col rounded-md border border-violet-800/50 bg-slate-950/35 p-2">
+        <div className="flex h-full min-h-0 flex-col rounded-md border border-violet-200 bg-background/70 p-2 dark:border-violet-800/50 dark:bg-slate-950/35">
           <Tabs
             value={candidateView}
             onValueChange={(value) =>
@@ -4162,7 +4178,7 @@ function SpawnAgentCandidatesPanel({
             }
             className="flex h-full min-h-0 flex-col"
           >
-            <TabsList className="grid w-full grid-cols-4 bg-slate-950/60 p-1">
+            <TabsList className="grid w-full grid-cols-4 bg-muted p-1 dark:bg-slate-950/60">
               <TabsTrigger value="selected">已选</TabsTrigger>
               <TabsTrigger value="routed">路由</TabsTrigger>
               <TabsTrigger value="priority">重点</TabsTrigger>
@@ -4197,8 +4213,8 @@ function SpawnAgentCandidatesPanel({
                             className={cn(
                               "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition",
                               isSelected
-                                ? "border-amber-400/70 bg-amber-500/15 text-amber-50"
-                                : "border-slate-700 bg-slate-950/45 text-slate-200 hover:border-violet-500/60 hover:bg-violet-500/10",
+                                ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-400/70 dark:bg-amber-500/15 dark:text-amber-50"
+                                : "border-border bg-card text-foreground hover:border-violet-300 hover:bg-violet-50 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-200 dark:hover:border-violet-500/60 dark:hover:bg-violet-500/10",
                               !isSelected &&
                                 draftSpawnAgentModels.length >=
                                   spawnAgentVisibleLimit
@@ -4213,8 +4229,8 @@ function SpawnAgentCandidatesPanel({
                               className={cn(
                                 "shrink-0 border text-[10px]",
                                 isSelected
-                                  ? "border-amber-300/70 bg-amber-200/10 text-amber-50"
-                                  : "border-slate-600 bg-slate-800 text-slate-300",
+                                  ? "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-300/70 dark:bg-amber-200/10 dark:text-amber-50"
+                                  : "border-border bg-muted text-muted-foreground dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300",
                               )}
                             >
                               {isSelected
@@ -4225,7 +4241,7 @@ function SpawnAgentCandidatesPanel({
                         );
                       })
                     ) : (
-                      <div className="rounded-md border border-dashed border-slate-700 px-3 py-2 text-xs text-slate-400">
+                      <div className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground dark:border-slate-700 dark:text-slate-400">
                         这个来源暂时没有可用模型。
                       </div>
                     )}
@@ -4237,22 +4253,22 @@ function SpawnAgentCandidatesPanel({
         </div>
       </div>
 
-      <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-violet-200/80">
-        <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
+      <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-violet-700/80 dark:text-violet-200/80">
+        <Badge className="border border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100">
           catalog: {selectedCatalog.models.length}
         </Badge>
-        <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
+        <Badge className="border border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100">
           路由命中: {routedCatalogModelIds.length}
         </Badge>
-        <Badge className="border border-violet-500/40 bg-violet-500/10 text-violet-100">
+        <Badge className="border border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100">
           来源: {generatedVisibleModels.length > 0 ? "诊断实测" : "配置预览"}
         </Badge>
         <Badge
           className={cn(
             "border",
             localCandidateValidation.missingSelectedModels.length === 0
-              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
-              : "border-amber-500/40 bg-amber-500/10 text-amber-100",
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100"
+              : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100",
           )}
         >
           本地检查:{" "}
@@ -4263,29 +4279,29 @@ function SpawnAgentCandidatesPanel({
       </div>
 
       {candidateSaveError ? (
-        <div className="mt-3 rounded-md border border-rose-700/50 bg-rose-950/30 px-3 py-2 text-xs leading-5 text-rose-100">
+        <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700 dark:border-rose-700/50 dark:bg-rose-950/30 dark:text-rose-100">
           保存失败：{candidateSaveError}
         </div>
       ) : null}
       {candidateSaveMessage ? (
-        <div className="mt-3 rounded-md border border-emerald-700/50 bg-emerald-950/30 px-3 py-2 text-xs leading-5 text-emerald-100">
+        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-950/30 dark:text-emerald-100">
           {candidateSaveMessage}
         </div>
       ) : null}
       {candidateValidationMessage ? (
-        <div className="mt-3 rounded-md border border-sky-700/50 bg-sky-950/30 px-3 py-2 text-xs leading-5 text-sky-100">
+        <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-800 dark:border-sky-700/50 dark:bg-sky-950/30 dark:text-sky-100">
           {candidateValidationMessage}
         </div>
       ) : null}
       {actualCandidateValidation.missingSelectedModels.length > 0 ? (
-        <div className="mt-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs leading-5 text-amber-100">
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-100">
           live 可见窗口还没覆盖已选模型：
           {actualCandidateValidation.missingSelectedModels.join(", ")}
           。保存后请重启 Codex Desktop/app-server 再校验。
         </div>
       ) : null}
       {spawnAgentMissingPriorityModels.length > 0 ? (
-        <div className="mt-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs leading-5 text-amber-100">
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-100">
           仍有重点模型不在前 {spawnAgentVisibleLimit} 个可见候选中：
           {spawnAgentMissingPriorityModels.join(", ")}
           。请把它们加入子 Agent 候选列表并重启 Codex Desktop/app-server。
@@ -4319,6 +4335,7 @@ function StatusTab({
   onEditPlan: (provider: Provider, detail?: string) => void;
   onDeletePlan: (provider: Provider) => void;
 }) {
+  const queryClient = useQueryClient();
   const range = useMemo(() => ({ preset: "today" as const }), []);
   const { data: requestLogs, isLoading } = useRequestLogs({
     filters: { appType: "codex" },
@@ -4326,6 +4343,13 @@ function StatusTab({
     page: 0,
     pageSize: 500,
     options: { refetchInterval: 5000 },
+  });
+  const {
+    data: subagentUsage,
+    isLoading: isLoadingSubagentUsage,
+    error: subagentUsageError,
+  } = useCodexSubagentUsageStats(range, 80, {
+    refetchInterval: 10000,
   });
   const [diagnostics, setDiagnostics] =
     useState<CodexMultiRouterDiagnostics | null>(null);
@@ -4338,6 +4362,10 @@ function StatusTab({
   >(null);
   const [isUnlockingModelPicker, setIsUnlockingModelPicker] = useState(false);
   const [statusView, setStatusView] = useState<StatusView>("link");
+  const [isSyncingSessionUsage, setIsSyncingSessionUsage] = useState(false);
+  const [sessionSyncMessage, setSessionSyncMessage] = useState<string | null>(
+    null,
+  );
   const logs = requestLogs?.data ?? [];
   const proxyLogs = logs.filter(
     (log) => (log.dataSource ?? "proxy") === "proxy",
@@ -4427,6 +4455,27 @@ function StatusTab({
       : "",
   ].filter(Boolean);
 
+  /// 手动同步 Codex JSONL 会话用量，让子 Agent 统计立即看到最新 token_count。
+  async function syncCodexSessionUsage() {
+    setIsSyncingSessionUsage(true);
+    setSessionSyncMessage(null);
+    try {
+      const result = await usageApi.syncSessionUsage();
+      setSessionSyncMessage(
+        result.imported > 0
+          ? `已同步 ${result.imported} 条会话用量记录`
+          : "会话用量已是最新",
+      );
+      await queryClient.invalidateQueries({ queryKey: usageKeys.all });
+    } catch (error) {
+      setSessionSyncMessage(
+        `同步失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      setIsSyncingSessionUsage(false);
+    }
+  }
+
   /// 一键诊断只读取本地现场和 router 日志，不向真实上游发起模型请求。
   async function runDiagnostics(nextView: StatusView = "debug") {
     setStatusView(nextView);
@@ -4466,13 +4515,15 @@ function StatusTab({
         value={statusView}
         diagnostics={diagnostics}
         protocolCount={protocolRows.length}
-        trafficCount={trafficRows.length}
+        trafficCount={
+          trafficRows.length + (subagentUsage?.modelStats.length ?? 0)
+        }
         providerCount={selectedRoutes.length}
         onChange={setStatusView}
       />
 
       {statusView === "link" && (
-        <section className="rounded-lg border border-slate-700 bg-slate-950/40 p-4">
+        <section className="rounded-lg border border-border bg-card p-4 dark:border-slate-700 dark:bg-slate-950/40">
           <SectionHeader
             icon={Activity}
             title="链路状态"
@@ -4484,7 +4535,7 @@ function StatusTab({
                   variant="outline"
                   onClick={() => runDiagnostics("debug")}
                   disabled={isDiagnosing}
-                  className="gap-2 border-amber-500/50 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20"
+                  className="gap-2 border-amber-300 bg-background/70 text-amber-700 hover:bg-amber-50 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/20"
                 >
                   {isDiagnosing ? (
                     <RefreshCw className="h-4 w-4 animate-spin" />
@@ -4498,7 +4549,7 @@ function StatusTab({
                   variant="outline"
                   onClick={() => runDiagnostics("protocol")}
                   disabled={isDiagnosing}
-                  className="gap-2 border-cyan-500/50 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
+                  className="gap-2 border-cyan-300 bg-background/70 text-cyan-700 hover:bg-cyan-50 dark:border-cyan-500/50 dark:bg-cyan-500/10 dark:text-cyan-100 dark:hover:bg-cyan-500/20"
                 >
                   {isDiagnosing ? (
                     <RefreshCw className="h-4 w-4 animate-spin" />
@@ -4512,7 +4563,7 @@ function StatusTab({
                   variant="outline"
                   onClick={unlockModelPicker}
                   disabled={isUnlockingModelPicker}
-                  className="gap-2 border-indigo-500/50 bg-indigo-500/10 text-indigo-100 hover:bg-indigo-500/20"
+                  className="gap-2 border-indigo-300 bg-background/70 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/50 dark:bg-indigo-500/10 dark:text-indigo-100 dark:hover:bg-indigo-500/20"
                 >
                   {isUnlockingModelPicker ? (
                     <RefreshCw className="h-4 w-4 animate-spin" />
@@ -4537,7 +4588,7 @@ function StatusTab({
                       size="sm"
                       variant="outline"
                       onClick={() => onDeletePlan(selectedPlan)}
-                      className="gap-2 border-rose-500/50 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20"
+                      className="gap-2 border-rose-300 bg-background/70 text-rose-700 hover:bg-rose-50 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-100 dark:hover:bg-rose-500/20"
                     >
                       <Trash2 className="h-4 w-4" />
                       删除
@@ -4601,7 +4652,7 @@ function StatusTab({
             />
           </div>
           {modelPickerUnlockError ? (
-            <div className="mt-3 rounded-lg border border-rose-700/50 bg-rose-950/30 p-3 text-xs text-rose-100">
+            <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-700/50 dark:bg-rose-950/30 dark:text-rose-100">
               模型菜单解锁失败：{modelPickerUnlockError}
             </div>
           ) : null}
@@ -4610,8 +4661,8 @@ function StatusTab({
               className={cn(
                 "mt-3 rounded-lg border p-3 text-xs leading-5",
                 modelPickerUnlockResult.injected
-                  ? "border-emerald-700/50 bg-emerald-950/25 text-emerald-100"
-                  : "border-amber-700/50 bg-amber-950/25 text-amber-100",
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-950/25 dark:text-emerald-100"
+                  : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/25 dark:text-amber-100",
               )}
             >
               <div className="font-semibold">
@@ -4657,7 +4708,7 @@ function StatusTab({
       )}
 
       {statusView === "protocol" && (
-        <section className="rounded-lg border border-cyan-700/40 bg-cyan-950/10 p-4">
+        <section className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-4 dark:border-cyan-700/40 dark:bg-cyan-950/10">
           <SectionHeader
             icon={GitBranch}
             title="协议探测"
@@ -4668,7 +4719,7 @@ function StatusTab({
                 variant="outline"
                 onClick={() => runDiagnostics("protocol")}
                 disabled={isDiagnosing}
-                className="gap-2 border-cyan-500/50 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
+                className="gap-2 border-cyan-300 bg-background/70 text-cyan-700 hover:bg-cyan-50 dark:border-cyan-500/50 dark:bg-cyan-500/10 dark:text-cyan-100 dark:hover:bg-cyan-500/20"
               >
                 {isDiagnosing ? (
                   <RefreshCw className="h-4 w-4 animate-spin" />
@@ -4680,14 +4731,15 @@ function StatusTab({
             }
           />
           {!diagnostics && !isDiagnosing ? (
-            <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/50 p-4 text-sm leading-6 text-slate-300">
+            <div className="mt-3 rounded-lg border border-border bg-muted/40 p-4 text-sm leading-6 text-muted-foreground dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-300">
               尚未执行协议探测。点击右上角按钮后，会读取当前 MultiRouter route
-              规则并结合最近 router 日志，展示每个模型的配置协议和最近一次真实出站协议。
+              规则并结合最近 router
+              日志，展示每个模型的配置协议和最近一次真实出站协议。
             </div>
           ) : null}
           {protocolRows.length > 0 ? (
-            <div className="mt-3 overflow-hidden rounded-lg border border-slate-700">
-              <div className="grid grid-cols-[1.1fr_1fr_1fr_1fr_1.4fr] gap-2 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-slate-300">
+            <div className="mt-3 overflow-hidden rounded-lg border border-border dark:border-slate-700">
+              <div className="grid grid-cols-[1.1fr_1fr_1fr_1fr_1.4fr] gap-2 bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground dark:bg-slate-900/80 dark:text-slate-300">
                 <span>Provider / Route</span>
                 <span>Model</span>
                 <span>配置判定</span>
@@ -4697,11 +4749,11 @@ function StatusTab({
               {protocolRows.map((row) => (
                 <div
                   key={`protocol-${row.providerId}-${row.model}`}
-                  className="grid grid-cols-[1.1fr_1fr_1fr_1fr_1.4fr] gap-2 border-t border-slate-800 px-3 py-2 text-xs text-slate-300"
+                  className="grid grid-cols-[1.1fr_1fr_1fr_1fr_1.4fr] gap-2 border-t border-border px-3 py-2 text-xs text-foreground dark:border-slate-800 dark:text-slate-300"
                 >
                   <div className="min-w-0">
                     <div className="truncate">{row.providerName}</div>
-                    <div className="truncate text-[11px] text-slate-500">
+                    <div className="truncate text-[11px] text-muted-foreground dark:text-slate-500">
                       {row.routeLabel || row.routeId || "未命名规则"}
                     </div>
                   </div>
@@ -4713,7 +4765,7 @@ function StatusTab({
                         : "待探测"}
                     </div>
                     <div
-                      className="truncate text-[11px] text-slate-500"
+                      className="truncate text-[11px] text-muted-foreground dark:text-slate-500"
                       title={row.configuredProtocolDetail ?? undefined}
                     >
                       {protocolDecisionSourceLabel(
@@ -4727,7 +4779,7 @@ function StatusTab({
                         ? apiFormatLabel(row.lastObservedProtocol)
                         : "暂无实测"}
                     </div>
-                    <div className="truncate text-[11px] text-slate-500">
+                    <div className="truncate text-[11px] text-muted-foreground dark:text-slate-500">
                       {row.lastObservedAt ?? "等待新请求"}
                     </div>
                   </div>
@@ -4746,7 +4798,7 @@ function StatusTab({
                         row.configuredProtocolDetail ??
                         "无"}
                     </div>
-                    <div className="truncate text-[11px] text-slate-500">
+                    <div className="truncate text-[11px] text-muted-foreground dark:text-slate-500">
                       最近请求 {row.requestCount} 次，失败 {row.failedCount} 次
                     </div>
                   </div>
@@ -4754,16 +4806,17 @@ function StatusTab({
               ))}
             </div>
           ) : diagnostics ? (
-            <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/50 p-4 text-sm leading-6 text-slate-300">
-              当前没有可归属的协议探测结果。已加载 route {selectedRoutes.length} 条，
-              router 事件 {routerRequestEvents.length} 条；请先让 Codex 发起一次真实请求，再重新探测。
+            <div className="mt-3 rounded-lg border border-border bg-muted/40 p-4 text-sm leading-6 text-muted-foreground dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-300">
+              当前没有可归属的协议探测结果。已加载 route {selectedRoutes.length}{" "}
+              条， router 事件 {routerRequestEvents.length} 条；请先让 Codex
+              发起一次真实请求，再重新探测。
             </div>
           ) : null}
         </section>
       )}
 
       {statusView === "providers" && (
-        <section className="rounded-lg border border-blue-700/40 bg-blue-950/15 p-4">
+        <section className="rounded-lg border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-700/40 dark:bg-blue-950/15">
           <SectionHeader
             icon={GitFork}
             title="分流子 Provider"
@@ -4779,14 +4832,14 @@ function StatusTab({
               return (
                 <div
                   key={`${entry.provider.id}-${entry.route.id ?? entry.index}`}
-                  className="rounded-lg border border-slate-700 bg-slate-950/50 p-3"
+                  className="rounded-lg border border-border bg-card p-3 dark:border-slate-700 dark:bg-slate-950/50"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-100">
+                      <div className="truncate text-sm font-semibold text-foreground dark:text-slate-100">
                         {targetProvider?.name ?? targetProviderId ?? "内联上游"}
                       </div>
-                      <div className="mt-1 truncate text-xs text-slate-400">
+                      <div className="mt-1 truncate text-xs text-muted-foreground dark:text-slate-400">
                         {entry.route.label || entry.route.id || "未命名规则"}
                       </div>
                     </div>
@@ -4801,7 +4854,7 @@ function StatusTab({
                       {entry.route.enabled === false ? "已停用" : "已启用"}
                     </Badge>
                   </div>
-                  <div className="mt-3 text-xs leading-5 text-slate-400">
+                  <div className="mt-3 text-xs leading-5 text-muted-foreground dark:text-slate-400">
                     {routeMatchSummary(entry.route)}
                   </div>
                 </div>
@@ -4821,57 +4874,219 @@ function StatusTab({
       )}
 
       {statusView === "traffic" && (
-        <section className="rounded-lg border border-emerald-700/40 bg-emerald-950/10 p-4">
-          <SectionHeader
-            icon={Database}
-            title="今日子 Provider / Model 流量"
-            detail="基于 Codex 请求日志聚合；若后端只记录外层 MultiRouter，页面会按 requestModel 尝试回归属到 route target。"
-          />
-          <div className="mt-3 overflow-hidden rounded-lg border border-slate-700">
-            <div className="grid grid-cols-[1.2fr_1.2fr_0.7fr_0.7fr_0.8fr_0.8fr] gap-2 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-slate-300">
-              <span>Provider</span>
-              <span>Model</span>
-              <span className="text-right">请求</span>
-              <span className="text-right">失败</span>
-              <span className="text-right">Tokens</span>
-              <span className="text-right">延迟</span>
-            </div>
-            {isLoading ? (
-              <div className="p-4 text-sm text-slate-400">正在读取统计...</div>
-            ) : trafficRows.length > 0 ? (
-              trafficRows.map((row) => (
-                <div
-                  key={`${row.providerId}-${row.model}`}
-                  className="grid grid-cols-[1.2fr_1.2fr_0.7fr_0.7fr_0.8fr_0.8fr] gap-2 border-t border-slate-800 px-3 py-2 text-xs text-slate-300"
-                >
-                  <span className="truncate">{row.providerName}</span>
-                  <span className="truncate font-mono">{row.model}</span>
-                  <span className="text-right">{row.requestCount}</span>
-                  <span className="text-right">{row.failedCount}</span>
-                  <span className="text-right">
-                    {row.totalTokens.toLocaleString()}
-                  </span>
-                  <span className="text-right">{row.avgLatencyMs}ms</span>
+        <div className="space-y-4">
+          <section className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-700/40 dark:bg-emerald-950/10">
+            <SectionHeader
+              icon={Database}
+              title="今日子 Provider / Model 流量"
+              detail="基于真实 Codex 代理请求日志聚合；若后端只记录外层 MultiRouter，页面会按 requestModel 尝试回归属到 route target。"
+            />
+            <div className="mt-3 overflow-hidden rounded-lg border border-border dark:border-slate-700">
+              <div className="grid grid-cols-[1.2fr_1.2fr_0.7fr_0.7fr_0.8fr_0.8fr] gap-2 bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground dark:bg-slate-900/80 dark:text-slate-300">
+                <span>Provider</span>
+                <span>Model</span>
+                <span className="text-right">请求</span>
+                <span className="text-right">失败</span>
+                <span className="text-right">Tokens</span>
+                <span className="text-right">延迟</span>
+              </div>
+              {isLoading ? (
+                <div className="p-4 text-sm text-muted-foreground">
+                  正在读取统计...
                 </div>
-              ))
-            ) : (
-              <div className="p-4 text-sm leading-6 text-slate-400">
-                暂无可归属到子 Provider 的请求日志。今日 Codex 日志{" "}
-                {logs.length} 条，其中真实代理转发 {proxyLogs.length} 条，Codex
-                会话同步 {sessionLogs.length} 条，外层 MultiRouter 日志{" "}
-                {routerLogs.length} 条，目标 Provider 数 {routeTargetCount} 个。
+              ) : trafficRows.length > 0 ? (
+                trafficRows.map((row) => (
+                  <div
+                    key={`${row.providerId}-${row.model}`}
+                    className="grid grid-cols-[1.2fr_1.2fr_0.7fr_0.7fr_0.8fr_0.8fr] gap-2 border-t border-border px-3 py-2 text-xs text-foreground dark:border-slate-800 dark:text-slate-300"
+                  >
+                    <span className="truncate">{row.providerName}</span>
+                    <span className="truncate font-mono">{row.model}</span>
+                    <span className="text-right">{row.requestCount}</span>
+                    <span className="text-right">{row.failedCount}</span>
+                    <span className="text-right">
+                      {row.totalTokens.toLocaleString()}
+                    </span>
+                    <span className="text-right">{row.avgLatencyMs}ms</span>
+                  </div>
+                ))
+              ) : (
+                <div className="p-4 text-sm leading-6 text-muted-foreground">
+                  暂无可归属到子 Provider 的请求日志。今日 Codex 日志{" "}
+                  {logs.length} 条，其中真实代理转发 {proxyLogs.length}{" "}
+                  条，Codex 会话同步 {sessionLogs.length} 条，外层 MultiRouter
+                  日志 {routerLogs.length} 条，目标 Provider 数{" "}
+                  {routeTargetCount} 个。
+                </div>
+              )}
+            </div>
+            <div className="mt-3 text-xs text-muted-foreground">
+              已尝试归属真实代理日志 {routedLogs.length} 条、router 诊断事件{" "}
+              {routerRequestEvents.length} 条；这里不把 codex_session
+              历史同步当作转发。
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-violet-200 bg-violet-50/70 p-4 dark:border-violet-700/40 dark:bg-violet-950/10">
+            <SectionHeader
+              icon={GitFork}
+              title="今日子 Agent 会话流量"
+              detail="基于 Codex 本地 JSONL/SQLite 的 subagent 会话列表和 codex_session 同步用量；它回答哪个子 Agent、哪个模型消耗了多少 token。"
+              action={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void syncCodexSessionUsage()}
+                  disabled={isSyncingSessionUsage}
+                  className="gap-2 border-violet-300 bg-background/70 text-violet-700 hover:bg-violet-100 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-100 dark:hover:bg-violet-500/20"
+                >
+                  {isSyncingSessionUsage ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  同步会话用量
+                </Button>
+              }
+            />
+            {sessionSyncMessage && (
+              <div className="mt-3 rounded-md border border-violet-200 bg-background/70 px-3 py-2 text-xs text-muted-foreground dark:border-violet-700/50 dark:bg-violet-950/30 dark:text-violet-100">
+                {sessionSyncMessage}
               </div>
             )}
-          </div>
-          <div className="mt-3 text-xs text-slate-500">
-            已尝试归属真实代理日志 {routedLogs.length} 条、router 诊断事件{" "}
-            {routerRequestEvents.length} 条；这里不把 codex_session
-            历史同步当作转发。
-          </div>
-        </section>
+            {subagentUsageError && (
+              <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-700/50 dark:bg-rose-950/30 dark:text-rose-100">
+                子 Agent 用量读取失败：
+                {subagentUsageError instanceof Error
+                  ? subagentUsageError.message
+                  : String(subagentUsageError)}
+              </div>
+            )}
+            {subagentUsage?.skippedReason && (
+              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-100">
+                Codex 历史读取跳过：{subagentUsage.skippedReason}
+              </div>
+            )}
+
+            <div className="mt-3 overflow-hidden rounded-lg border border-border dark:border-slate-700">
+              <div className="grid grid-cols-[1.4fr_0.7fr_0.7fr_0.9fr_0.7fr] gap-2 bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground dark:bg-slate-900/80 dark:text-slate-300">
+                <span>模型</span>
+                <span className="text-right">子 Agent</span>
+                <span className="text-right">请求</span>
+                <span className="text-right">Tokens</span>
+                <span className="text-right">费用</span>
+              </div>
+              {isLoadingSubagentUsage ? (
+                <div className="p-4 text-sm text-muted-foreground">
+                  正在读取子 Agent 统计...
+                </div>
+              ) : subagentUsage?.modelStats.length ? (
+                subagentUsage.modelStats.map((row) => (
+                  <div
+                    key={row.model}
+                    className="grid grid-cols-[1.4fr_0.7fr_0.7fr_0.9fr_0.7fr] gap-2 border-t border-border px-3 py-2 text-xs text-foreground dark:border-slate-800 dark:text-slate-300"
+                  >
+                    <span className="truncate font-mono">{row.model}</span>
+                    <span className="text-right">{row.agentCount}</span>
+                    <span className="text-right">{row.requestCount}</span>
+                    <span className="text-right">
+                      {row.totalTokens.toLocaleString()}
+                    </span>
+                    <span className="text-right">
+                      {formatUsageCost(row.totalCost)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="p-4 text-sm leading-6 text-muted-foreground">
+                  暂无子 Agent 会话用量。已读取{" "}
+                  {subagentUsage?.totalAgents ?? 0} 个本地子 Agent
+                  会话；如果刚刚运行过子 Agent，请先点击“同步会话用量”。
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 overflow-hidden rounded-lg border border-border dark:border-slate-700">
+              <div className="grid grid-cols-[1.2fr_1fr_0.6fr_0.8fr_0.7fr_1fr] gap-2 bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground dark:bg-slate-900/80 dark:text-slate-300">
+                <span>子 Agent</span>
+                <span>模型</span>
+                <span className="text-right">请求</span>
+                <span className="text-right">Tokens</span>
+                <span className="text-right">费用</span>
+                <span>最近使用</span>
+              </div>
+              {isLoadingSubagentUsage ? (
+                <div className="p-4 text-sm text-muted-foreground">
+                  正在读取子 Agent 列表...
+                </div>
+              ) : subagentUsage?.agents.length ? (
+                subagentUsage.agents.map((agent) => (
+                  <div
+                    key={agent.sessionId}
+                    className="grid grid-cols-[1.2fr_1fr_0.6fr_0.8fr_0.7fr_1fr] gap-2 border-t border-border px-3 py-2 text-xs text-foreground dark:border-slate-800 dark:text-slate-300"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold">
+                        {subagentDisplayName(agent)}
+                      </div>
+                      <div className="truncate text-[11px] text-muted-foreground dark:text-slate-500">
+                        {agent.agentRole ?? agent.title ?? agent.sessionId}
+                      </div>
+                    </div>
+                    <span
+                      className="truncate font-mono"
+                      title={agent.models.join(", ")}
+                    >
+                      {agent.models.join(", ") || "未知"}
+                    </span>
+                    <span className="text-right">{agent.requestCount}</span>
+                    <span className="text-right">
+                      {agent.totalTokens.toLocaleString()}
+                    </span>
+                    <span className="text-right">
+                      {formatUsageCost(agent.totalCost)}
+                    </span>
+                    <span className="truncate">
+                      {formatUsageTimestamp(agent.lastUsedAt, agent.updatedAt)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="p-4 text-sm leading-6 text-muted-foreground">
+                  未发现本地子 Agent 会话。状态库：
+                  {subagentUsage?.stateDbPath ?? "未定位"}。
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );
+}
+
+/// 格式化美元成本，保留小额用量的可见精度。
+function formatUsageCost(value?: string): string {
+  const parsed = Number.parseFloat(value ?? "");
+  if (!Number.isFinite(parsed)) return "$0.000000";
+  return `$${parsed.toFixed(parsed > 0 && parsed < 0.01 ? 6 : 4)}`;
+}
+
+/// 子 Agent 列表优先显示 Codex thread_spawn 昵称，缺失时回退到历史标题和短 ID。
+function subagentDisplayName(agent: CodexSubagentUsageAgent): string {
+  return (
+    agent.agentNickname ||
+    agent.title ||
+    (agent.sessionId ? agent.sessionId.slice(0, 8) : "未命名子 Agent")
+  );
+}
+
+/// 将会话同步时间转换成本地可读时间，未产生 token_count 时回退到线程更新时间。
+function formatUsageTimestamp(lastUsedAt?: number, updatedAt?: string): string {
+  if (typeof lastUsedAt === "number" && Number.isFinite(lastUsedAt)) {
+    return new Date(lastUsedAt * 1000).toLocaleString();
+  }
+  return updatedAt || "无用量";
 }
 
 /// 测试发布页只做本地匹配预览，并展示下一步如何发布到 Codex。
@@ -4896,7 +5111,7 @@ function TestTab({
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
-      <section className="rounded-lg border border-purple-700/40 bg-purple-950/10 p-4">
+      <section className="rounded-lg border border-purple-200 bg-purple-50/70 p-4 dark:border-purple-700/40 dark:bg-purple-950/10">
         <SectionHeader
           icon={Play}
           title="匹配预览"
@@ -4907,7 +5122,7 @@ function TestTab({
             value={testModel}
             onChange={(event) => onModelChange(event.target.value)}
             placeholder="例如：gpt-5.4-mini、qwen3.6、deepseek-v4-flash"
-            className="h-10 rounded-md border border-purple-700/50 bg-slate-950/70 px-3 text-sm outline-none transition placeholder:text-slate-500 focus:border-purple-400 focus:ring-2 focus:ring-purple-500/30"
+            className="h-10 rounded-md border border-purple-200 bg-background px-3 text-sm outline-none transition placeholder:text-muted-foreground focus:border-purple-400 focus:ring-2 focus:ring-purple-500/20 dark:border-purple-700/50 dark:bg-slate-950/70 dark:placeholder:text-slate-500 dark:focus:ring-purple-500/30"
           />
           <Button
             onClick={onPreviewRoute}
@@ -4924,26 +5139,26 @@ function TestTab({
                 key={model}
                 type="button"
                 onClick={() => onModelChange(model.replace(/\*$/, ""))}
-                className="rounded-full border border-purple-500/40 bg-purple-500/10 px-3 py-1 text-xs text-purple-100 transition hover:border-purple-300 hover:bg-purple-500/20"
+                className="rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-xs text-purple-800 transition hover:border-purple-300 hover:bg-purple-100 dark:border-purple-500/40 dark:bg-purple-500/10 dark:text-purple-100 dark:hover:bg-purple-500/20"
               >
                 {model}
               </button>
             ))}
           </div>
         )}
-        <div className="mt-4 rounded-lg border border-purple-700/40 bg-slate-950/50 p-4">
+        <div className="mt-4 rounded-lg border border-purple-200 bg-background/80 p-4 dark:border-purple-700/40 dark:bg-slate-950/50">
           <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-            <Activity className="h-4 w-4 text-purple-300" />
+            <Activity className="h-4 w-4 text-purple-600 dark:text-purple-300" />
             预览结果
           </div>
-          <p className="text-sm leading-6 text-slate-300">
+          <p className="text-sm leading-6 text-muted-foreground dark:text-slate-300">
             {testResult ??
               "还没有执行预览。这里不会请求真实上游，也不会消耗额度。"}
           </p>
         </div>
       </section>
 
-      <section className="rounded-lg border border-emerald-700/40 bg-emerald-950/10 p-4">
+      <section className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-700/40 dark:bg-emerald-950/10">
         <SectionHeader
           icon={RadioTower}
           title="发布检查"
@@ -5049,7 +5264,7 @@ function StatusViewSwitcher({
   ];
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-950/40 p-2">
+    <div className="rounded-lg border border-border bg-card p-2 dark:border-slate-700 dark:bg-slate-950/40">
       <div className="grid gap-2 md:grid-cols-5">
         {items.map((item) => {
           const Icon = item.icon;
@@ -5062,8 +5277,8 @@ function StatusViewSwitcher({
               className={cn(
                 "flex min-w-0 items-center gap-3 rounded-md border px-3 py-2 text-left transition",
                 active
-                  ? "border-blue-500/60 bg-blue-600/20 text-blue-100"
-                  : "border-slate-700 bg-slate-950/40 text-slate-300 hover:border-blue-500/50 hover:bg-blue-950/20",
+                  ? "border-blue-400 bg-blue-50 text-blue-800 dark:border-blue-500/60 dark:bg-blue-600/20 dark:text-blue-100"
+                  : "border-border bg-background text-muted-foreground hover:border-blue-300 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300 dark:hover:border-blue-500/50 dark:hover:bg-blue-950/20",
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
@@ -5105,7 +5320,7 @@ function DiagnosticsPanel({
     ) ?? [];
 
   return (
-    <div className="rounded-lg border border-amber-600/40 bg-amber-950/10 p-4">
+    <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-600/40 dark:bg-amber-950/10">
       <SectionHeader
         icon={Bug}
         title="Debug 检查"
@@ -5116,7 +5331,7 @@ function DiagnosticsPanel({
             variant="outline"
             onClick={onRun}
             disabled={isLoading}
-            className="gap-2 border-amber-500/50 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20"
+            className="gap-2 border-amber-300 bg-background/70 text-amber-700 hover:bg-amber-50 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/20"
           >
             {isLoading ? (
               <RefreshCw className="h-4 w-4 animate-spin" />
@@ -5129,13 +5344,13 @@ function DiagnosticsPanel({
       />
 
       {error && (
-        <div className="mt-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-100">
+        <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100">
           {error}
         </div>
       )}
 
       {!diagnostics && !error && (
-        <div className="mt-3 rounded-lg border border-slate-700 bg-slate-950/50 p-3 text-sm leading-6 text-slate-300">
+        <div className="mt-3 rounded-lg border border-border bg-muted/40 p-3 text-sm leading-6 text-muted-foreground dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-300">
           尚未运行 Debug 检查。点击按钮后会读取真实 Codex live
           配置和本地路由日志，用来确认请求是否进入 MultiRouter。
         </div>
@@ -5147,8 +5362,8 @@ function DiagnosticsPanel({
             className={cn(
               "rounded-lg border p-3",
               diagnostics.ready
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
-                : "border-rose-500/40 bg-rose-500/10 text-rose-100",
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100"
+                : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100",
             )}
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -5164,8 +5379,8 @@ function DiagnosticsPanel({
                 className={cn(
                   "border",
                   diagnostics.ready
-                    ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-100"
-                    : "border-rose-500/50 bg-rose-500/15 text-rose-100",
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/50 dark:bg-emerald-500/15 dark:text-emerald-100"
+                    : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/15 dark:text-rose-100",
                 )}
               >
                 {diagnostics.generatedAt}
@@ -5199,9 +5414,9 @@ function DiagnosticsPanel({
           </div>
 
           <div className="grid gap-3 text-sm xl:grid-cols-4">
-            <div className="rounded-lg border border-slate-700 bg-slate-950/50 p-3">
-              <div className="mb-3 flex items-center gap-2 font-semibold text-slate-100">
-                <Settings2 className="h-4 w-4 text-blue-300" />
+            <div className="rounded-lg border border-border bg-card p-3 dark:border-slate-700 dark:bg-slate-950/50">
+              <div className="mb-3 flex items-center gap-2 font-semibold text-foreground dark:text-slate-100">
+                <Settings2 className="h-4 w-4 text-blue-600 dark:text-blue-300" />
                 Codex Live Config
               </div>
               <div className="space-y-2">
@@ -5250,9 +5465,9 @@ function DiagnosticsPanel({
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-700 bg-slate-950/50 p-3">
-              <div className="mb-3 flex items-center gap-2 font-semibold text-slate-100">
-                <Server className="h-4 w-4 text-violet-300" />
+            <div className="rounded-lg border border-border bg-card p-3 dark:border-slate-700 dark:bg-slate-950/50">
+              <div className="mb-3 flex items-center gap-2 font-semibold text-foreground dark:text-slate-100">
+                <Server className="h-4 w-4 text-violet-600 dark:text-violet-300" />
                 Codex Desktop
               </div>
               <div className="space-y-2">
@@ -5294,9 +5509,9 @@ function DiagnosticsPanel({
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-700 bg-slate-950/50 p-3">
-              <div className="mb-3 flex items-center gap-2 font-semibold text-slate-100">
-                <Route className="h-4 w-4 text-emerald-300" />
+            <div className="rounded-lg border border-border bg-card p-3 dark:border-slate-700 dark:bg-slate-950/50">
+              <div className="mb-3 flex items-center gap-2 font-semibold text-foreground dark:text-slate-100">
+                <Route className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
                 Route Plan
               </div>
               <div className="space-y-2">
@@ -5323,9 +5538,9 @@ function DiagnosticsPanel({
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-700 bg-slate-950/50 p-3">
-              <div className="mb-3 flex items-center gap-2 font-semibold text-slate-100">
-                <FileClock className="h-4 w-4 text-amber-300" />
+            <div className="rounded-lg border border-border bg-card p-3 dark:border-slate-700 dark:bg-slate-950/50">
+              <div className="mb-3 flex items-center gap-2 font-semibold text-foreground dark:text-slate-100">
+                <FileClock className="h-4 w-4 text-amber-600 dark:text-amber-300" />
                 Router Log
               </div>
               <div className="space-y-2">
@@ -5354,8 +5569,8 @@ function DiagnosticsPanel({
           </div>
 
           {diagnostics.routePlan.routeSummaries.length > 0 && (
-            <div className="overflow-hidden rounded-lg border border-slate-700">
-              <div className="grid grid-cols-[1fr_1fr_1fr_1fr_0.8fr] gap-2 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-slate-300">
+            <div className="overflow-hidden rounded-lg border border-border dark:border-slate-700">
+              <div className="grid grid-cols-[1fr_1fr_1fr_1fr_0.8fr] gap-2 bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground dark:bg-slate-900/80 dark:text-slate-300">
                 <span>规则</span>
                 <span>目标 Provider</span>
                 <span>配置协议</span>
@@ -5365,7 +5580,7 @@ function DiagnosticsPanel({
               {diagnostics.routePlan.routeSummaries.map((route, index) => (
                 <div
                   key={`${route.id ?? index}-${route.targetProviderId ?? "inline"}`}
-                  className="grid grid-cols-[1fr_1fr_1fr_1fr_0.8fr] gap-2 border-t border-slate-800 px-3 py-2 text-xs text-slate-300"
+                  className="grid grid-cols-[1fr_1fr_1fr_1fr_0.8fr] gap-2 border-t border-border px-3 py-2 text-xs text-foreground dark:border-slate-800 dark:text-slate-300"
                 >
                   <span className="truncate">
                     {route.label ?? route.id ?? `规则 ${index + 1}`}
@@ -5385,10 +5600,12 @@ function DiagnosticsPanel({
                   >
                     {route.configuredProtocol
                       ? apiFormatLabel(route.configuredProtocol)
-                      : route.apiFormat ?? "跟随"}
+                      : (route.apiFormat ?? "跟随")}
                   </span>
                   <span className="truncate">
-                    {protocolDecisionSourceLabel(route.configuredProtocolSource)}
+                    {protocolDecisionSourceLabel(
+                      route.configuredProtocolSource,
+                    )}
                   </span>
                   <span className="truncate">
                     {[
@@ -5404,8 +5621,8 @@ function DiagnosticsPanel({
           )}
 
           {diagnostics.routerLog.recentEvents.length > 0 && (
-            <div className="overflow-hidden rounded-lg border border-slate-700">
-              <div className="grid grid-cols-[1fr_0.9fr_0.8fr_0.9fr_0.6fr_1.6fr] gap-2 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-slate-300">
+            <div className="overflow-hidden rounded-lg border border-border dark:border-slate-700">
+              <div className="grid grid-cols-[1fr_0.9fr_0.8fr_0.9fr_0.6fr_1.6fr] gap-2 bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground dark:bg-slate-900/80 dark:text-slate-300">
                 <span>时间</span>
                 <span>事件</span>
                 <span>协议</span>
@@ -5416,7 +5633,7 @@ function DiagnosticsPanel({
               {diagnostics.routerLog.recentEvents.slice(0, 12).map((event) => (
                 <div
                   key={`${event.timestamp}-${event.event}-${event.line}`}
-                  className="grid grid-cols-[1fr_0.9fr_0.8fr_0.9fr_0.6fr_1.6fr] gap-2 border-t border-slate-800 px-3 py-2 text-xs text-slate-300"
+                  className="grid grid-cols-[1fr_0.9fr_0.8fr_0.9fr_0.6fr_1.6fr] gap-2 border-t border-border px-3 py-2 text-xs text-foreground dark:border-slate-800 dark:text-slate-300"
                 >
                   <span className="truncate">{event.timestamp}</span>
                   <span className="truncate font-mono">{event.event}</span>
@@ -5465,8 +5682,8 @@ function DebugIssueList({
       className={cn(
         "rounded-lg border p-3 text-sm",
         tone === "fail"
-          ? "border-rose-500/40 bg-rose-500/10 text-rose-100"
-          : "border-amber-500/40 bg-amber-500/10 text-amber-100",
+          ? "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100"
+          : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100",
       )}
     >
       <div className="mb-2 font-semibold">{title}</div>
@@ -5517,23 +5734,27 @@ function diagnosticStatusMeta(status: CodexDiagnosticStatus): {
     case "pass":
       return {
         icon: CheckCircle2,
-        className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-100",
+        className:
+          "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100",
       };
     case "warn":
       return {
         icon: AlertTriangle,
-        className: "border-amber-500/40 bg-amber-500/10 text-amber-100",
+        className:
+          "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100",
       };
     case "fail":
       return {
         icon: XCircle,
-        className: "border-rose-500/40 bg-rose-500/10 text-rose-100",
+        className:
+          "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100",
       };
     case "info":
     default:
       return {
         icon: Info,
-        className: "border-blue-500/40 bg-blue-500/10 text-blue-100",
+        className:
+          "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-100",
       };
   }
 }
@@ -5555,15 +5776,17 @@ function StatusCard({
       className={cn(
         "rounded-lg border p-3",
         ok
-          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
-          : "border-amber-500/40 bg-amber-500/10 text-amber-100",
+          ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100"
+          : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100",
       )}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs opacity-80">{label}</span>
         <span className="h-2.5 w-2.5 rounded-full bg-current" />
       </div>
-      <div className="mt-2 text-lg font-semibold text-white">{value}</div>
+      <div className="mt-2 text-lg font-semibold text-foreground dark:text-white">
+        {value}
+      </div>
       <div className="mt-1 truncate text-xs opacity-75" title={detail}>
         {detail}
       </div>
@@ -5586,11 +5809,13 @@ function SectionHeader({
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
-        <div className="flex items-center gap-2 text-base font-semibold text-slate-100">
-          <Icon className="h-4 w-4 text-blue-300" />
+        <div className="flex items-center gap-2 text-base font-semibold text-foreground dark:text-slate-100">
+          <Icon className="h-4 w-4 text-blue-600 dark:text-blue-300" />
           {title}
         </div>
-        <p className="mt-1 text-xs leading-5 text-slate-400">{detail}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground dark:text-slate-400">
+          {detail}
+        </p>
       </div>
       {action}
     </div>
@@ -5625,24 +5850,24 @@ function SortableSpawnAgentCandidate({
         transition,
       }}
       className={cn(
-        "flex items-center gap-2 rounded-md border border-violet-800/60 bg-slate-950/50 px-2 py-2 text-xs",
+        "flex items-center gap-2 rounded-md border border-violet-200 bg-background/80 px-2 py-2 text-xs dark:border-violet-800/60 dark:bg-slate-950/50",
         isDragging ? "opacity-60 shadow-lg shadow-violet-950/40" : "",
       )}
     >
       <button
         type="button"
-        className="grid h-7 w-7 shrink-0 place-items-center rounded border border-violet-700/60 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-700/60 dark:bg-violet-500/10 dark:text-violet-200 dark:hover:bg-violet-500/20"
         {...attributes}
         {...listeners}
         aria-label={`拖动 ${modelId}`}
       >
         <GripVertical className="h-4 w-4" />
       </button>
-      <div className="w-8 shrink-0 text-[11px] text-violet-300">
+      <div className="w-8 shrink-0 text-[11px] text-violet-700 dark:text-violet-300">
         #{index + 1}
       </div>
       <div
-        className="min-w-0 flex-1 truncate font-mono text-slate-100"
+        className="min-w-0 flex-1 truncate font-mono text-foreground dark:text-slate-100"
         title={catalogModelLabel(model)}
       >
         {catalogModelLabel(model)}
@@ -5652,7 +5877,7 @@ function SortableSpawnAgentCandidate({
         size="sm"
         variant="ghost"
         onClick={() => onRemove(modelId)}
-        className="h-7 w-7 shrink-0 p-0 text-slate-300 hover:bg-rose-500/15 hover:text-rose-100"
+        className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:bg-rose-50 hover:text-rose-700 dark:text-slate-300 dark:hover:bg-rose-500/15 dark:hover:text-rose-100"
       >
         <Trash2 className="h-4 w-4" />
       </Button>
@@ -5674,21 +5899,21 @@ function PlanCardContent({
   return (
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="truncate font-semibold text-slate-100">
+        <span className="truncate font-semibold text-foreground dark:text-slate-100">
           {provider.name}
         </span>
         <Badge
           className={cn(
             "border",
             routing?.enabled === false
-              ? "border-slate-500/50 bg-slate-500/10 text-slate-200"
-              : "border-emerald-500/50 bg-emerald-500/15 text-emerald-100",
+              ? "border-border bg-muted text-muted-foreground dark:border-slate-500/50 dark:bg-slate-500/10 dark:text-slate-200"
+              : "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/50 dark:bg-emerald-500/15 dark:text-emerald-100",
           )}
         >
           {routing?.enabled === false ? "入口已停用" : "入口已启用"}
         </Badge>
       </div>
-      <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
+      <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground dark:text-slate-400">
         <span>规则 {routes.length} 条</span>
         {routing?.defaultRouteId && <span>默认 {routing.defaultRouteId}</span>}
         {!compact && <span>ID {provider.id}</span>}
@@ -5719,16 +5944,16 @@ function RouteListButton({
       className={cn(
         "group rounded-lg border px-3 py-2 text-left transition",
         active
-          ? "border-emerald-400 bg-emerald-600/20 shadow-[0_0_0_1px_rgba(52,211,153,0.3)]"
-          : "border-slate-700 bg-slate-950/40 hover:border-emerald-400 hover:bg-emerald-950/20",
+          ? "border-emerald-400 bg-emerald-50 shadow-[0_0_0_1px_rgba(52,211,153,0.20)] dark:bg-emerald-600/20 dark:shadow-[0_0_0_1px_rgba(52,211,153,0.3)]"
+          : "border-border bg-card hover:border-emerald-400 hover:bg-emerald-50 dark:border-slate-700 dark:bg-slate-950/40 dark:hover:bg-emerald-950/20",
       )}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-slate-100">
+          <div className="truncate text-sm font-semibold text-foreground dark:text-slate-100">
             {entry.route.label || entry.route.id || "未命名规则"}
           </div>
-          <div className="mt-1 truncate text-xs text-slate-400">
+          <div className="mt-1 truncate text-xs text-muted-foreground dark:text-slate-400">
             所属多路路由：{entry.provider.name}
           </div>
         </div>
@@ -5736,24 +5961,24 @@ function RouteListButton({
           className={cn(
             "border",
             entry.route.enabled === false
-              ? "border-slate-500/50 bg-slate-500/10 text-slate-200"
-              : "border-emerald-500/50 bg-emerald-500/15 text-emerald-100",
+              ? "border-border bg-muted text-muted-foreground dark:border-slate-500/50 dark:bg-slate-500/10 dark:text-slate-200"
+              : "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/50 dark:bg-emerald-500/15 dark:text-emerald-100",
           )}
         >
           {entry.route.enabled === false ? "已停用" : "已启用"}
         </Badge>
       </div>
       <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
-        <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-0.5 text-blue-100">
+        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-blue-800 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-100">
           {targetProvider ? "复用供应商配置" : apiFormatLabel(format)}
         </span>
-        <span className="rounded-full border border-slate-600 bg-slate-900 px-2 py-0.5 text-slate-300">
+        <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300">
           {targetProvider
             ? `目标：${targetProvider.name}`
             : authSourceLabel(entry.route.upstream?.auth?.source)}
         </span>
       </div>
-      <div className="mt-1.5 truncate text-xs text-slate-400">
+      <div className="mt-1.5 truncate text-xs text-muted-foreground dark:text-slate-400">
         {routeMatchSummary(entry.route)}
       </div>
     </button>
@@ -5774,7 +5999,7 @@ function RouteDetailPanel({
 }) {
   if (!selectedRoute) {
     return (
-      <section className="rounded-lg border border-slate-700 bg-slate-950/40 p-3">
+      <section className="rounded-lg border border-border bg-card p-3 dark:border-slate-700 dark:bg-slate-950/40">
         <EmptyState
           icon={Route}
           title="请选择一条规则"
@@ -5792,7 +6017,7 @@ function RouteDetailPanel({
   const targetProvider = routeTargetProvider(route, providersById);
 
   return (
-    <section className="rounded-lg border border-emerald-700/40 bg-slate-950/50 p-3">
+    <section className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 dark:border-emerald-700/40 dark:bg-slate-950/50">
       <SectionHeader
         icon={Database}
         title={route.label || route.id || "规则详情"}
@@ -5864,7 +6089,7 @@ function RouteDetailPanel({
         </Button>
         <Button
           variant="outline"
-          className="justify-start gap-2 text-rose-200 hover:text-rose-100"
+          className="justify-start gap-2 text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:text-rose-200 dark:hover:text-rose-100"
           onClick={() => onOpenRoutePicker(selectedRoute.provider)}
         >
           <Trash2 className="h-4 w-4" />
@@ -5878,9 +6103,13 @@ function RouteDetailPanel({
 /// 只读详情行，避免信息散落成难扫描的长段落。
 function DetailRow({ label, value }: { label: string; value?: string }) {
   return (
-    <div className="rounded-md border border-slate-800 bg-slate-950/50 p-3">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="mt-1 break-words text-slate-200">{value || "未配置"}</div>
+    <div className="rounded-md border border-border bg-muted/40 p-3 dark:border-slate-800 dark:bg-slate-950/50">
+      <div className="text-xs text-muted-foreground dark:text-slate-500">
+        {label}
+      </div>
+      <div className="mt-1 break-words text-foreground dark:text-slate-200">
+        {value || "未配置"}
+      </div>
     </div>
   );
 }
@@ -5888,11 +6117,13 @@ function DetailRow({ label, value }: { label: string; value?: string }) {
 /// 模型源迷你卡，仅用于总览页快速提示。
 function SourceMiniCard({ provider }: { provider: Provider }) {
   return (
-    <div className="rounded-lg border border-amber-700/30 bg-slate-950/40 p-3">
-      <div className="truncate text-sm font-semibold text-slate-100">
+    <div className="rounded-lg border border-amber-200 bg-card p-3 dark:border-amber-700/30 dark:bg-slate-950/40">
+      <div className="truncate text-sm font-semibold text-foreground dark:text-slate-100">
         {provider.name}
       </div>
-      <div className="mt-1 truncate text-xs text-slate-400">{provider.id}</div>
+      <div className="mt-1 truncate text-xs text-muted-foreground dark:text-slate-400">
+        {provider.id}
+      </div>
     </div>
   );
 }
@@ -5904,8 +6135,8 @@ function ChecklistItem({ ok, label }: { ok: boolean; label: string }) {
       className={cn(
         "flex items-center gap-2 rounded-md border p-3 text-sm",
         ok
-          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
-          : "border-amber-500/40 bg-amber-500/10 text-amber-100",
+          ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100"
+          : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100",
       )}
     >
       <CheckCircle2 className="h-4 w-4" />
@@ -5929,12 +6160,16 @@ function EmptyState({
   onAction?: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-dashed border-slate-700 bg-slate-950/40 p-5">
+    <div className="rounded-lg border border-dashed border-border bg-muted/40 p-5 dark:border-slate-700 dark:bg-slate-950/40">
       <div className="flex items-start gap-3">
-        <Icon className="mt-0.5 h-5 w-5 text-slate-400" />
+        <Icon className="mt-0.5 h-5 w-5 text-muted-foreground dark:text-slate-400" />
         <div className="min-w-0 flex-1">
-          <div className="font-semibold text-slate-100">{title}</div>
-          <p className="mt-1 text-sm leading-6 text-slate-400">{detail}</p>
+          <div className="font-semibold text-foreground dark:text-slate-100">
+            {title}
+          </div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground dark:text-slate-400">
+            {detail}
+          </p>
           {onAction && (
             <Button
               size="sm"

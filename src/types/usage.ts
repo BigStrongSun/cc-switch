@@ -113,6 +113,54 @@ export interface ModelStats {
   avgCostPerRequest: string;
 }
 
+/** Codex 子 Agent 单个会话在本地同步日志中的用量。 */
+export interface CodexSubagentUsageAgent {
+  sessionId: string;
+  title: string;
+  agentNickname?: string;
+  agentRole?: string;
+  parentThreadId?: string;
+  depth?: number;
+  modelProvider?: string;
+  cwd?: string;
+  primaryModel?: string;
+  models: string[];
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  totalTokens: number;
+  totalCost: string;
+  lastUsedAt?: number;
+  updatedAt?: string;
+  rolloutPath?: string;
+}
+
+/** Codex 子 Agent 本地会话用量按模型聚合后的统计。 */
+export interface CodexSubagentModelUsage {
+  model: string;
+  agentCount: number;
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  totalTokens: number;
+  totalCost: string;
+}
+
+/** MultiRouter 状态页展示的 Codex 子 Agent 本地会话统计。 */
+export interface CodexSubagentUsageStats {
+  codexHome: string;
+  stateDbPath?: string;
+  activeDbKind?: string;
+  totalAgents: number;
+  agents: CodexSubagentUsageAgent[];
+  modelStats: CodexSubagentModelUsage[];
+  skippedReason?: string;
+}
+
 export interface LogFilters {
   appType?: string;
   providerName?: string;

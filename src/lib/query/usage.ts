@@ -128,6 +128,20 @@ export const usageKeys = {
       page,
       pageSize,
     ] as const,
+  codexSubagentStats: (
+    preset: UsageRangeSelection["preset"],
+    customStartDate: number | undefined,
+    customEndDate: number | undefined,
+    limit: number,
+  ) =>
+    [
+      ...usageKeys.all,
+      "codex-subagent-stats",
+      preset,
+      customStartDate ?? 0,
+      customEndDate ?? 0,
+      limit,
+    ] as const,
   detail: (requestId: string) =>
     [...usageKeys.all, "detail", requestId] as const,
   pricing: () => [...usageKeys.all, "pricing"] as const,
@@ -309,6 +323,28 @@ export function useRequestLogs({
       return usageApi.getRequestLogs(effectiveFilters, page, pageSize);
     },
     refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS, // 每30秒自动刷新
+    refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
+  });
+}
+
+/// 读取 Codex 本地子 Agent 会话用量，用于 MultiRouter 状态页的独立监控区块。
+export function useCodexSubagentUsageStats(
+  range: UsageRangeSelection,
+  limit: number = 80,
+  options?: UsageQueryOptions,
+) {
+  return useQuery({
+    queryKey: usageKeys.codexSubagentStats(
+      range.preset,
+      range.customStartDate,
+      range.customEndDate,
+      limit,
+    ),
+    queryFn: () => {
+      const { startDate, endDate } = resolveUsageRange(range);
+      return usageApi.getCodexSubagentUsageStats(startDate, endDate, limit);
+    },
+    refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
 }
