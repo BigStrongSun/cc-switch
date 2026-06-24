@@ -117,6 +117,19 @@ Codex MultiRouter 不是简单地把 Codex 切到某一个第三方 Provider。C
 - 免安装版仍使用系统默认用户数据和配置目录，因此除非明确要共享状态，否则不要同时运行上游官方 CC Switch 和 CCSwitchMulti。
 - macOS 产物需要 macOS 构建、签名和 notarization 环境；Windows/WSL 构建不会产出已签名公证的 macOS 包。
 
+### macOS 未签名版打开说明
+
+当前 CCSwitchMulti 的 macOS Apple Silicon 包暂未进行 Apple Developer ID 签名和 notarization。下载后如果 macOS 提示“CCSwitchMulti 已损坏，无法打开”或“无法验证开发者”，通常不是文件真的损坏，而是浏览器下载文件带有 quarantine 隔离标记，Gatekeeper 因为应用未签名/未公证而阻止启动。
+
+请先从 [Releases](../../releases) 下载 `CCSwitchMulti_<version>_aarch64.dmg` 或 `CCSwitchMulti_<version>_aarch64.app.zip`，把 `CCSwitchMulti.app` 拖到“应用程序”文件夹，然后在“终端”运行：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/CCSwitchMulti.app
+open /Applications/CCSwitchMulti.app
+```
+
+这只会移除 `CCSwitchMulti.app` 的下载隔离标记，不会关闭系统 Gatekeeper，也不会修改全局安全策略。若你更愿意使用 Apple 官方的图形界面流程，可以先尝试打开一次 App，再到“系统设置” -> “隐私与安全性”里选择“仍要打开 / Open Anyway”。
+
 ## ❤️Sponsor
 
 > [Want to appear here?](mailto:farion1231@gmail.com)
@@ -342,7 +355,14 @@ CC Switch provides a "Shared Config Snippet" feature to pass common data (beyond
 <details>
 <summary><strong>macOS installation</strong></summary>
 
-CC Switch for macOS is code-signed and notarized by Apple. You can download and install it directly — no extra steps needed. We recommend using the `.dmg` installer.
+The CCSwitchMulti macOS Apple Silicon package is currently unsigned and unnotarized. If macOS says the app is damaged or cannot verify the developer, move `CCSwitchMulti.app` to `/Applications`, then run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/CCSwitchMulti.app
+open /Applications/CCSwitchMulti.app
+```
+
+This removes the download quarantine flag for CCSwitchMulti only. It does not disable Gatekeeper globally.
 
 </details>
 
@@ -423,9 +443,9 @@ brew upgrade --cask cc-switch
 
 **Method 2: Manual Download**
 
-Download `CCSwitchMulti-v{version}-macOS.dmg` (recommended) or `.zip` from the [Releases](../../releases) page.
+Download `CCSwitchMulti_<version>_aarch64.dmg` (recommended) or `CCSwitchMulti_<version>_aarch64.app.zip` from the [Releases](../../releases) page.
 
-> **Note**: CC Switch for macOS is code-signed and notarized by Apple. You can install and open it directly.
+> **Note**: The current CCSwitchMulti macOS package is unsigned and unnotarized. If macOS reports that the app is damaged or cannot verify the developer, move `CCSwitchMulti.app` to `/Applications`, then run `xattr -dr com.apple.quarantine /Applications/CCSwitchMulti.app` and open it again.
 
 ### Arch Linux Users
 
