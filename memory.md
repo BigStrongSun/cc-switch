@@ -1,5 +1,15 @@
 # CC Switch Repository Memory
 
+## 2026-06-25 CCSwitchMulti v3.16.3-19 Prerelease
+
+- `v3.16.3-19` 已作为 GitHub prerelease 发布：`https://github.com/BigStrongSun/ccswitchmulti/releases/tag/v3.16.3-19`。tag 指向版本 bump 提交 `6a1cf4e1`，版本面同步点仍是四处：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`。业务修复提交是 `2e9723c1`（MultiRouter 子 Agent 流量监控 + 浅色主题修复），前面还包含 vLLM/Qwen 上下文窗口修复提交 `7481bbb5`、`6d5d8c02`。
+- 本次 release notes 必须继续用中文。内容覆盖：MultiRouter “今日子 Agent 会话流量”、子 Agent/模型聚合、会话用量同步入口、浅色模式可读性修复、vLLM `max_model_len/maxModelLen` 上下文窗口读取、SQLite session_id 分块查询，以及 macOS universal history-repair sidecar 构建修复。
+- 本地 Windows 构建路径：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-release-pipeline.ps1 -ReleaseRoot C:\Users\sunda\Documents\LLMservice\ccswitchmulti-release-v3.16.3-19 -Reason manual-prerelease-v3.16.3-19`。产出被整理到 `C:\Users\sunda\Documents\LLMservice\ccswitchmulti-release-v3.16.3-19-assets`，包括 setup、setup.sig、portable zip、raw exe、`latest.json`。
+- Linux 资产在 WSL `openclaw` 内完成，仍然使用临时 `{"bundle":{"createUpdaterArtifacts":false}}` 配置构建：先 `cargo build --manifest-path src-tauri/Cargo.toml --bin codex-history-repairer --features history-repairer --release`，再 `pnpm tauri build --bundles appimage,deb,rpm --config <tmpfile>`。实际上传资产是 `CCSwitchMulti_3.16.3-19_amd64.AppImage`、`CCSwitchMulti_3.16.3-19_amd64.deb`、`CCSwitchMulti-3.16.3-19-1.x86_64.rpm`。
+- macOS 本机仍不能构建；这次通过 `Supplemental macOS Release` workflow_dispatch 构建并上传，run id `28150527263` 成功，耗时约 29m30s。该 workflow 上传了 `CCSwitchMulti_3.16.3-19_universal.tar.gz`、`.tar.gz.sig`、`CCSwitchMulti_3.16.3-19_universal.app.zip`，并刷新 release `SHA256SUMS.txt`。
+- 最终 release 资产数为 12：Windows 4 个、Linux 3 个、macOS 3 个、`latest.json`、`SHA256SUMS.txt`。tag/main push 触发的 `.github/workflows/release.yml` push run 仍出现无 job 的失败记录，不作为本次发布路径；本次实际发布路径是手动本地 Windows + WSL Linux + supplemental macOS。
+- 本轮验证：`pnpm typecheck`、`pnpm build:renderer`、`cargo check --manifest-path src-tauri/Cargo.toml`、`cargo fmt --manifest-path src-tauri/Cargo.toml --check`、`cargo test --manifest-path src-tauri/Cargo.toml codex_subagent_usage_stats --lib`、`git diff --check`。已知非阻塞警告仍是 Rust unused helper、Vite browserslist/baseline 和大 chunk 警告，以及 Tauri bundler `__TAURI_BUNDLE_TYPE` warning。
+
 ## 2026-06-24 MultiRouter Subagent Usage And Light Theme Readability
 
 - MultiRouter 状态页的子 Agent 流量监控不能从真实代理转发日志里直接推断身份；真实代理日志只回答 route/provider/model 的出站归属。子 Agent 监控的来源应固定为 Codex 本地历史 SQLite/JSONL：先用 `thread_source="subagent"` 或 JSONL `session_meta.payload.source.subagent.thread_spawn` 确认子 Agent，再只聚合 `proxy_request_logs` 中 `app_type='codex'`、`data_source='codex_session'`、`session_id IN (subagent session ids)` 的同步用量行。
