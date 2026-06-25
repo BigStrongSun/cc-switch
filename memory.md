@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-06-25 MultiRouter Candidate Model Refresh Loading Fix
+
+- MultiRouter 路由页“候选 provider 模型列表刷新”一直停在“正在读取模型列表...”的根因在前端并发刷新状态机，不是后端 `/models` 请求缺少超时。后端 `src-tauri/src/services/model_fetch.rs` 每个请求已有 15s timeout；问题是 `src/components/codex/CodexRouterWorkspacePage.tsx` 自动刷新多个 provider 时，第一个 provider 成功写回 `providersApi.update` / `setOptimisticRoutingPlan` 会触发 effect cleanup，旧实现用局部 `cancelled` 阻断后续 pending provider 的 `.then/.catch`，而新一轮 effect 又被 `modelRefreshAttemptedKeysRef` 去重跳过，于是 UI 永久留在 loading。
+- 修复方式是按 provider 维护当前最新 `attemptKey`，用 `modelRefreshActiveAttemptKeysRef` 判断请求是否仍是该 provider 的最新 attempt；正常 rerender 不再吞掉同批并发请求终态，真实配置变更产生的新 attempt 仍能阻止旧请求覆盖状态或写回 DB。
+- 回归测试在 `src/components/codex/CodexRouterWorkspacePage.test.ts` 用可手动 resolve/reject 的 Promise 复现两个 provider 并发：Provider A 先成功并触发 rerender 后，Provider B 后续成功必须显示 `已读取并更新 1 个模型。` 且写回；Provider B 后续失败必须显示错误而不是卡 loading。
+- 本轮验证：`pnpm test:unit -- src/components/codex/CodexRouterWorkspacePage.test.ts`、`pnpm typecheck`、`pnpm build:renderer`、`git diff --check`。renderer build 仍只有既有 baseline/browserlist/chunk 警告。
+
 ## 2026-06-25 CCSwitchMulti v3.16.3-19 Prerelease
 
 - `v3.16.3-19` 已作为 GitHub prerelease 发布：`https://github.com/BigStrongSun/ccswitchmulti/releases/tag/v3.16.3-19`。tag 指向版本 bump 提交 `6a1cf4e1`，版本面同步点仍是四处：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`。业务修复提交是 `2e9723c1`（MultiRouter 子 Agent 流量监控 + 浅色主题修复），前面还包含 vLLM/Qwen 上下文窗口修复提交 `7481bbb5`、`6d5d8c02`。

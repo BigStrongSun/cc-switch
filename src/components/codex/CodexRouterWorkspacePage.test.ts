@@ -2,7 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { providersApi } from "@/lib/api";
+import {
+  fetchModelsForConfig,
+  type FetchedModel,
+} from "@/lib/api/model-fetch";
 import type { Provider } from "@/types";
 import {
   applyMultiRouterSettingsDraft,
@@ -30,6 +35,24 @@ vi.mock("@/lib/api/proxy", () => ({
 }));
 
 vi.mock("@/lib/query/usage", () => ({
+  usageKeys: {
+    all: ["usage"],
+  },
+  useCodexSubagentUsageStats: () => ({
+    data: {
+      totals: {
+        sessions: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+      },
+      agents: [],
+      modelStats: [],
+      providerModels: [],
+    },
+    isLoading: false,
+    error: null,
+  }),
   useRequestLogs: () => ({ data: [], isLoading: false }),
 }));
 
@@ -40,6 +63,27 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+vi.mock("@/lib/api/model-fetch", () => ({
+  fetchModelsForConfig: vi.fn(),
+}));
+
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+};
+
+/// 创建可手动完成的 Promise，用来稳定复现多个 provider 并发刷新时的返回顺序。
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function renderWorkspace(ui: React.ReactElement) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -49,7 +93,212 @@ function renderWorkspace(ui: React.ReactElement) {
   );
 }
 
+beforeEach(() => {
+  vi.mocked(fetchModelsForConfig).mockReset();
+  vi.mocked(providersApi.add).mockResolvedValue(true);
+  vi.mocked(providersApi.update).mockResolvedValue(true);
+});
+
 describe("Codex MultiRouter workspace route persistence helpers", () => {
+  it("finishes later provider refreshes after an earlier refresh rerenders the routes page", async () => {
+    const firstRefresh = createDeferred<FetchedModel[]>();
+    const secondRefresh = createDeferred<FetchedModel[]>();
+    vi.mocked(fetchModelsForConfig)
+      .mockReturnValueOnce(firstRefresh.promise)
+      .mockReturnValueOnce(secondRefresh.promise);
+    const providerA: Provider = {
+      id: "codex-source-a",
+      name: "Provider A",
+      category: "custom",
+      settingsConfig: {
+        baseUrl: "https://a.example/v1",
+        auth: { OPENAI_API_KEY: "key-a" },
+        modelCatalog: { models: [{ model: "old-a" }] },
+      },
+    };
+    const providerB: Provider = {
+      id: "codex-source-b",
+      name: "Provider B",
+      category: "custom",
+      settingsConfig: {
+        baseUrl: "https://b.example/v1",
+        auth: { OPENAI_API_KEY: "key-b" },
+        modelCatalog: { models: [{ model: "old-b" }] },
+      },
+    };
+    const plan = createDraftRoutingPlan(
+      [providerA, providerB],
+      [providerA, providerB],
+    );
+    const usedRouteIds = new Set<string>();
+    const routes = [
+      normalizeCodexRouteForSave(
+        {
+          label: providerA.name,
+          targetProviderId: providerA.id,
+          match: { models: ["model-a"] },
+        },
+        0,
+        usedRouteIds,
+      ),
+      normalizeCodexRouteForSave(
+        {
+          label: providerB.name,
+          targetProviderId: providerB.id,
+          match: { models: ["model-b"] },
+        },
+        1,
+        usedRouteIds,
+      ),
+    ];
+    const routedPlan: Provider = {
+      ...plan,
+      settingsConfig: {
+        ...plan.settingsConfig,
+        codexRouting: {
+          enabled: true,
+          defaultRouteId: routes[0].id,
+          routes,
+        },
+      },
+    };
+
+    renderWorkspace(
+      React.createElement(CodexRouterWorkspacePage, {
+        providers: [providerA, providerB, routedPlan],
+        isProxyRunning: true,
+        isCodexTakeoverActive: true,
+        activeProviderId: routedPlan.id,
+        initialProviderId: routedPlan.id,
+        initialTab: "routes",
+        onEditProvider: vi.fn(),
+        onDeletePlan: vi.fn(),
+        onCreateProvider: vi.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(fetchModelsForConfig).toHaveBeenCalledTimes(2));
+
+    firstRefresh.resolve([{ id: "model-a", ownedBy: null }]);
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(providersApi.update)
+          .mock.calls.some(([provider]) => provider.id === providerA.id),
+      ).toBe(true),
+    );
+
+    secondRefresh.resolve([{ id: "model-b", ownedBy: null }]);
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(providersApi.update)
+          .mock.calls.some(([provider]) => provider.id === providerB.id),
+      ).toBe(true),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByText("已读取并更新 1 个模型。")).toHaveLength(2),
+    );
+  });
+
+  it("reports a later provider refresh error after an earlier refresh rerenders the routes page", async () => {
+    const firstRefresh = createDeferred<FetchedModel[]>();
+    const secondRefresh = createDeferred<FetchedModel[]>();
+    vi.mocked(fetchModelsForConfig)
+      .mockReturnValueOnce(firstRefresh.promise)
+      .mockReturnValueOnce(secondRefresh.promise);
+    const providerA: Provider = {
+      id: "codex-error-source-a",
+      name: "Provider A",
+      category: "custom",
+      settingsConfig: {
+        baseUrl: "https://a.example/v1",
+        auth: { OPENAI_API_KEY: "key-a" },
+        modelCatalog: { models: [{ model: "old-a" }] },
+      },
+    };
+    const providerB: Provider = {
+      id: "codex-error-source-b",
+      name: "Provider B",
+      category: "custom",
+      settingsConfig: {
+        baseUrl: "https://b.example/v1",
+        auth: { OPENAI_API_KEY: "key-b" },
+        modelCatalog: { models: [{ model: "old-b" }] },
+      },
+    };
+    const plan = createDraftRoutingPlan(
+      [providerA, providerB],
+      [providerA, providerB],
+    );
+    const usedRouteIds = new Set<string>();
+    const routes = [
+      normalizeCodexRouteForSave(
+        {
+          label: providerA.name,
+          targetProviderId: providerA.id,
+          match: { models: ["model-a"] },
+        },
+        0,
+        usedRouteIds,
+      ),
+      normalizeCodexRouteForSave(
+        {
+          label: providerB.name,
+          targetProviderId: providerB.id,
+          match: { models: ["model-b"] },
+        },
+        1,
+        usedRouteIds,
+      ),
+    ];
+    const routedPlan: Provider = {
+      ...plan,
+      settingsConfig: {
+        ...plan.settingsConfig,
+        codexRouting: {
+          enabled: true,
+          defaultRouteId: routes[0].id,
+          routes,
+        },
+      },
+    };
+
+    renderWorkspace(
+      React.createElement(CodexRouterWorkspacePage, {
+        providers: [providerA, providerB, routedPlan],
+        isProxyRunning: true,
+        isCodexTakeoverActive: true,
+        activeProviderId: routedPlan.id,
+        initialProviderId: routedPlan.id,
+        initialTab: "routes",
+        onEditProvider: vi.fn(),
+        onDeletePlan: vi.fn(),
+        onCreateProvider: vi.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(fetchModelsForConfig).toHaveBeenCalledTimes(2));
+
+    firstRefresh.resolve([{ id: "model-a", ownedBy: null }]);
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(providersApi.update)
+          .mock.calls.some(([provider]) => provider.id === providerA.id),
+      ).toBe(true),
+    );
+
+    secondRefresh.reject(new Error("network timeout"));
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "获取模型列表失败，请检查当前 provider 配置：network timeout",
+        ),
+      ).toBeInTheDocument(),
+    );
+  });
+
   it("does not force the workspace back to routes after the initial jump is consumed", async () => {
     const source: Provider = {
       id: "codex-qwen",

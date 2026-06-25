@@ -1797,6 +1797,8 @@ export function CodexRouterWorkspacePage({
   >({});
   const appliedInitialNavigationRef = useRef<string | null>(null);
   const modelRefreshAttemptedKeysRef = useRef<Set<string>>(new Set());
+  // 记录每个 provider 当前最新的 /models 刷新 attempt；普通 rerender 会触发 effect cleanup，不能因此吞掉同批并发请求的终态。
+  const modelRefreshActiveAttemptKeysRef = useRef<Record<string, string>>({});
   const queryClient = useQueryClient();
 
   const effectiveProviders = useMemo(() => {
@@ -1835,7 +1837,6 @@ export function CodexRouterWorkspacePage({
     if (activeTab !== "routes") return;
     if (modelSources.length === 0) return;
 
-    let cancelled = false;
     for (const provider of modelSources) {
       const fetchConfig = getProviderModelFetchConfig(provider);
       const attemptKey = [
@@ -1847,6 +1848,7 @@ export function CodexRouterWorkspacePage({
       ].join("|");
       if (modelRefreshAttemptedKeysRef.current.has(attemptKey)) continue;
       modelRefreshAttemptedKeysRef.current.add(attemptKey);
+      modelRefreshActiveAttemptKeysRef.current[provider.id] = attemptKey;
 
       if (fetchConfig.skipReason) {
         setProviderModelRefreshStates((current) => ({
@@ -1875,8 +1877,11 @@ export function CodexRouterWorkspacePage({
         fetchConfig.customUserAgent,
       )
         .then(async (models) => {
-          if (cancelled) return;
+          const isCurrentAttempt = () =>
+            modelRefreshActiveAttemptKeysRef.current[provider.id] ===
+            attemptKey;
           if (models.length === 0) {
+            if (!isCurrentAttempt()) return;
             setProviderModelRefreshStates((current) => ({
               ...current,
               [provider.id]: {
@@ -1893,8 +1898,9 @@ export function CodexRouterWorkspacePage({
             provider,
             models,
           );
+          if (!isCurrentAttempt()) return;
           await providersApi.update(nextProvider, "codex");
-          if (cancelled) return;
+          if (!isCurrentAttempt()) return;
           const updatedProvidersById = new Map(providersById);
           updatedProvidersById.set(nextProvider.id, nextProvider);
           const affectedPlans: Provider[] = [];
@@ -1919,6 +1925,7 @@ export function CodexRouterWorkspacePage({
               },
             };
             await providersApi.update(nextPlan, "codex");
+            if (!isCurrentAttempt()) return;
             affectedPlans.push(nextPlan);
           }
           queryClient.setQueryData(["providers", "codex"], (current: any) =>
@@ -1954,7 +1961,12 @@ export function CodexRouterWorkspacePage({
           });
         })
         .catch((error) => {
-          if (cancelled) return;
+          if (
+            modelRefreshActiveAttemptKeysRef.current[provider.id] !==
+            attemptKey
+          ) {
+            return;
+          }
           setProviderModelRefreshStates((current) => ({
             ...current,
             [provider.id]: {
@@ -1966,10 +1978,6 @@ export function CodexRouterWorkspacePage({
           }));
         });
     }
-
-    return () => {
-      cancelled = true;
-    };
   }, [
     activeTab,
     modelSources,
