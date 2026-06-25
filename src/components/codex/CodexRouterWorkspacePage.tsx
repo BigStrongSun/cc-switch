@@ -262,6 +262,51 @@ const OPENAI_CODEX_FALLBACK_MODELS = OPENAI_CODEX_FALLBACK_CATALOG_MODELS.map(
 );
 const DEFAULT_CODEX_PROXY_LISTEN_ADDRESS = "127.0.0.1";
 const DEFAULT_CODEX_PROXY_LISTEN_PORT = 15721;
+const MODEL_REFRESH_TIMEOUT_MS = 30_000;
+
+/// 生成候选 provider /models 刷新的去重键；API Key 用短哈希参与比较，避免换 key 后仍复用旧请求。
+function buildProviderModelRefreshAttemptKey(
+  providerId: string,
+  fetchConfig: ProviderModelFetchConfig,
+): string {
+  return [
+    providerId,
+    fetchConfig.baseUrl,
+    hashSensitiveAttemptPart(fetchConfig.apiKey),
+    fetchConfig.isFullUrl,
+    fetchConfig.customUserAgent ?? "",
+  ].join("|");
+}
+
+/// 为敏感字段生成仅用于内存比较的稳定短哈希，避免把完整 API Key 塞进刷新状态键。
+function hashSensitiveAttemptPart(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${value.length}:${(hash >>> 0).toString(16)}`;
+}
+
+/// 给前端自动刷新加一层兜底超时；后端正常有 timeout，但 IPC 异常挂起时也必须让 UI 退出 loading。
+function withModelRefreshTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs = MODEL_REFRESH_TIMEOUT_MS,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      reject(
+        new Error(
+          `模型列表读取超过 ${Math.round(timeoutMs / 1000)} 秒，请检查网络或 provider /models 端点。`,
+        ),
+      );
+    }, timeoutMs);
+
+    promise
+      .then(resolve, reject)
+      .finally(() => window.clearTimeout(timeoutId));
+  });
+}
 
 /// 提取普通 Codex provider 的 /models 读取配置；官方 OAuth/缺少普通端点的 provider 不走这里。
 function getProviderModelFetchConfig(
@@ -1839,13 +1884,10 @@ export function CodexRouterWorkspacePage({
 
     for (const provider of modelSources) {
       const fetchConfig = getProviderModelFetchConfig(provider);
-      const attemptKey = [
+      const attemptKey = buildProviderModelRefreshAttemptKey(
         provider.id,
-        fetchConfig.baseUrl,
-        Boolean(fetchConfig.apiKey),
-        fetchConfig.isFullUrl,
-        fetchConfig.customUserAgent ?? "",
-      ].join("|");
+        fetchConfig,
+      );
       if (modelRefreshAttemptedKeysRef.current.has(attemptKey)) continue;
       modelRefreshAttemptedKeysRef.current.add(attemptKey);
       modelRefreshActiveAttemptKeysRef.current[provider.id] = attemptKey;
@@ -1869,12 +1911,14 @@ export function CodexRouterWorkspacePage({
         },
       }));
 
-      fetchModelsForConfig(
-        fetchConfig.baseUrl,
-        fetchConfig.apiKey,
-        fetchConfig.isFullUrl,
-        undefined,
-        fetchConfig.customUserAgent,
+      withModelRefreshTimeout(
+        fetchModelsForConfig(
+          fetchConfig.baseUrl,
+          fetchConfig.apiKey,
+          fetchConfig.isFullUrl,
+          undefined,
+          fetchConfig.customUserAgent,
+        ),
       )
         .then(async (models) => {
           const isCurrentAttempt = () =>

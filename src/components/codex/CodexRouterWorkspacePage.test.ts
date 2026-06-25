@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { providersApi } from "@/lib/api";
 import {
   fetchModelsForConfig,
@@ -97,6 +97,10 @@ beforeEach(() => {
   vi.mocked(fetchModelsForConfig).mockReset();
   vi.mocked(providersApi.add).mockResolvedValue(true);
   vi.mocked(providersApi.update).mockResolvedValue(true);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("Codex MultiRouter workspace route persistence helpers", () => {
@@ -297,6 +301,161 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
         ),
       ).toBeInTheDocument(),
     );
+  });
+
+  it("restarts provider refresh when the api key changes and ignores the stale request", async () => {
+    const staleRefresh = createDeferred<FetchedModel[]>();
+    const currentRefresh = createDeferred<FetchedModel[]>();
+    vi.mocked(fetchModelsForConfig)
+      .mockReturnValueOnce(staleRefresh.promise)
+      .mockReturnValueOnce(currentRefresh.promise);
+    const provider: Provider = {
+      id: "codex-keyed-source",
+      name: "Keyed Source",
+      category: "custom",
+      settingsConfig: {
+        baseUrl: "https://keyed.example/v1",
+        auth: { OPENAI_API_KEY: "old-key" },
+        modelCatalog: { models: [{ model: "old-catalog" }] },
+      },
+    };
+    const plan = createDraftRoutingPlan([provider], [provider]);
+    const usedRouteIds = new Set<string>();
+    const route = normalizeCodexRouteForSave(
+      {
+        label: provider.name,
+        targetProviderId: provider.id,
+        match: { models: ["new-model"] },
+      },
+      0,
+      usedRouteIds,
+    );
+    const routedPlan: Provider = {
+      ...plan,
+      settingsConfig: {
+        ...plan.settingsConfig,
+        codexRouting: {
+          enabled: true,
+          defaultRouteId: route.id,
+          routes: [route],
+        },
+      },
+    };
+    const props = {
+      providers: [provider, routedPlan],
+      isProxyRunning: true,
+      isCodexTakeoverActive: true,
+      activeProviderId: routedPlan.id,
+      initialProviderId: routedPlan.id,
+      initialTab: "routes" as const,
+      onEditProvider: vi.fn(),
+      onDeletePlan: vi.fn(),
+      onCreateProvider: vi.fn(),
+    };
+
+    const { rerender } = renderWorkspace(
+      React.createElement(CodexRouterWorkspacePage, props),
+    );
+    await waitFor(() => expect(fetchModelsForConfig).toHaveBeenCalledTimes(1));
+
+    const providerWithNewKey: Provider = {
+      ...provider,
+      settingsConfig: {
+        ...provider.settingsConfig,
+        auth: { OPENAI_API_KEY: "new-key" },
+      },
+    };
+    rerender(
+      React.createElement(
+        QueryClientProvider,
+        {
+          client: new QueryClient({
+            defaultOptions: { queries: { retry: false } },
+          }),
+        },
+        React.createElement(CodexRouterWorkspacePage, {
+          ...props,
+          providers: [providerWithNewKey, routedPlan],
+        }),
+      ),
+    );
+    await waitFor(() => expect(fetchModelsForConfig).toHaveBeenCalledTimes(2));
+
+    staleRefresh.resolve([{ id: "stale-model", ownedBy: null }]);
+    await Promise.resolve();
+    expect(
+      vi
+        .mocked(providersApi.update)
+        .mock.calls.some(([savedProvider]) =>
+          JSON.stringify(savedProvider.settingsConfig).includes("stale-model"),
+        ),
+    ).toBe(false);
+
+    currentRefresh.resolve([{ id: "new-model", ownedBy: null }]);
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(providersApi.update)
+          .mock.calls.some(
+            ([savedProvider]) =>
+              savedProvider.id === provider.id &&
+              JSON.stringify(savedProvider.settingsConfig).includes(
+                "new-model",
+              ),
+          ),
+      ).toBe(true),
+    );
+    expect(
+      vi
+        .mocked(providersApi.update)
+        .mock.calls.some(([savedProvider]) =>
+          JSON.stringify(savedProvider.settingsConfig).includes("stale-model"),
+        ),
+    ).toBe(false);
+  });
+
+  it("settles a provider refresh when the model fetch ipc never returns", async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetchModelsForConfig).mockReturnValue(new Promise(() => {}));
+    const provider: Provider = {
+      id: "codex-timeout-source",
+      name: "Timeout Source",
+      category: "custom",
+      settingsConfig: {
+        baseUrl: "https://timeout.example/v1",
+        auth: { OPENAI_API_KEY: "key-timeout" },
+        modelCatalog: { models: [{ model: "old-timeout" }] },
+      },
+    };
+    const plan = createDraftRoutingPlan([provider], [provider]);
+
+    renderWorkspace(
+      React.createElement(CodexRouterWorkspacePage, {
+        providers: [provider, plan],
+        isProxyRunning: true,
+        isCodexTakeoverActive: true,
+        activeProviderId: plan.id,
+        initialProviderId: plan.id,
+        initialTab: "routes",
+        onEditProvider: vi.fn(),
+        onDeletePlan: vi.fn(),
+        onCreateProvider: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(fetchModelsForConfig).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(
+      screen.getByText(
+        "获取模型列表失败，请检查当前 provider 配置：模型列表读取超过 30 秒，请检查网络或 provider /models 端点。",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("does not force the workspace back to routes after the initial jump is consumed", async () => {
