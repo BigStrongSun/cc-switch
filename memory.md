@@ -1,5 +1,13 @@
 # CC Switch Repository Memory
 
+## 2026-06-25 CCSwitchMulti v3.16.3-21 Prerelease
+
+- `v3.16.3-21` 已作为 GitHub prerelease 发布：`https://github.com/BigStrongSun/ccswitchmulti/releases/tag/v3.16.3-21`。tag 指向 `554bed1c chore(release): prepare v3.16.3-21 hotfix`，业务修复来自 `966a8e38 fix(codex): settle model refresh save-back hangs`。
+- 本次热修的真实边界：`v3.16.3-20` 只修了并发刷新和 `/models` 阶段超时，仍可能在读取成功后的 `providersApi.update` 写回 provider / plan catalog 阶段永久 loading；`v3.16.3-21` 才把读取和写回合成同一个 30 秒超时事务。
+- Windows 本地 release hook 构建成功，导出目录为 `C:\Users\sunda\Documents\LLMservice\最新版ccswitchmulti`，raw exe 文件版本为 `3.16.3-21`。release 创建时 `gh release create` 曾在 raw exe 上传阶段卡住，留下 draft；处理方式是停止残留 `gh`，补传 raw exe，再 `gh release edit --draft=false --prerelease=true` 发布。
+- Supplemental Linux Release workflow `28177240622` 成功并上传 AppImage、deb、rpm；Supplemental macOS Release workflow `28177240635` 成功并上传 unsigned universal `.app.zip`、updater tarball 和 tarball 签名。最终 release 共有 12 个资产，`SHA256SUMS.txt` 覆盖除自身外的 11 个资产。
+- 发布前验证：`pnpm test:unit -- src/components/codex/CodexRouterWorkspacePage.test.ts`、`pnpm typecheck`、`cargo check --manifest-path src-tauri/Cargo.toml`（仅既有 `commands/misc.rs` unused warnings）、`git diff --check`、`pnpm build:renderer`。
+
 ## 2026-06-25 MultiRouter Model Refresh v3.16.3-21 Hotfix Boundary
 
 - 用户/外部反馈截图仍停在“候选 provider 模型列表刷新 / 正在读取模型列表...”时，必须区分三个版本边界：本机安装目录 `C:\Users\sunda\AppData\Local\CCSwitchMulti\cc-switch.exe` 仍是 `3.16.3-18`，公开 `v3.16.3-19` 完全不含刷新状态机修复，公开 `v3.16.3-20` 含 `ddfeed42`/`33a0bc58` 但不含 `966a8e38 fix(codex): settle model refresh save-back hangs`。
