@@ -1,5 +1,14 @@
 # CC Switch Repository Memory
 
+## 2026-06-26 CCSwitchMulti v3.16.3-22 Prerelease
+
+- `v3.16.3-22` 已作为 GitHub prerelease 发布：`https://github.com/BigStrongSun/ccswitchmulti/releases/tag/v3.16.3-22`。Release 为非 draft、`prerelease=true`，发布时间为 `2026-06-26T04:16:52Z`，tag 指向 `d4260d1aeb89ade1859f4a341612a8453fc57cbb chore(release): prepare v3.16.3-22 prerelease`。
+- 业务修复来自 `9b91ff5d fix(codex): refresh multirouter model sources optimistically`：MultiRouter `/models` 刷新成功后不再等待父级 providers refetch，当前打开的 route picker 会通过 `optimisticModelSourcesById` 立即读到新 catalog，解决“读取成功但 UI 仍显示未发现模型目录 / 卡在旧列表”的边界。
+- Windows 本地 post-commit release pipeline 构建成功，导出目录为 `C:\Users\sunda\Documents\LLMservice\最新版ccswitchmulti`，完成时间 `2026-06-26 11:59:43`；Windows setup 为 `CCSwitchMulti_3.16.3-22_x64-setup.exe`，raw exe 的 FileVersion/ProductVersion 均验证为 `3.16.3-22`，`latest.json` 指向 `v3.16.3-22`。
+- 发布创建时 `gh release create` 在 raw exe 上传阶段遇到 EOF 并留下 draft release；恢复方式是停止残留 `gh` 进程，逐个补传缺失 Windows 资产，并删除误名 checksum 资产后重新上传正确的 `SHA256SUMS.txt`。后续 Linux/macOS workflow 又刷新了最终 checksum。
+- Supplemental Linux Release workflow `28216822549` 成功，上传 AppImage、deb、rpm；Supplemental macOS Release workflow `28216824340` 成功，上传 unsigned universal `.app.zip`、universal updater tarball 和 `.tar.gz.sig`。最终 release 共有 12 个资产，`SHA256SUMS.txt` 覆盖除自身外的 11 个资产。
+- 发布前验证：`pnpm test:unit -- src/components/codex/CodexRouterWorkspacePage.test.ts`（21 个测试通过）、`pnpm typecheck`、`cargo check --manifest-path src-tauri/Cargo.toml`（仅既有 `commands/misc.rs` unused warnings）、`git diff --check`（仅 `Cargo.lock` LF/CRLF 提示）。发布后复核：`gh release view v3.16.3-22 --repo BigStrongSun/ccswitchmulti --json tagName,isDraft,isPrerelease,url,assets,publishedAt,targetCommitish`、下载 `SHA256SUMS.txt` 检查 11 条 checksum、`gh run view 28216822549` 和 `gh run view 28216824340` 均为 `status=completed, conclusion=success`。
+
 ## 2026-06-26 MultiRouter Model Refresh UI Stale Catalog Fix
 
 - 新版仍出现“加载模型列表卡住 / UI 没刷新”时，要区分两类问题：`v3.16.3-21` 已解决 `/models` 读取或保存事务不 settle 导致永久 loading；本次发现的剩余边界是刷新成功后 `nextProvider` 写入 DB/React Query，但当前 `CodexRouterWorkspacePage` 的 `modelSources` 仍可能来自父级旧 `providers` props，导致已打开的 `RouteCandidatePicker` 继续显示旧 catalog 或“未发现模型目录”。
