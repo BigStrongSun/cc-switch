@@ -24,6 +24,7 @@ const CODEX_MODELS_CACHE_BACKUP_FILENAME: &str = "models_cache.cc-switch-backup.
 const CC_SWITCH_CODEX_MODELS_CACHE_ETAG: &str = "cc-switch-model-catalog";
 const CODEX_MODEL_CATALOG_TEMPLATE_SLUG: &str = "gpt-5.5";
 const CODEX_OPENAI_MODEL_PROVIDER_ID: &str = "openai";
+const CODEX_PROXY_AUTH_PLACEHOLDER: &str = "PROXY_MANAGED";
 const CODEX_REASONING_EFFORTS: &[(&str, &str)] = &[
     ("low", "Fast responses with lighter reasoning"),
     (
@@ -422,9 +423,7 @@ fn codex_oauth_model_context_windows_from_live_auth() -> std::collections::HashM
     let resolved = std::thread::spawn(move || {
         tauri::async_runtime::block_on(async move {
             let manager = CodexOAuthManager::new(app_config_dir);
-            let Some(account_id) = manager.default_account_id().await else {
-                return None;
-            };
+            let account_id = manager.default_account_id().await?;
             let token = manager
                 .get_valid_token_for_account(&account_id)
                 .await
@@ -1755,6 +1754,64 @@ fn remove_active_custom_codex_model_provider_section(doc: &mut DocumentMut) {
     }
 }
 
+/// 判断一个 Codex provider 表是否仍携带本地接管占位 token。
+///
+/// 这类表通常来自 takeover 期间的 live `config.toml`。如果后续 restore
+/// 以这个 live 文件为底做合并，表内的 `PROXY_MANAGED` 不能继续留在恢复后的
+/// 第三方 provider 配置里。
+fn codex_provider_table_has_proxy_placeholder(item: &Item) -> bool {
+    item.as_table_like()
+        .and_then(|table| table.get("experimental_bearer_token"))
+        .and_then(|token| token.as_str())
+        == Some(CODEX_PROXY_AUTH_PLACEHOLDER)
+}
+
+/// 移除目标 provider 不再使用的 CC Switch 自有 provider 表。
+///
+/// 参数：
+/// - `live_doc`：当前 live `config.toml` 解析结果，可能仍处于 takeover 状态。
+/// - `provider_doc`：即将写回的目标 provider 配置。
+///
+/// 副作用：直接修改 `live_doc`，只清理 `custom`/`codex_model_router_v2` 这类
+/// CC Switch 生成表中的陈旧接管内容，保留用户其它 provider 表。
+fn remove_stale_cc_switch_model_provider_sections(
+    live_doc: &mut DocumentMut,
+    provider_doc: &DocumentMut,
+) {
+    let target_provider = active_codex_model_provider_id(provider_doc);
+    let should_remove_container = live_doc
+        .get_mut("model_providers")
+        .and_then(|item| item.as_table_like_mut())
+        .map(|providers| {
+            for provider_id in [
+                CC_SWITCH_CODEX_MODEL_PROVIDER_ID,
+                CC_SWITCH_CODEX_ROUTER_MODEL_PROVIDER_ID,
+            ] {
+                if target_provider
+                    .as_deref()
+                    .is_some_and(|target| target.eq_ignore_ascii_case(provider_id))
+                {
+                    continue;
+                }
+
+                let should_remove = providers.get(provider_id).is_some_and(|item| {
+                    provider_id == CC_SWITCH_CODEX_ROUTER_MODEL_PROVIDER_ID
+                        || codex_provider_table_has_proxy_placeholder(item)
+                });
+                if should_remove {
+                    providers.remove(provider_id);
+                }
+            }
+
+            providers.is_empty()
+        })
+        .unwrap_or(false);
+
+    if should_remove_container {
+        live_doc.as_table_mut().remove("model_providers");
+    }
+}
+
 // provider 未声明的私有字段不能沿用 live 里的旧值，否则 official 会残留 router。
 fn remove_codex_provider_owned_fields_missing_from_provider(
     live_doc: &mut DocumentMut,
@@ -1786,6 +1843,8 @@ fn remove_codex_provider_owned_fields_missing_from_provider(
     if provider_doc.get("experimental_bearer_token").is_none() {
         live_doc.as_table_mut().remove("experimental_bearer_token");
     }
+
+    remove_stale_cc_switch_model_provider_sections(live_doc, provider_doc);
 }
 
 // 空 official provider 配置表示回到 Codex 默认 provider，同时保留用户全局配置。
@@ -3031,6 +3090,72 @@ requires_openai_auth = true
         assert!(
             custom.get("experimental_bearer_token").is_none(),
             "restored provider table must drop takeover proxy token"
+        );
+        assert_eq!(
+            parsed
+                .get("desktop")
+                .and_then(|value| value.get("notifications-turn-mode"))
+                .and_then(|value| value.as_str()),
+            Some("always"),
+            "user-owned desktop settings should still be preserved"
+        );
+    }
+
+    #[test]
+    fn merge_provider_config_removes_stale_takeover_custom_section_for_different_provider() {
+        // 关闭 takeover 时，恢复备份会以仍处于接管态的 live config 为底合并。
+        // 如果目标 provider 不再使用 `custom`，旧表里的 PROXY_MANAGED 必须被清掉。
+        let live_config = r#"model_provider = "custom"
+model = "deepseek-chat"
+
+[model_providers.custom]
+name = "DeepSeek"
+base_url = "http://127.0.0.1:15721/v1"
+wire_api = "responses"
+requires_openai_auth = true
+experimental_bearer_token = "PROXY_MANAGED"
+supports_websockets = false
+
+[desktop]
+notifications-turn-mode = "always"
+"#;
+        let provider_config = r#"model_provider = "deepseek"
+model = "deepseek-chat"
+
+[model_providers.deepseek]
+name = "DeepSeek"
+base_url = "https://api.deepseek.com/v1"
+wire_api = "responses"
+"#;
+
+        let merged =
+            merge_codex_provider_config_texts(live_config, provider_config).expect("merge config");
+        let parsed: toml::Value = toml::from_str(&merged).expect("parse merged config");
+
+        assert_eq!(
+            parsed
+                .get("model_provider")
+                .and_then(|value| value.as_str()),
+            Some("deepseek")
+        );
+        assert!(
+            !merged.contains(CODEX_PROXY_AUTH_PLACEHOLDER),
+            "restored config must not keep takeover proxy token"
+        );
+        assert!(
+            parsed
+                .get("model_providers")
+                .and_then(|value| value.get("custom"))
+                .is_none(),
+            "stale cc-switch custom provider table should be removed"
+        );
+        assert_eq!(
+            parsed
+                .get("model_providers")
+                .and_then(|value| value.get("deepseek"))
+                .and_then(|value| value.get("base_url"))
+                .and_then(|value| value.as_str()),
+            Some("https://api.deepseek.com/v1")
         );
         assert_eq!(
             parsed

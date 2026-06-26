@@ -416,9 +416,7 @@ where
     ) -> Result<Value, String> {
         self.socket
             .send(Message::Text(
-                json!({ "id": id, "method": method, "params": params })
-                    .to_string()
-                    .into(),
+                json!({ "id": id, "method": method, "params": params }).to_string(),
             ))
             .await
             .map_err(|error| format!("failed to send CDP command {method}: {error}"))?;

@@ -3010,9 +3010,9 @@ fn should_preserve_exact_header_case(
 /// - `needs_transform`: 是否已经走了 Claude/Anthropic 转换管线。
 /// - `codex_responses_to_chat`: 是否已经被改写到 Chat Completions 上游。
 /// - `codex_responses_to_messages`: 是否已经被改写到 Messages 上游。
-/// 返回:
+///   返回:
 /// - `true` 表示需要在透传前补齐 ChatGPT Codex backend 的必填字段。
-/// 副作用:
+///   副作用:
 /// - 无。该函数只读入参，用来把修复范围限制在 official managed Codex OAuth。
 fn should_normalize_codex_oauth_responses_passthrough_body(
     app_type: &AppType,
@@ -3034,9 +3034,9 @@ fn should_normalize_codex_oauth_responses_passthrough_body(
 ///
 /// 参数:
 /// - `url`: 已拼接完成的上游 URL。
-/// 返回:
+///   返回:
 /// - `true` 表示 host/path 是 `chatgpt.com/backend-api/codex/responses` 系列。
-/// 副作用:
+///   副作用:
 /// - 无。解析失败时保守返回 `false`，避免影响普通 OpenAI/兼容厂商。
 fn is_chatgpt_codex_responses_upstream_url(url: &str) -> bool {
     let Ok(uri) = url.parse::<http::Uri>() else {

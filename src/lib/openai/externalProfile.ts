@@ -52,7 +52,8 @@ export function profileBackendKey(profile?: {
   providerId?: string | null;
   routeId?: string | null;
 }): string {
-  if (!profile?.backendType || !profile.appType || !profile.providerId) return "";
+  if (!profile?.backendType || !profile.appType || !profile.providerId)
+    return "";
   return [
     profile.backendType,
     profile.appType,
@@ -133,7 +134,8 @@ export function chooseDefaultBackendKey(
   return (
     available.find((option) => option.isManagedOAuth)?.key ??
     available.find(isCodexRouterProviderOption)?.key ??
-    available.find((option) => option.backendType === "codex_router_route")?.key ??
+    available.find((option) => option.backendType === "codex_router_route")
+      ?.key ??
     available[0]?.key ??
     options[0]?.key ??
     ""
@@ -221,10 +223,10 @@ export function describeBackendTarget(
     protocol: isRouterProvider
       ? "按第三方请求里的 model 自动命中 Codex 路由"
       : isRoute
-      ? "先按 Codex 路由解析，再转成 OpenAI v1 响应"
-      : option.isManagedOAuth
-        ? "转接 ChatGPT Codex Responses 后端"
-        : "按 OpenAI-compatible /chat/completions 转发",
+        ? "先按 Codex 路由解析，再转成 OpenAI v1 响应"
+        : option.isManagedOAuth
+          ? "转接 ChatGPT Codex Responses 后端"
+          : "按 OpenAI-compatible /chat/completions 转发",
     auth: option.isManagedOAuth
       ? "OAuth 留在 CC Switch 内部，不暴露给第三方 agent"
       : "使用该模型源保存的凭据",
@@ -243,7 +245,9 @@ export function describeBackendTarget(
 }
 
 /// 判断一个后端选项是否代表整套 Codex 多模型路由，而不是某一条单独 route。
-function isCodexRouterProviderOption(option: ExternalOpenAIAPIBackendOption): boolean {
+function isCodexRouterProviderOption(
+  option: ExternalOpenAIAPIBackendOption,
+): boolean {
   return (
     option.backendType === "provider" &&
     option.appType === "codex" &&

@@ -1431,7 +1431,7 @@ fn codex_router_log_diagnostics_from_text_at(
     let has_recent_request = recent_events
         .iter()
         .filter(|event| codex_router_log_event_is_recent(event, now, recent_window))
-        .any(|event| codex_router_log_is_request_event(event));
+        .any(codex_router_log_is_request_event);
     recent_events.truncate(30);
 
     CodexRouterLogDiagnostics {

@@ -112,7 +112,9 @@ function hasCodexRoutingConfig(provider: Provider): boolean {
 }
 
 // 从 Codex MultiRouter 子路由里提取 OpenAI OAuth 账号绑定，用于恢复 provider 卡片的额度显示。
-function resolveCodexRouteOauthMeta(provider: Provider): ProviderMeta | undefined {
+function resolveCodexRouteOauthMeta(
+  provider: Provider,
+): ProviderMeta | undefined {
   const routing = (provider.settingsConfig as Record<string, any>)
     ?.codexRouting;
   const routes = Array.isArray(routing?.routes) ? routing.routes : [];

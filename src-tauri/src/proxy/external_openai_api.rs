@@ -19,17 +19,12 @@ const PROFILE_SETTING_KEY: &str = "external_openai_api_profile_v1";
 pub const DEFAULT_EXTERNAL_OPENAI_API_ADDRESS: &str = "127.0.0.1";
 pub const DEFAULT_EXTERNAL_OPENAI_API_PORT: u16 = 15722;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ExternalOpenAiApiBackendType {
+    #[default]
     Provider,
     CodexRouterRoute,
-}
-
-impl Default for ExternalOpenAiApiBackendType {
-    fn default() -> Self {
-        Self::Provider
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

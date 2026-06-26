@@ -92,11 +92,11 @@ pub fn chat_completions_request_to_codex_responses(body: Value) -> Result<Value,
 ///
 /// 参数:
 /// - `request_body`: 本地代理收到或上游转换得到的 Responses JSON。
-/// 返回:
+///   返回:
 /// - 补齐 `instructions/input/store/stream/tools/parallel_tool_calls/include` 后的 JSON。
-/// 副作用:
+///   副作用:
 /// - 无。函数只转换传入的 JSON 值，不访问配置、网络或数据库。
-/// 边界:
+///   边界:
 /// - 调用方必须先确认这是 official managed Codex OAuth 透传路径；普通 OpenAI Responses、
 ///   Qwen/DeepSeek Chat 转换路径不应该调用该函数。
 pub(crate) fn normalize_codex_oauth_responses_request(request_body: Value) -> Value {
@@ -133,9 +133,9 @@ pub(crate) fn normalize_codex_oauth_responses_request(request_body: Value) -> Va
 ///
 /// 参数:
 /// - `body`: 正在构建的请求体对象。
-/// 返回:
+///   返回:
 /// - 无，直接修改 `body.input`。
-/// 副作用:
+///   副作用:
 /// - 无外部副作用；只修改内存中的 JSON 对象。
 fn normalize_codex_oauth_responses_input(body: &mut Map<String, Value>) {
     let input = match body.remove("input") {
@@ -153,9 +153,9 @@ fn normalize_codex_oauth_responses_input(body: &mut Map<String, Value>) {
 ///
 /// 参数:
 /// - `text`: 用户输入文本。
-/// 返回:
+///   返回:
 /// - `input` 数组值，内部包含一条 `type=message` 的 user 消息。
-/// 副作用:
+///   副作用:
 /// - 无。
 fn codex_oauth_input_text_message(text: String) -> Value {
     let mut content_part = Map::new();
@@ -177,9 +177,9 @@ fn codex_oauth_input_text_message(text: String) -> Value {
 ///
 /// 参数:
 /// - `body`: 正在构建的请求体对象。
-/// 返回:
+///   返回:
 /// - 无，缺失或空白时写入最小默认 system instructions。
-/// 副作用:
+///   副作用:
 /// - 无外部副作用；只修改内存中的 JSON 对象。
 fn ensure_codex_oauth_responses_instructions(body: &mut Map<String, Value>) {
     let has_non_empty_instructions = body
@@ -199,9 +199,9 @@ fn ensure_codex_oauth_responses_instructions(body: &mut Map<String, Value>) {
 ///
 /// 参数:
 /// - `body`: 正在构建的请求体对象。
-/// 返回:
+///   返回:
 /// - 无，直接修改或创建 `include` 数组。
-/// 副作用:
+///   副作用:
 /// - 无外部副作用；只修改内存中的 JSON 对象。
 fn ensure_codex_oauth_reasoning_include(body: &mut Map<String, Value>) {
     const REASONING_MARKER: &str = "reasoning.encrypted_content";
@@ -666,7 +666,7 @@ fn chat_tool_message_to_response_item(message: &Value) -> Value {
             .get("content")
             .and_then(|value| value.as_str())
             .map(canonicalize_json_string_if_parseable)
-            .unwrap_or_else(String::new)
+            .unwrap_or_default()
     })
 }
 

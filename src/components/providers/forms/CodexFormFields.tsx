@@ -194,7 +194,11 @@ function catalogRowsMatchModels(
   rows: Array<
     Pick<
       CodexCatalogRow,
-      "model" | "upstreamModel" | "upstream_model" | "displayName" | "contextWindow"
+      | "model"
+      | "upstreamModel"
+      | "upstream_model"
+      | "displayName"
+      | "contextWindow"
     >
   >,
   models: CodexCatalogModel[],
@@ -222,7 +226,10 @@ function mergeFetchedModelsIntoCatalogRows(
   } = {},
 ): CodexCatalogRow[] {
   const next = [...rows];
-  const rowByFetchedModel = new Map<string, { row: CodexCatalogRow; index: number }>();
+  const rowByFetchedModel = new Map<
+    string,
+    { row: CodexCatalogRow; index: number }
+  >();
   next.forEach((row, index) => {
     const upstreamModel = catalogRowUpstreamModel(row);
     if (upstreamModel) {
@@ -497,9 +504,9 @@ export function CodexFormFields({
             .map((model) => {
               const upstreamModel = model.id.trim();
               return (
-                mergedRows.find(
-                  (row) => catalogRowUpstreamModel(row) === upstreamModel,
-                )?.model.trim() ?? upstreamModel
+                mergedRows
+                  .find((row) => catalogRowUpstreamModel(row) === upstreamModel)
+                  ?.model.trim() ?? upstreamModel
               );
             })
             .filter((model): model is string => Boolean(model))
@@ -1520,16 +1527,21 @@ export function CodexFormFields({
                               model: event.target.value,
                             })
                           }
-                          placeholder={t("codexConfig.catalogModelPlaceholder", {
-                            defaultValue: "例如: gpt-5.5-thirdparty",
-                          })}
+                          placeholder={t(
+                            "codexConfig.catalogModelPlaceholder",
+                            {
+                              defaultValue: "例如: gpt-5.5-thirdparty",
+                            },
+                          )}
                           aria-label={t("codexConfig.catalogColumnModel", {
                             defaultValue: "候选模型名",
                           })}
                         />
                         <div className="flex gap-1">
                           <Input
-                            value={row.upstreamModel ?? row.upstream_model ?? ""}
+                            value={
+                              row.upstreamModel ?? row.upstream_model ?? ""
+                            }
                             onChange={(event) =>
                               handleUpdateCatalogRow(index, {
                                 upstreamModel: event.target.value,

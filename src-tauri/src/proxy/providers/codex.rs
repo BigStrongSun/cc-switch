@@ -804,7 +804,7 @@ fn build_codex_routed_provider(
 
     routed.settings_config = JsonValue::Object(settings);
 
-    let mut meta = routed.meta.clone().unwrap_or_else(ProviderMeta::default);
+    let mut meta = routed.meta.clone().unwrap_or_default();
     if let Some(wire_api) = codex_route_api_format(upstream, route) {
         meta.api_format = Some(wire_api.to_string());
     }

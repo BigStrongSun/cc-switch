@@ -797,8 +797,7 @@ fn build_codex_subagent_usage_stats_from_history(
         let effective_model = effective_model_sql("l");
 
         for session_id_chunk in session_ids.chunks(CODEX_SUBAGENT_USAGE_SESSION_CHUNK) {
-            let placeholders = std::iter::repeat("?")
-                .take(session_id_chunk.len())
+            let placeholders = std::iter::repeat_n("?", session_id_chunk.len())
                 .collect::<Vec<_>>()
                 .join(", ");
             let mut conditions = vec![

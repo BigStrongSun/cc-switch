@@ -98,9 +98,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     appId as ProviderFilter,
   );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [showCodexHistoryRepair, setShowCodexHistoryRepair] = useState(
-    () => appId === "codex",
-  );
+  const [showCodexHistoryRepair, setShowCodexHistoryRepair] = useState(false);
   const isCodexManager = appId === "codex";
 
   // 使用 FlexSearch 全文搜索
@@ -129,7 +127,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
   }, [filteredSessions, selectedKey]);
 
   useEffect(() => {
-    setShowCodexHistoryRepair(isCodexManager);
+    setShowCodexHistoryRepair(false);
   }, [isCodexManager]);
 
   const selectedSession = useMemo(() => {
