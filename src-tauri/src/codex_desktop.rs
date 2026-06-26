@@ -887,6 +887,7 @@ fn find_latest_windows_codex_executable() -> Option<PathBuf> {
 ///
 /// MSIX 包布局随版本变化过：有的版本直接在 `app/Codex.exe`，有的把可执行文件
 /// 放到 `app/resources`。只接受大写 `Codex.exe`，避免把 CLI launcher 当 Desktop。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn windows_codex_package_executable_candidates(package_root: &Path) -> Vec<PathBuf> {
     vec![
         package_root.join("app").join("Codex.exe"),
@@ -913,12 +914,8 @@ fn find_local_windows_codex_executable() -> Option<PathBuf> {
     None
 }
 
-#[cfg(not(target_os = "windows"))]
-fn find_local_windows_codex_executable() -> Option<PathBuf> {
-    None
-}
-
 /// 从 WindowsApps 包目录名解析版本号，供排序使用。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn version_tuple_from_package_name(name: &str) -> Vec<u32> {
     name.strip_prefix("OpenAI.Codex_")
         .and_then(|rest| rest.split_once('_').map(|(version, _)| version))

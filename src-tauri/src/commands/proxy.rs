@@ -1047,6 +1047,7 @@ fn parse_rfc3339_to_local(text: &str) -> Option<chrono::DateTime<chrono::Local>>
         .map(|datetime| datetime.with_timezone(&chrono::Local))
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct RawWindowsCodexProcess {
