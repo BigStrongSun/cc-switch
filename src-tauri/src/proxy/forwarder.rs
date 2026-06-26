@@ -5,6 +5,7 @@
 use super::hyper_client::ProxyResponse;
 use super::{
     body_filter::filter_private_params_with_whitelist,
+    content_encoding::{decompress_body, get_content_encoding},
     error::*,
     failover_switch::FailoverSwitchManager,
     json_canonical::{canonicalize_value, short_value_hash},
@@ -2363,7 +2364,20 @@ impl RequestForwarder {
             ))
         } else {
             let status_code = status.as_u16();
-            let body_text = String::from_utf8(response.bytes().await?.to_vec()).ok();
+            // 错误响应同样可能被上游压缩（content-encoding）。reqwest 未启用任何
+            // 自动解压 feature，这里拿到的是原始字节；不解压的话，压缩过的错误体会
+            // 在 from_utf8 处变成非 UTF-8 而被丢弃，隐藏掉上游的限流/鉴权等详情。
+            let encoding = get_content_encoding(response.headers());
+            let raw = response.bytes().await?;
+            let decoded = match encoding {
+                Some(encoding) => match decompress_body(&encoding, &raw) {
+                    Ok(Some(decompressed)) => decompressed,
+                    // 不支持的编码 / 解压失败：退回原始字节，尽量保留可读信息
+                    _ => raw.to_vec(),
+                },
+                None => raw.to_vec(),
+            };
+            let body_text = String::from_utf8(decoded).ok();
             if let Some(trace_id) = codex_trace_id.as_deref() {
                 super::codex_router_log::append_event(
                     "upstream_error",
