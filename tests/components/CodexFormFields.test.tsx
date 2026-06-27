@@ -59,6 +59,8 @@ function renderRoutingHarness(
         onEndpointModalToggle={vi.fn()}
         autoSelect={false}
         onAutoSelectChange={vi.fn()}
+        takeoverEnabled={true}
+        onTakeoverEnabledChange={vi.fn()}
         apiFormat="openai_chat"
         onApiFormatChange={vi.fn()}
         codexRouting={routing}
@@ -66,6 +68,10 @@ function renderRoutingHarness(
         speedTestEndpoints={[]}
         customUserAgent=""
         onCustomUserAgentChange={vi.fn()}
+        localProxyHeadersOverride=""
+        onLocalProxyHeadersOverrideChange={vi.fn()}
+        localProxyBodyOverride=""
+        onLocalProxyBodyOverrideChange={vi.fn()}
       />
     );
   }
@@ -109,6 +115,8 @@ function renderCatalogHarness(initialCatalog: CodexCatalogModel[]) {
         onEndpointModalToggle={vi.fn()}
         autoSelect={false}
         onAutoSelectChange={vi.fn()}
+        takeoverEnabled={true}
+        onTakeoverEnabledChange={vi.fn()}
         apiFormat="openai_chat"
         onApiFormatChange={vi.fn()}
         catalogModels={catalog}
@@ -119,6 +127,10 @@ function renderCatalogHarness(initialCatalog: CodexCatalogModel[]) {
         speedTestEndpoints={[]}
         customUserAgent=""
         onCustomUserAgentChange={vi.fn()}
+        localProxyHeadersOverride=""
+        onLocalProxyHeadersOverrideChange={vi.fn()}
+        localProxyBodyOverride=""
+        onLocalProxyBodyOverrideChange={vi.fn()}
       />
     );
   }
