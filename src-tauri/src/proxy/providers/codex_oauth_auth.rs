@@ -231,11 +231,21 @@ pub struct CodexOAuthManager {
     /// 过期条目会在 start_device_flow 时被清理，防止放弃的登录流程导致无界增长
     pending_device_codes: Arc<RwLock<HashMap<String, PendingDeviceCode>>>,
     http_client: Client,
+    /// OAuth token 端点；生产环境固定为 OpenAI，测试中可替换为本地假服务。
+    oauth_token_url: String,
     storage_path: PathBuf,
 }
 
 impl CodexOAuthManager {
     pub fn new(data_dir: PathBuf) -> Self {
+        Self::new_with_oauth_token_url(data_dir, OAUTH_TOKEN_URL.to_string())
+    }
+
+    /// 创建 Codex OAuth 管理器，并允许测试注入 token 端点。
+    ///
+    /// 生产代码通过 `new` 使用官方端点；测试代码用本地 HTTP 服务精确模拟
+    /// refresh token 失效、轮换和临时网络错误，避免依赖真实 OpenAI。
+    fn new_with_oauth_token_url(data_dir: PathBuf, oauth_token_url: String) -> Self {
         let storage_path = data_dir.join("codex_oauth_auth.json");
 
         let manager = Self {
@@ -245,6 +255,7 @@ impl CodexOAuthManager {
             refresh_locks: Arc::new(RwLock::new(HashMap::new())),
             pending_device_codes: Arc::new(RwLock::new(HashMap::new())),
             http_client: Client::new(),
+            oauth_token_url,
             storage_path,
         };
 
@@ -433,7 +444,7 @@ impl CodexOAuthManager {
     ) -> Result<OAuthTokenResponse, CodexOAuthError> {
         let response = self
             .http_client
-            .post(OAUTH_TOKEN_URL)
+            .post(&self.oauth_token_url)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .header("User-Agent", CODEX_USER_AGENT)
             .form(&[
@@ -467,7 +478,7 @@ impl CodexOAuthManager {
     ) -> Result<OAuthTokenResponse, CodexOAuthError> {
         let response = self
             .http_client
-            .post(OAUTH_TOKEN_URL)
+            .post(&self.oauth_token_url)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .header("User-Agent", CODEX_USER_AGENT)
             .form(&[
@@ -537,7 +548,15 @@ impl CodexOAuthManager {
                 .ok_or_else(|| CodexOAuthError::AccountNotFound(account_id.to_string()))?
         };
 
-        let new_tokens = self.refresh_with_token(&refresh_token).await?;
+        let new_tokens = match self.refresh_with_token(&refresh_token).await {
+            Ok(tokens) => tokens,
+            Err(CodexOAuthError::RefreshTokenInvalid) => {
+                self.remove_invalid_account_after_refresh_failure(account_id)
+                    .await?;
+                return Err(CodexOAuthError::RefreshTokenInvalid);
+            }
+            Err(e) => return Err(e),
+        };
 
         // 如果服务端返回了新的 refresh_token，更新存储
         if let Some(new_refresh) = new_tokens.refresh_token.clone() {
@@ -677,6 +696,7 @@ impl CodexOAuthManager {
 
     /// 获取认证状态摘要（与 Copilot 的格式保持一致，便于复用前端）
     pub async fn get_status(&self) -> CodexOAuthStatus {
+        let auth_error = self.validate_status_default_account().await;
         let accounts_map = self.accounts.read().await.clone();
         let default_id = self.resolve_default_account_id().await;
         let account_list = Self::sorted_accounts(&accounts_map, default_id.as_deref());
@@ -692,10 +712,56 @@ impl CodexOAuthManager {
             default_account_id: default_id,
             authenticated,
             username,
+            auth_error,
         }
     }
 
     // ==================== 内部方法 ====================
+
+    /// 状态查询时验证当前默认账号是否还能刷新 access token。
+    ///
+    /// 休眠/唤醒或长时间未使用后，内存 access token 通常已经过期，
+    /// 旧实现只看磁盘里是否存在 refresh token，导致 UI 仍显示已登录，
+    /// 真实请求才暴露 401。这里仅在服务端明确返回 refresh token 失效时
+    /// 清理账号；网络错误、解析错误等保留账号，避免短暂断网误退出登录。
+    async fn validate_status_default_account(&self) -> Option<String> {
+        let max_attempts = self.accounts.read().await.len();
+
+        for _ in 0..max_attempts {
+            let Some(account_id) = self.resolve_default_account_id().await else {
+                return None;
+            };
+
+            match self.get_valid_token_for_account(&account_id).await {
+                Ok(_) => return None,
+                Err(CodexOAuthError::RefreshTokenInvalid) => {
+                    log::warn!(
+                        "[CodexOAuth] 状态检查发现 refresh_token 已失效，已移除账号: {account_id}"
+                    );
+                    continue;
+                }
+                Err(CodexOAuthError::AccountNotFound(_)) => continue,
+                Err(e) => {
+                    log::warn!("[CodexOAuth] 状态检查无法验证账号 {account_id}: {e}");
+                    return Some(format!("认证状态验证失败：{e}"));
+                }
+            }
+        }
+
+        None
+    }
+
+    /// 在刷新明确失败时清理对应账号和内存 token。
+    ///
+    /// 这个路径只处理 `RefreshTokenInvalid`，用于把“本地有账号记录”
+    /// 与“服务端仍接受 refresh token”拆开，避免后续状态查询继续误报已登录。
+    async fn remove_invalid_account_after_refresh_failure(
+        &self,
+        account_id: &str,
+    ) -> Result<(), CodexOAuthError> {
+        log::warn!("[CodexOAuth] refresh_token 已失效，移除账号: {account_id}");
+        self.remove_account(account_id).await
+    }
 
     async fn add_account_internal(
         &self,
@@ -897,6 +963,8 @@ pub struct CodexOAuthStatus {
     pub default_account_id: Option<String>,
     pub authenticated: bool,
     pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_error: Option<String>,
 }
 
 // ==================== 工具函数 ====================
@@ -975,6 +1043,7 @@ fn extract_identity_from_tokens(tokens: &OAuthTokenResponse) -> (Option<String>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn test_parse_interval_number() {
@@ -1129,5 +1198,107 @@ mod tests {
         let accounts = manager.list_accounts().await;
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].id, "acc-456");
+    }
+
+    /// 启动一次性 OAuth token 假端点。
+    ///
+    /// 每个测试只需要接收一次 refresh 请求；返回 URL 后后台任务会读取请求并写回指定状态码和响应体。
+    async fn spawn_single_refresh_endpoint(status: u16, body: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test oauth endpoint");
+        let addr = listener
+            .local_addr()
+            .expect("read test oauth endpoint addr");
+
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept refresh request");
+            let mut buffer = [0_u8; 4096];
+            let _ = socket
+                .read(&mut buffer)
+                .await
+                .expect("read refresh request");
+            let status_text = match status {
+                200 => "OK",
+                401 => "Unauthorized",
+                403 => "Forbidden",
+                _ => "Test",
+            };
+            let response = format!(
+                "HTTP/1.1 {status} {status_text}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write refresh response");
+        });
+
+        format!("http://{addr}/oauth/token")
+    }
+
+    #[tokio::test]
+    async fn status_check_removes_account_when_refresh_token_is_invalid() {
+        let temp = tempfile::tempdir().unwrap();
+        let token_url = spawn_single_refresh_endpoint(401, r#"{"error":"invalid_grant"}"#).await;
+        let manager =
+            CodexOAuthManager::new_with_oauth_token_url(temp.path().to_path_buf(), token_url);
+
+        manager
+            .add_account_internal(
+                "acc-expired".to_string(),
+                "rt-expired".to_string(),
+                Some("expired@example.com".to_string()),
+            )
+            .await
+            .unwrap();
+
+        let status = manager.get_status().await;
+
+        assert!(!status.authenticated);
+        assert!(status.accounts.is_empty());
+        assert!(status.default_account_id.is_none());
+        let persisted = std::fs::read_to_string(&manager.storage_path)
+            .expect("empty store should be persisted after removing invalid account");
+        assert!(persisted.contains(r#""accounts": {}"#));
+    }
+
+    #[tokio::test]
+    async fn status_check_refreshes_expired_default_account_when_token_is_valid() {
+        let temp = tempfile::tempdir().unwrap();
+        let token_url = spawn_single_refresh_endpoint(
+            200,
+            r#"{"access_token":"fresh-access","refresh_token":"fresh-refresh","expires_in":3600}"#,
+        )
+        .await;
+        let manager =
+            CodexOAuthManager::new_with_oauth_token_url(temp.path().to_path_buf(), token_url);
+
+        manager
+            .add_account_internal(
+                "acc-valid".to_string(),
+                "old-refresh".to_string(),
+                Some("valid@example.com".to_string()),
+            )
+            .await
+            .unwrap();
+
+        let status = manager.get_status().await;
+        let token = manager
+            .get_valid_token_for_account("acc-valid")
+            .await
+            .unwrap();
+
+        assert!(status.authenticated);
+        assert_eq!(status.accounts.len(), 1);
+        assert_eq!(token, "fresh-access");
+
+        let accounts = manager.accounts.read().await;
+        assert_eq!(
+            accounts
+                .get("acc-valid")
+                .map(|account| account.refresh_token.as_str()),
+            Some("fresh-refresh")
+        );
     }
 }

@@ -57,6 +57,7 @@ export const CodexOAuthSection: React.FC<CodexOAuthSectionProps> = ({
     accounts,
     defaultAccountId,
     hasAnyAccount,
+    migrationError,
     pollingState,
     deviceCode,
     error,
@@ -109,6 +110,16 @@ export const CodexOAuthSection: React.FC<CodexOAuthSectionProps> = ({
             : t("codexOauth.notAuthenticated", "未认证")}
         </Badge>
       </div>
+
+      {/* 状态验证失败提示；通常是睡眠唤醒后的临时网络问题，明确失效会被后端清理为未认证 */}
+      {migrationError && (
+        <p className="text-sm text-amber-600 dark:text-amber-400">
+          {t("codexOauth.statusVerificationFailed", {
+            error: migrationError,
+            defaultValue: migrationError,
+          })}
+        </p>
+      )}
 
       {/* 账号选择器 */}
       {hasAnyAccount && onAccountSelect && (

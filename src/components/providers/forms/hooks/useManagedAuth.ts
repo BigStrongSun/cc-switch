@@ -211,12 +211,16 @@ export function useManagedAuth(
   );
 
   const accounts = authStatus?.accounts ?? [];
+  // 账号列表只表示本地仍有记录，authenticated 才表示后端认为该认证状态可用；
+  // Codex OAuth 在 refresh token 明确失效时会清理账号或降级状态，避免 UI 误报已登录。
+  const hasUsableAccount =
+    (authStatus?.authenticated ?? false) && accounts.length > 0;
 
   return {
     authStatus,
     isLoadingStatus,
     accounts,
-    hasAnyAccount: accounts.length > 0,
+    hasAnyAccount: hasUsableAccount,
     isAuthenticated: authStatus?.authenticated ?? false,
     defaultAccountId: authStatus?.default_account_id ?? null,
     migrationError: authStatus?.migration_error ?? null,

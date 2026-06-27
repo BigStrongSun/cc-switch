@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-06-28 Codex OAuth Sleep Wake Refresh Invalid Status Fix
+
+- 休眠/唤醒后 Codex OAuth 认证页误报已登录的根因在 `src-tauri/src/proxy/providers/codex_oauth_auth.rs::get_status()`：旧逻辑只看 `codex_oauth_auth.json` 里是否有本地账号记录，把 `!accounts.is_empty()` 当作 `authenticated`，没有验证 refresh token 是否仍被 OpenAI 接受。真实请求路径 `get_valid_token_for_account()` 刷新失败时才返回 `RefreshTokenInvalid`，所以 UI 会先显示绿色已登录，下一次请求才暴露 401。
+- 修复边界：Codex OAuth 状态查询会验证默认账号；如果内存 access token 已过期/不存在，会触发 refresh。只有 OpenAI token 端点明确返回 401/403 映射为 `RefreshTokenInvalid` 时才移除失效账号并让状态回到未认证；网络错误、解析错误等临时故障只通过状态错误提示暴露，不清空账号，避免睡醒后短暂断网误退出。
+- 前端 `useManagedAuth` 的 `hasAnyAccount` 不能只等于 `accounts.length > 0`，应受后端 `authenticated` 约束。Codex OAuth 本地账号记录和真实可用认证态必须分开看；以后不要再用“本地有账号”直接驱动绿色认证状态或保存校验。
+- 回归测试落点：`codex_oauth_auth.rs` 用可注入 OAuth token URL 的一次性本地假端点覆盖两条路径：401 invalid refresh 会删除账号并返回未认证；200 refresh 会缓存新 access token 并轮换 refresh token。验证命令优先跑 `cargo test --manifest-path src-tauri\Cargo.toml status_check_ --lib`。
+
 ## 2026-06-27 Logging And Frequent Exit Diagnostics Inventory
 
 - 程序已有三类本地日志：通用运行日志由 `tauri-plugin-log` 写到 `<app_config_dir>/logs/cc-switch.log`（默认 `~/.cc-switch/logs/cc-switch.log`），panic hook 追加写 `<app_config_dir>/crash.log`，Codex MultiRouter 诊断事件写 `<app_config_dir>/logs/codex-router.log`。默认 app config 目录仍是用户家目录下 `.cc-switch`，但启动时会先读取 Store 里的 app_config_dir 覆盖。
