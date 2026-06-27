@@ -13,6 +13,7 @@ import {
   buildModelCatalogForRoutes,
   CodexRouterWorkspacePage,
   createDraftRoutingPlan,
+  dedupeCodexRoutesBySemanticProvider,
   isRoutingPlan,
   mergeRoutePickerDraftIds,
   normalizeCodexRouteForSave,
@@ -871,6 +872,47 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
     expect(routing?.routes?.[1].match?.prefixes).toEqual(["deepseek-"]);
   });
 
+  it("keeps legacy provider references and dedupes equivalent route candidates", () => {
+    const deepseek: Provider = {
+      id: "deepseek",
+      name: "DeepSeek",
+      category: "custom",
+      settingsConfig: {
+        modelCatalog: {
+          models: [{ model: "deepseek-v4-flash" }],
+        },
+      },
+    };
+    const plan: Provider = {
+      id: "codex-multirouter",
+      name: "Legacy Router",
+      category: "custom",
+      settingsConfig: {
+        codexRouting: [
+          {
+            id: "legacy-deepseek",
+            label: "DeepSeek",
+            provider: "deepseek",
+            models: ["deepseek-v4-flash"],
+          },
+          {
+            id: "router-deepseek",
+            label: "DeepSeek",
+            targetProviderId: "deepseek",
+            match: { models: ["deepseek-v4-flash"] },
+          },
+        ],
+      },
+    };
+
+    const routes = readCodexRouting(plan)?.routes ?? [];
+    const deduped = dedupeCodexRoutesBySemanticProvider(routes, [deepseek]);
+
+    expect(routes[0].targetProviderId).toBe("deepseek");
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0].id).toBe("legacy-deepseek");
+  });
+
   it("normalizes selected router candidates into visible routes and catalog models", () => {
     const qwen: Provider = {
       id: "codex-qwen",
@@ -972,6 +1014,76 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
       "qwen3.6",
       "deepseek-v4-flash",
     ]);
+  });
+
+  it("adds and enables a new provider candidate without using select-all", async () => {
+    const openai: Provider = {
+      id: "codex-openai",
+      name: "OpenAI Official",
+      category: "custom",
+      settingsConfig: {
+        modelCatalog: { models: [{ model: "gpt-5.5" }] },
+      },
+    };
+    const qwen: Provider = {
+      id: "codex-qwen-local",
+      name: "Qwen Local vLLM",
+      category: "custom",
+      settingsConfig: {
+        modelCatalog: { models: [{ model: "qwen3.6" }] },
+      },
+    };
+    const plan = createDraftRoutingPlan([openai, qwen], [openai, qwen]);
+    const openaiRoute = normalizeCodexRouteForSave(
+      {
+        label: openai.name,
+        targetProviderId: openai.id,
+        match: { models: ["gpt-5.5"], prefixes: ["gpt"] },
+      },
+      0,
+      new Set<string>(),
+    );
+    const routedPlan: Provider = {
+      ...plan,
+      settingsConfig: {
+        ...plan.settingsConfig,
+        codexRouting: {
+          enabled: true,
+          routes: [openaiRoute],
+        },
+      },
+    };
+
+    renderWorkspace(
+      React.createElement(CodexRouterWorkspacePage, {
+        providers: [openai, qwen, routedPlan],
+        isProxyRunning: true,
+        isCodexTakeoverActive: true,
+        activeProviderId: routedPlan.id,
+        initialProviderId: routedPlan.id,
+        initialTab: "routes",
+        onEditProvider: vi.fn(),
+        onDeletePlan: vi.fn(),
+        onCreateProvider: vi.fn(),
+      }),
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "编辑匹配规则" }));
+    await user.click(screen.getByRole("button", { name: "启用" }));
+    await user.click(screen.getByRole("button", { name: "保存规则" }));
+
+    await waitFor(() => expect(providersApi.update).toHaveBeenCalled());
+    const updateCalls = vi.mocked(providersApi.update).mock.calls;
+    const savedPlan = updateCalls[updateCalls.length - 1]?.[0];
+    const savedRoutes = readCodexRouting(savedPlan as Provider)?.routes ?? [];
+    const qwenRoute = savedRoutes.find(
+      (route) => route.targetProviderId === qwen.id,
+    );
+
+    expect(savedRoutes).toHaveLength(2);
+    expect(qwenRoute?.enabled).toBe(true);
+    expect(qwenRoute?.match?.models).toContain("qwen3.6");
   });
 
   it("rebuilds route catalog from current targets instead of keeping stale fallback models", () => {

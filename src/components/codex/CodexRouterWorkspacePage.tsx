@@ -197,6 +197,101 @@ type RouteCandidate = {
   matchPrefixes: string[];
 };
 
+/// 将用于人眼识别的 route/provider 文本规整成稳定 key，供旧配置和新 provider 做语义匹配。
+function normalizedRouteIdentityText(value?: string | null): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+/// 收集 provider 可暴露的模型集合；旧 inline route 没有 targetProviderId 时用它判断是否与新增 provider 等价。
+function providerRouteModelIdentitySet(provider: Provider): Set<string> {
+  return new Set(
+    [
+      ...readCodexModelCatalog(provider).models.map((model) => model.model),
+      ...collectProviderModelIds(provider),
+      ...fallbackCatalogDraftForProvider(provider).map((model) => model.model),
+      ...inferProviderPrefixes(provider, collectProviderModelIds(provider)),
+    ]
+      .map(normalizedRouteIdentityText)
+      .filter(Boolean),
+  );
+}
+
+/// 旧版 route 可能只保存 label/match/upstream，没有 targetProviderId；这里用名称和模型交集找回对应模型源。
+function findSemanticRouteProvider(
+  route: CodexRoute,
+  modelSources: Provider[],
+): Provider | undefined {
+  const targetProviderId = routeTargetProviderId(route);
+  if (targetProviderId) {
+    return modelSources.find((source) => source.id === targetProviderId);
+  }
+
+  const routeNames = [
+    route.label,
+    route.id,
+    route.upstream?.provider,
+    route.upstream?.providerId,
+    route.upstream?.provider_id,
+  ]
+    .map(normalizedRouteIdentityText)
+    .filter(Boolean);
+  const routeModels = [
+    ...(route.match?.models ?? []),
+    ...(route.match?.prefixes ?? []),
+  ]
+    .map(normalizedRouteIdentityText)
+    .filter(Boolean);
+
+  return modelSources.find((source) => {
+    const providerNames = [source.id, source.name, source.meta?.providerType]
+      .map((value) =>
+        typeof value === "string" ? normalizedRouteIdentityText(value) : "",
+      )
+      .filter(Boolean);
+    if (
+      routeNames.some((name) => providerNames.includes(name)) ||
+      providerNames.some((name) => routeNames.includes(name))
+    ) {
+      return true;
+    }
+
+    const providerModels = providerRouteModelIdentitySet(source);
+    return routeModels.some((model) => providerModels.has(model));
+  });
+}
+
+/// route 去重以真实目标 provider 优先；没有目标 provider 的旧 route 则退回到语义匹配出的 provider。
+function routeSemanticProviderId(
+  route: CodexRoute,
+  modelSources: Provider[],
+): string | undefined {
+  return (
+    routeTargetProviderId(route) ??
+    findSemanticRouteProvider(route, modelSources)?.id
+  );
+}
+
+/// 已保存 route 中可能同时存在“旧 inline 规则”和“复用供应商配置规则”；展示和保存前都要归并。
+export function dedupeCodexRoutesBySemanticProvider(
+  routes: CodexRoute[],
+  modelSources: Provider[],
+): CodexRoute[] {
+  const seenProviderIds = new Set<string>();
+  const result: CodexRoute[] = [];
+  for (const route of routes) {
+    const semanticProviderId = routeSemanticProviderId(route, modelSources);
+    if (semanticProviderId) {
+      if (seenProviderIds.has(semanticProviderId)) continue;
+      seenProviderIds.add(semanticProviderId);
+    }
+    result.push(route);
+  }
+  return result;
+}
+
 type MultiRouterSettingsDraft = {
   name: string;
   notes?: string;
@@ -656,7 +751,9 @@ function normalizeLegacyCodexRoutingRoute(
       upstream?.targetProviderId ??
       upstream?.target_provider_id ??
       upstream?.providerId ??
-      upstream?.provider_id,
+      upstream?.provider_id ??
+      route?.provider ??
+      upstream?.provider,
     match: {
       models,
       prefixes: prefixes.filter(
@@ -1104,7 +1201,10 @@ function buildRouteCandidates(
   const usedIds = new Set<string>();
   const candidates: RouteCandidate[] = [];
   const existingRoutes = selectedPlan
-    ? (readCodexRouting(selectedPlan)?.routes ?? [])
+    ? dedupeCodexRoutesBySemanticProvider(
+        readCodexRouting(selectedPlan)?.routes ?? [],
+        modelSources,
+      )
     : [];
 
   for (const route of existingRoutes) {
@@ -1114,9 +1214,11 @@ function buildRouteCandidates(
       usedIds,
     );
     const normalizedRoute: CodexRoute = { ...route, id };
-    const provider = targetProviderId
-      ? modelSources.find((source) => source.id === targetProviderId)
-      : undefined;
+    const provider =
+      (targetProviderId
+        ? modelSources.find((source) => source.id === targetProviderId)
+        : undefined) ??
+      findSemanticRouteProvider(normalizedRoute, modelSources);
     const routeWithInferredMatch = enrichRouteMatchFromProvider(
       normalizedRoute,
       provider,
@@ -1135,7 +1237,10 @@ function buildRouteCandidates(
 
   const existingProviderIds = new Set(
     candidates
-      .map((candidate) => routeTargetProviderId(candidate.route))
+      .map(
+        (candidate) =>
+          candidate.provider?.id ?? routeTargetProviderId(candidate.route),
+      )
       .filter((id): id is string => Boolean(id)),
   );
   for (const provider of modelSources) {
@@ -2132,7 +2237,10 @@ export function CodexRouterWorkspacePage({
   ]);
 
   const routeEntries = routingPlans.flatMap((provider) =>
-    (readCodexRouting(provider)?.routes ?? []).map((route, index) => ({
+    dedupeCodexRoutesBySemanticProvider(
+      readCodexRouting(provider)?.routes ?? [],
+      modelSources,
+    ).map((route, index) => ({
       provider,
       route,
       index,
@@ -2313,8 +2421,11 @@ export function CodexRouterWorkspacePage({
   async function handleSaveRoutingRoutes(plan: Provider, routes: CodexRoute[]) {
     const currentRouting = readCodexRouting(plan) ?? {};
     const usedRouteIds = new Set<string>();
-    const normalizedRoutes = routes.map((route, index) =>
-      normalizeCodexRouteForSave(route, index, usedRouteIds),
+    const normalizedRoutes = dedupeCodexRoutesBySemanticProvider(
+      routes.map((route, index) =>
+        normalizeCodexRouteForSave(route, index, usedRouteIds),
+      ),
+      modelSources,
     );
     const enabledRouteIds = normalizedRoutes
       .filter((route) => route.enabled !== false)
@@ -3936,8 +4047,19 @@ function RouteCandidatePicker({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => toggleSetValue(setEnabledIds, candidate.id)}
-                  disabled={!checked || isSaving}
+                  onClick={() => {
+                    if (!checked) {
+                      setSelectedIds(
+                        (current) => new Set([...current, candidate.id]),
+                      );
+                      setEnabledIds(
+                        (current) => new Set([...current, candidate.id]),
+                      );
+                      return;
+                    }
+                    toggleSetValue(setEnabledIds, candidate.id);
+                  }}
+                  disabled={isSaving}
                   className={cn(
                     "h-8 min-w-[78px] px-2",
                     enabled
@@ -3945,7 +4067,7 @@ function RouteCandidatePicker({
                       : "border-amber-300 text-amber-700 dark:border-amber-500/50 dark:text-amber-100",
                   )}
                 >
-                  {enabled ? "已启用" : "已停用"}
+                  {!checked ? "启用" : enabled ? "已启用" : "已停用"}
                 </Button>
               </div>
               <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
