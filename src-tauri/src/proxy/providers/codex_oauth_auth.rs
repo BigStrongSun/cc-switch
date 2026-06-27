@@ -187,6 +187,12 @@ struct CodexAccountData {
     pub email: Option<String>,
     /// Refresh Token（持久化）
     pub refresh_token: String,
+    /// 最近一次可用的 access_token；用于重启/睡眠恢复后减少 refresh_token 消耗
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+    /// access_token 的过期时间戳（毫秒）；缺失或即将过期时必须重新 refresh
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token_expires_at_ms: Option<i64>,
     /// 认证时间戳（秒）
     pub authenticated_at: i64,
 }
@@ -417,20 +423,29 @@ impl CodexOAuthManager {
             CodexOAuthError::ParseError("无法从 token 中提取 account_id".to_string())
         })?;
 
-        // 缓存 access_token
+        let expires_at_ms = compute_expires_at_ms(tokens.expires_in);
+
+        // 缓存 access_token，并随账号记录持久化一份短期 token，
+        // 避免应用重启或睡眠恢复后在 access token 仍有效时立刻消耗 refresh token。
         {
             let mut tokens_cache = self.access_tokens.write().await;
             tokens_cache.insert(
                 account_id.clone(),
                 CachedAccessToken {
                     token: tokens.access_token.clone(),
-                    expires_at_ms: compute_expires_at_ms(tokens.expires_in),
+                    expires_at_ms,
                 },
             );
         }
 
         let account = self
-            .add_account_internal(account_id, refresh_token, email)
+            .add_account_internal(
+                account_id,
+                refresh_token,
+                email,
+                Some(tokens.access_token),
+                Some(expires_at_ms),
+            )
             .await?;
 
         Ok(Some(account))
@@ -508,6 +523,47 @@ impl CodexOAuthManager {
             .map_err(|e| CodexOAuthError::ParseError(e.to_string()))
     }
 
+    /// 尝试从持久化账号记录恢复仍有效的 access_token。
+    ///
+    /// refresh_token 才是长期凭据；access_token 只是短期缓存。这里必须检查
+    /// 过期时间和刷新缓冲，避免把即将过期的 token 重新放回热路径。
+    async fn load_persisted_access_token(&self, account_id: &str) -> Option<String> {
+        let persisted = {
+            let accounts = self.accounts.read().await;
+            accounts.get(account_id).and_then(|account| {
+                let token = account.access_token.clone()?;
+                let expires_at_ms = account.access_token_expires_at_ms?;
+                Some(CachedAccessToken {
+                    token,
+                    expires_at_ms,
+                })
+            })
+        }?;
+
+        if persisted.is_expiring_soon() {
+            return None;
+        }
+
+        {
+            let mut tokens = self.access_tokens.write().await;
+            tokens.insert(account_id.to_string(), persisted.clone());
+        }
+
+        Some(persisted.token)
+    }
+
+    /// 获取指定账号的 refresh_token。
+    ///
+    /// 读取逻辑独立出来是为了让 access_token 持久缓存与 refresh fallback 的
+    /// 顺序更清晰：先内存、再磁盘短期 token、最后才消耗 refresh token。
+    async fn persisted_refresh_token(&self, account_id: &str) -> Result<String, CodexOAuthError> {
+        let accounts = self.accounts.read().await;
+        accounts
+            .get(account_id)
+            .map(|a| a.refresh_token.clone())
+            .ok_or_else(|| CodexOAuthError::AccountNotFound(account_id.to_string()))
+    }
+
     // ==================== Token 获取（含自动刷新） ====================
 
     /// 获取指定账号的有效 access_token（必要时自动刷新）
@@ -525,6 +581,10 @@ impl CodexOAuthManager {
             }
         }
 
+        if let Some(token) = self.load_persisted_access_token(account_id).await {
+            return Ok(token);
+        }
+
         log::info!("[CodexOAuth] 账号 {account_id} 的 access_token 需要刷新");
 
         let refresh_lock = self.get_refresh_lock(account_id).await;
@@ -540,13 +600,11 @@ impl CodexOAuthManager {
             }
         }
 
-        let refresh_token = {
-            let accounts = self.accounts.read().await;
-            accounts
-                .get(account_id)
-                .map(|a| a.refresh_token.clone())
-                .ok_or_else(|| CodexOAuthError::AccountNotFound(account_id.to_string()))?
-        };
+        if let Some(token) = self.load_persisted_access_token(account_id).await {
+            return Ok(token);
+        }
+
+        let refresh_token = self.persisted_refresh_token(account_id).await?;
 
         let new_tokens = match self.refresh_with_token(&refresh_token).await {
             Ok(tokens) => tokens,
@@ -558,20 +616,25 @@ impl CodexOAuthManager {
             Err(e) => return Err(e),
         };
 
-        // 如果服务端返回了新的 refresh_token，更新存储
-        if let Some(new_refresh) = new_tokens.refresh_token.clone() {
-            if new_refresh != refresh_token {
-                let mut accounts = self.accounts.write().await;
-                if let Some(account) = accounts.get_mut(account_id) {
-                    account.refresh_token = new_refresh;
-                }
-                drop(accounts);
-                self.save_to_disk().await?;
-            }
-        }
-
         let access_token = new_tokens.access_token.clone();
         let expires_at_ms = compute_expires_at_ms(new_tokens.expires_in);
+
+        // refresh 成功后同时持久化轮换后的 refresh_token 与短期 access_token。
+        // 这样状态查询、应用重启和短睡眠恢复都优先复用未过期 access_token，
+        // 减少 refresh_token 被频繁使用或并发轮换的机会。
+        {
+            let mut accounts = self.accounts.write().await;
+            if let Some(account) = accounts.get_mut(account_id) {
+                if let Some(new_refresh) = new_tokens.refresh_token.clone() {
+                    if new_refresh != refresh_token {
+                        account.refresh_token = new_refresh;
+                    }
+                }
+                account.access_token = Some(access_token.clone());
+                account.access_token_expires_at_ms = Some(expires_at_ms);
+            }
+        }
+        self.save_to_disk().await?;
 
         {
             let mut tokens = self.access_tokens.write().await;
@@ -768,6 +831,8 @@ impl CodexOAuthManager {
         account_id: String,
         refresh_token: String,
         email: Option<String>,
+        access_token: Option<String>,
+        access_token_expires_at_ms: Option<i64>,
     ) -> Result<GitHubAccount, CodexOAuthError> {
         let now = chrono::Utc::now().timestamp();
 
@@ -775,6 +840,8 @@ impl CodexOAuthManager {
             account_id: account_id.clone(),
             email,
             refresh_token,
+            access_token,
+            access_token_expires_at_ms,
             authenticated_at: now,
         };
 
@@ -1160,6 +1227,8 @@ mod tests {
                     "acc-123".to_string(),
                     "rt-secret".to_string(),
                     Some("user@example.com".to_string()),
+                    None,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -1182,6 +1251,8 @@ mod tests {
                 "acc-123".to_string(),
                 "rt".to_string(),
                 Some("a@example.com".to_string()),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -1190,6 +1261,8 @@ mod tests {
                 "acc-456".to_string(),
                 "rt2".to_string(),
                 Some("b@example.com".to_string()),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -1249,6 +1322,8 @@ mod tests {
                 "acc-expired".to_string(),
                 "rt-expired".to_string(),
                 Some("expired@example.com".to_string()),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -1279,6 +1354,8 @@ mod tests {
                 "acc-valid".to_string(),
                 "old-refresh".to_string(),
                 Some("valid@example.com".to_string()),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -1300,5 +1377,37 @@ mod tests {
                 .map(|account| account.refresh_token.as_str()),
             Some("fresh-refresh")
         );
+    }
+
+    #[tokio::test]
+    async fn persisted_access_token_survives_restart_without_refresh() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().to_path_buf();
+        let expires_at_ms = chrono::Utc::now().timestamp_millis() + 3_600_000;
+
+        {
+            let manager = CodexOAuthManager::new(path.clone());
+            manager
+                .add_account_internal(
+                    "acc-cached".to_string(),
+                    "refresh-should-not-be-used".to_string(),
+                    Some("cached@example.com".to_string()),
+                    Some("persisted-access".to_string()),
+                    Some(expires_at_ms),
+                )
+                .await
+                .unwrap();
+        }
+
+        let manager = CodexOAuthManager::new_with_oauth_token_url(
+            path,
+            "http://127.0.0.1:9/oauth/token".to_string(),
+        );
+        let token = manager
+            .get_valid_token_for_account("acc-cached")
+            .await
+            .unwrap();
+
+        assert_eq!(token, "persisted-access");
     }
 }

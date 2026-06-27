@@ -4,8 +4,9 @@
 
 - 休眠/唤醒后 Codex OAuth 认证页误报已登录的根因在 `src-tauri/src/proxy/providers/codex_oauth_auth.rs::get_status()`：旧逻辑只看 `codex_oauth_auth.json` 里是否有本地账号记录，把 `!accounts.is_empty()` 当作 `authenticated`，没有验证 refresh token 是否仍被 OpenAI 接受。真实请求路径 `get_valid_token_for_account()` 刷新失败时才返回 `RefreshTokenInvalid`，所以 UI 会先显示绿色已登录，下一次请求才暴露 401。
 - 修复边界：Codex OAuth 状态查询会验证默认账号；如果内存 access token 已过期/不存在，会触发 refresh。只有 OpenAI token 端点明确返回 401/403 映射为 `RefreshTokenInvalid` 时才移除失效账号并让状态回到未认证；网络错误、解析错误等临时故障只通过状态错误提示暴露，不清空账号，避免睡醒后短暂断网误退出。
+- 进一步降低失效概率的策略是减少 refresh token 使用次数，而不是幻想本地能让服务端已撤销的 refresh token 继续有效。`CodexAccountData` 现在可持久化最近一次短期 `access_token` 和 `access_token_expires_at_ms`；登录/刷新成功都会写入它，重启或短睡眠恢复后如果 access token 仍未临近过期，`get_valid_token_for_account()` 会直接复用它，不触发 refresh。这样可以减少状态页打开、应用重启和短时间睡眠造成的 refresh token 轮换/并发使用风险。
 - 前端 `useManagedAuth` 的 `hasAnyAccount` 不能只等于 `accounts.length > 0`，应受后端 `authenticated` 约束。Codex OAuth 本地账号记录和真实可用认证态必须分开看；以后不要再用“本地有账号”直接驱动绿色认证状态或保存校验。
-- 回归测试落点：`codex_oauth_auth.rs` 用可注入 OAuth token URL 的一次性本地假端点覆盖两条路径：401 invalid refresh 会删除账号并返回未认证；200 refresh 会缓存新 access token 并轮换 refresh token。验证命令优先跑 `cargo test --manifest-path src-tauri\Cargo.toml status_check_ --lib`。
+- 回归测试落点：`codex_oauth_auth.rs` 用可注入 OAuth token URL 的一次性本地假端点覆盖两条路径：401 invalid refresh 会删除账号并返回未认证；200 refresh 会缓存新 access token 并轮换 refresh token；`persisted_access_token_survives_restart_without_refresh` 覆盖重启后复用未过期 access token、不访问 refresh 端点。验证命令优先跑 `cargo test --manifest-path src-tauri\Cargo.toml status_check_ --lib` 和单测名 `persisted_access_token_survives_restart_without_refresh`。
 
 ## 2026-06-27 Logging And Frequent Exit Diagnostics Inventory
 
