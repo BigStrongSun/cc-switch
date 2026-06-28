@@ -86,6 +86,14 @@ import { AgentsPanel } from "@/components/agents/AgentsPanel";
 import { UniversalProviderPanel } from "@/components/universal";
 import { McpIcon } from "@/components/BrandIcons";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { SessionManagerPage } from "@/components/sessions/SessionManagerPage";
 import {
   useDisableCurrentOmo,
@@ -203,6 +211,10 @@ function App() {
     setOpenCodexHistoryRepairOnSessions,
   ] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [
+    isCodexMultiRouterEntryChoiceOpen,
+    setIsCodexMultiRouterEntryChoiceOpen,
+  ] = useState(false);
   const [isCodexMultiRouterWizardOpen, setIsCodexMultiRouterWizardOpen] =
     useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
@@ -915,11 +927,27 @@ function App() {
     setCurrentView("codexRouter");
   };
 
-  // 从首页 CTA 进入 Codex MultiRouter 向导；入口负责切换上下文，向导内部只管理配置草稿。
+  // 从首页 CTA 进入入口选择面板；用户可以随时退出，也可以选择引导或直接进入工作台。
   const handleStartCodexMultiRouterWizard = () => {
     setActiveApp("codex");
     setCurrentView("providers");
+    setIsCodexMultiRouterEntryChoiceOpen(true);
+  };
+
+  // 用户明确选择引导时才打开遮罩式向导，避免每次点击入口都被强制带入教程。
+  const handleOpenCodexMultiRouterGuide = () => {
+    setActiveApp("codex");
+    setIsCodexMultiRouterEntryChoiceOpen(false);
     setIsCodexMultiRouterWizardOpen(true);
+  };
+
+  // 用户选择跳过引导时直接进入 MultiRouter 状态页；没有已保存方案时打开工作台空状态。
+  const handleOpenCodexMultiRouterWorkspaceDirectly = () => {
+    const existingPlan = Object.values(providers).find((provider) =>
+      isRoutingPlan(provider),
+    );
+    setIsCodexMultiRouterEntryChoiceOpen(false);
+    openCodexRouterWorkspace(existingPlan ?? null, "status");
   };
 
   // 用户在向导里选择启用 MultiRouter 时，必须把 CCSwitchMulti 本地代理和 Codex 接管一起打开。
@@ -1787,6 +1815,65 @@ function App() {
         appId={activeApp}
         onSubmit={addProvider}
       />
+
+      <Dialog
+        open={isCodexMultiRouterEntryChoiceOpen}
+        onOpenChange={setIsCodexMultiRouterEntryChoiceOpen}
+      >
+        <DialogContent className="max-w-lg" zIndex="alert">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RouteIcon className="h-5 w-5 text-primary" />
+              配置多路模型
+            </DialogTitle>
+            <DialogDescription className="leading-6">
+              你可以开始完整引导，也可以随时退出并直接进入 MultiRouter
+              工作台。再次点击首页入口时仍会先回到这个选择面板。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3 px-6 py-4">
+            <button
+              type="button"
+              onClick={handleOpenCodexMultiRouterGuide}
+              className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-left transition-colors hover:bg-primary/10"
+            >
+              <div className="flex items-center gap-2 font-medium">
+                <Wrench className="h-4 w-4 text-primary" />
+                开始引导配置
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                按步骤创建 provider、获取模型、处理重名、生成路由、启用
+                MultiRouter，并接到状态页和历史修复流程。
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenCodexMultiRouterWorkspaceDirectly}
+              className="rounded-lg border bg-card p-4 text-left transition-colors hover:bg-muted/60"
+            >
+              <div className="flex items-center gap-2 font-medium">
+                <LayoutDashboard className="h-4 w-4 text-muted-foreground" />
+                直接打开工作台
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                跳过教程，直接进入 MultiRouter 状态页查看、编辑或测试现有路由。
+              </p>
+            </button>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsCodexMultiRouterEntryChoiceOpen(false)}
+            >
+              暂不配置
+            </Button>
+            <Button onClick={handleOpenCodexMultiRouterGuide}>开始引导</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <CodexMultiRouterWizard
         open={isCodexMultiRouterWizardOpen}

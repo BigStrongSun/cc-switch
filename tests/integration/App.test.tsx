@@ -37,6 +37,7 @@ vi.mock("@/components/providers/ProviderList", () => ({
     onConfigureUsage,
     onOpenWebsite,
     onCreate,
+    onStartCodexMultiRouterWizard,
   }: any) => (
     <div>
       <div data-testid="provider-list">{JSON.stringify(providers)}</div>
@@ -55,6 +56,11 @@ vi.mock("@/components/providers/ProviderList", () => ({
         open-website
       </button>
       <button onClick={() => onCreate?.()}>create</button>
+      {onStartCodexMultiRouterWizard ? (
+        <button onClick={() => onStartCodexMultiRouterWizard()}>
+          open-multirouter-entry
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -116,6 +122,15 @@ vi.mock("@/components/codex/CodexRouterWorkspacePage", async () => {
     ),
   };
 });
+
+vi.mock("@/components/codex/CodexMultiRouterWizard", () => ({
+  CodexMultiRouterWizard: ({ open, onOpenChange }: any) =>
+    open ? (
+      <div data-testid="codex-multirouter-wizard">
+        <button onClick={() => onOpenChange(false)}>close-wizard</button>
+      </div>
+    ) : null,
+}));
 
 vi.mock("@/components/UsageScriptModal", () => ({
   default: ({ isOpen, provider, onSave, onClose }: any) =>
@@ -377,6 +392,72 @@ describe("App integration with MSW", () => {
       "codex-router",
     );
     expect(screen.getByTestId("codex-router-tab").textContent).toBe("routes");
+  });
+
+  it("lets the Codex MultiRouter entry choose whether to start the guide", async () => {
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    fireEvent.click(screen.getByText("switch-codex"));
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "codex-1",
+      ),
+    );
+
+    fireEvent.click(screen.getByText("open-multirouter-entry"));
+
+    expect(screen.getByText("配置多路模型")).toBeInTheDocument();
+    expect(screen.getByText("开始引导配置")).toBeInTheDocument();
+    expect(screen.getByText("直接打开工作台")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("开始引导"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("codex-multirouter-wizard"),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("opens the MultiRouter status workspace directly from the entry choice", async () => {
+    setProviders("codex", {
+      "codex-router": {
+        id: "codex-router",
+        name: "OpenAI Multi-Model Router",
+        settingsConfig: {
+          codexRouting: {
+            enabled: true,
+            routes: [],
+          },
+        },
+        category: "aggregator",
+        sortIndex: 0,
+        createdAt: Date.now(),
+      },
+    });
+    setCurrentProviderId("codex", "codex-router");
+
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    fireEvent.click(screen.getByText("switch-codex"));
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "codex-router",
+      ),
+    );
+
+    fireEvent.click(screen.getByText("open-multirouter-entry"));
+    fireEvent.click(screen.getByText("直接打开工作台"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("codex-router-workspace")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("codex-router-target").textContent).toBe(
+      "codex-router",
+    );
+    expect(screen.getByTestId("codex-router-tab").textContent).toBe("status");
   });
 
   it("shows toast when duplicate cannot load live provider ids", async () => {
