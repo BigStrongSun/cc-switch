@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-06-28 Mixed Relay Responses Capability Boundary
+
+- 当前 MultiRouter 对 Codex `/responses` 的上游协议选择是 route/effective-provider 级配置判定，不是模型级在线能力探测。运行时入口是 `src-tauri/src/proxy/providers/codex.rs::explain_codex_responses_upstream_protocol`，优先看 managed `codex_oauth`、`meta.apiFormat`、`settings_config.apiFormat/api_format`、已知 chat-only base_url、`config.toml wire_api`，最后默认原生 Responses。
+- 对“同一个中转里既有 GPT/Responses 模型，也有 Qwen/DeepSeek 等 Chat-only 模型”的正确现有用法是拆成多条 route：GPT/Responses 模型 route 写 `upstream.apiFormat=openai_responses`，Chat-only 模型 route 写 `upstream.apiFormat=openai_chat`。如果 route 引用 `targetProviderId`，`materialize_codex_routed_provider_from_target` 会继承目标 provider 的 base_url/auth/apiFormat；因此同一个目标 provider 不能天然表达“部分模型 responses、部分模型 chat”，除非拆成两个 provider 或使用内联 route 覆盖协议。
+- 目前 `/models` 刷新只读取模型 id、owned_by、context_window 等元数据并写回 `modelCatalog`，`CodexCatalogModel` 和 `CodexRoutingCapabilities` 只有图片/文本/推理相关能力，没有 `supportsResponses` / per-model `apiFormat` 字段。状态页“协议探测”读取配置判定和 `codex-router.log` 最近真实请求的 `effective_endpoint/responses_to_chat`，不会主动请求远端 `/v1/responses`，所以不会自动发现某个模型不支持 Responses。
+- 若后续实现在线探测，应做成显式手动/批量按钮而不是自动刷新时静默执行：对每个候选模型发最小 `/v1/responses` 探测请求，识别 404/405/400 unsupported endpoint/model 等结果并缓存到 provider `modelCatalog.models[].supportsResponses` 或 `apiFormat`；探测会消耗额度、可能触发供应商限流，也可能误判“模型不支持”与“账号无权限/渠道暂不可用”，因此结果应带时间戳、错误摘要和手动覆盖入口。
+
 ## 2026-06-28 Responses-Lite Header Source And Proxy Failure Mechanism
 
 - OpenAI Codex 源码确认 `x-openai-internal-codex-responses-lite` 不是普通透传 header，而是由模型元数据 `ModelInfo.use_responses_lite` 驱动的官方内部协商信号。`codex-rs/protocol/src/openai_models.rs` 定义 `use_responses_lite: bool`；`codex-rs/core/src/client.rs::add_responses_lite_header()` 在该值为 true 时给 HTTP Responses 请求加入 `x-openai-internal-codex-responses-lite: true`；WebSocket 路径则在 `build_ws_client_metadata()` 中写入 `ws_request_header_x_openai_internal_codex_responses_lite=true`。
