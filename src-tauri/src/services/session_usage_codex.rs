@@ -53,6 +53,7 @@ impl DeltaTokens {
 /// 单文件解析时的运行状态
 struct FileParseState {
     session_id: Option<String>,
+    rollout_thread_id: Option<String>,
     current_model: String,
     prev_total: Option<CumulativeTokens>,
     event_index: u32,
@@ -228,6 +229,34 @@ fn collect_jsonl_recursive(dir: &Path, files: &mut Vec<PathBuf>, depth: u32, max
     }
 }
 
+/// 从 Codex rollout 文件名提取线程自身 ID。
+///
+/// 子 Agent JSONL 的 `session_meta.payload.session_id` 可能指向父线程，因此同步器
+/// 需要用文件名里的 rollout/thread id 作为子 Agent 自己的会话归属。
+fn codex_rollout_thread_id_from_path(path: &Path) -> Option<String> {
+    let stem = path.file_stem()?.to_str()?;
+    let candidate = stem.get(stem.len().checked_sub(36)?..)?;
+    let dash_count = candidate.chars().filter(|ch| *ch == '-').count();
+    if candidate.len() == 36
+        && dash_count == 4
+        && candidate
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() || ch == '-')
+    {
+        Some(candidate.to_string())
+    } else {
+        None
+    }
+}
+
+/// 判断 session_meta 是否来自子 Agent 派生线程。
+///
+/// 新旧 Codex 版本的 source 路径略有差异，这里同时接受两种结构化标记。
+fn session_meta_marks_subagent(payload: &serde_json::Value) -> bool {
+    payload.pointer("/source/subagent/thread_spawn").is_some()
+        || payload.pointer("/source/thread_spawn").is_some()
+}
+
 /// 同步单个 Codex JSONL 文件，返回 (imported, skipped)
 fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppError> {
     let file_path_str = file_path.to_string_lossy().to_string();
@@ -252,6 +281,7 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
 
     let mut state = FileParseState {
         session_id: None,
+        rollout_thread_id: codex_rollout_thread_id_from_path(file_path),
         current_model: "unknown".to_string(),
         prev_total: None,
         event_index: 0,
@@ -298,14 +328,17 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
         match event_type {
             "session_meta" if state.session_id.is_none() => {
                 let payload = value.get("payload");
-                state.session_id = payload
-                    .and_then(|p| {
+                state.session_id = payload.and_then(|p| {
+                    if session_meta_marks_subagent(p) {
+                        state.rollout_thread_id.clone()
+                    } else {
                         p.get("session_id")
                             .or_else(|| p.get("sessionId"))
                             .or_else(|| p.get("id"))
-                    })
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                    }
+                });
             }
             "turn_context" => {
                 if let Some(payload) = value.get("payload") {
@@ -657,6 +690,80 @@ mod tests {
     fn test_collect_codex_session_files_nonexistent() {
         let files = collect_codex_session_files(Path::new("/nonexistent/path"));
         assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_codex_rollout_thread_id_from_path_extracts_suffix() {
+        let path = Path::new(
+            "C:/Users/test/.codex/sessions/2026/06/28/rollout-2026-06-28T15-17-52-019f0d17-6ddd-7880-9575-b240e2d61220.jsonl",
+        );
+        assert_eq!(
+            codex_rollout_thread_id_from_path(path).as_deref(),
+            Some("019f0d17-6ddd-7880-9575-b240e2d61220")
+        );
+    }
+
+    #[test]
+    fn test_sync_codex_subagent_uses_rollout_thread_id() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let temp_dir = tempfile::tempdir().map_err(|e| AppError::Config(e.to_string()))?;
+        let subagent_id = "019f0d17-6ddd-7880-9575-b240e2d61220";
+        let file_path = temp_dir
+            .path()
+            .join(format!("rollout-2026-06-28T15-17-52-{subagent_id}.jsonl"));
+        let lines = [
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": {
+                    "session_id": "019f0a06-3e50-71e1-b2c3-ab9c179ffea4",
+                    "source": {
+                        "subagent": {
+                            "thread_spawn": {
+                                "parent_thread_id": "019f0a06-3e50-71e1-b2c3-ab9c179ffea4",
+                                "agent_role": "deepseek-flash"
+                            }
+                        }
+                    }
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "turn_context",
+                "payload": { "model": "deepseek-v4-flash" }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "event_msg",
+                "timestamp": "2026-06-28T07:17:58Z",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "total_token_usage": {
+                            "input_tokens": 100,
+                            "cached_input_tokens": 20,
+                            "output_tokens": 30
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        ];
+        std::fs::write(&file_path, lines.join("\n"))
+            .map_err(|e| AppError::Config(e.to_string()))?;
+
+        let (imported, skipped) = sync_single_codex_file(&db, &file_path)?;
+        assert_eq!(imported, 1);
+        assert_eq!(skipped, 0);
+
+        let conn = lock_conn!(db.conn);
+        let session_id: String = conn.query_row(
+            "SELECT session_id FROM proxy_request_logs WHERE request_id LIKE 'codex_session:%'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(session_id, subagent_id);
+
+        Ok(())
     }
 
     #[test]

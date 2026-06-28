@@ -79,7 +79,7 @@ import {
   getCodexBaseUrl,
 } from "@/utils/providerConfigUtils";
 import type { Provider } from "@/types";
-import type { CodexSubagentUsageAgent, RequestLog } from "@/types/usage";
+import type { RequestLog } from "@/types/usage";
 import type {
   CodexDiagnosticCheck,
   CodexDiagnosticStatus,
@@ -5241,7 +5241,7 @@ function StatusTab({
             <SectionHeader
               icon={GitFork}
               title="今日子 Agent 会话流量"
-              detail="基于 Codex 本地 JSONL/SQLite 的 subagent 会话列表和 codex_session 同步用量；它回答哪个子 Agent、哪个模型消耗了多少 token。"
+              detail="基于 Codex 本地 JSONL/SQLite 的 subagent 会话列表和 token_count 用量；按模型汇总子 Agent 数、请求和 token。"
               action={
                 <Button
                   size="sm"
@@ -5316,57 +5316,10 @@ function StatusTab({
               )}
             </div>
 
-            <div className="mt-3 overflow-hidden rounded-lg border border-border dark:border-slate-700">
-              <div className="grid grid-cols-[1.2fr_1fr_0.6fr_0.8fr_0.7fr_1fr] gap-2 bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground dark:bg-slate-900/80 dark:text-slate-300">
-                <span>子 Agent</span>
-                <span>模型</span>
-                <span className="text-right">请求</span>
-                <span className="text-right">Tokens</span>
-                <span className="text-right">费用</span>
-                <span>最近使用</span>
-              </div>
-              {isLoadingSubagentUsage ? (
-                <div className="p-4 text-sm text-muted-foreground">
-                  正在读取子 Agent 列表...
-                </div>
-              ) : subagentUsage?.agents.length ? (
-                subagentUsage.agents.map((agent) => (
-                  <div
-                    key={agent.sessionId}
-                    className="grid grid-cols-[1.2fr_1fr_0.6fr_0.8fr_0.7fr_1fr] gap-2 border-t border-border px-3 py-2 text-xs text-foreground dark:border-slate-800 dark:text-slate-300"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold">
-                        {subagentDisplayName(agent)}
-                      </div>
-                      <div className="truncate text-[11px] text-muted-foreground dark:text-slate-500">
-                        {agent.agentRole ?? agent.title ?? agent.sessionId}
-                      </div>
-                    </div>
-                    <span
-                      className="truncate font-mono"
-                      title={agent.models.join(", ")}
-                    >
-                      {agent.models.join(", ") || "未知"}
-                    </span>
-                    <span className="text-right">{agent.requestCount}</span>
-                    <span className="text-right">
-                      {agent.totalTokens.toLocaleString()}
-                    </span>
-                    <span className="text-right">
-                      {formatUsageCost(agent.totalCost)}
-                    </span>
-                    <span className="truncate">
-                      {formatUsageTimestamp(agent.lastUsedAt, agent.updatedAt)}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="p-4 text-sm leading-6 text-muted-foreground">
-                  未发现本地子 Agent 会话。状态库：
-                  {subagentUsage?.stateDbPath ?? "未定位"}。
-                </div>
-              )}
+            <div className="mt-3 rounded-lg border border-border bg-background/70 px-3 py-2 text-xs leading-6 text-muted-foreground dark:border-slate-700 dark:bg-slate-950/20 dark:text-slate-300">
+              已读取 {subagentUsage?.totalAgents ?? 0} 个本地子 Agent 会话，
+              归并为 {subagentUsage?.modelStats.length ?? 0} 个模型分组。状态库：
+              {subagentUsage?.stateDbPath ?? "未定位"}。
             </div>
           </section>
         </div>
@@ -5380,23 +5333,6 @@ function formatUsageCost(value?: string): string {
   const parsed = Number.parseFloat(value ?? "");
   if (!Number.isFinite(parsed)) return "$0.000000";
   return `$${parsed.toFixed(parsed > 0 && parsed < 0.01 ? 6 : 4)}`;
-}
-
-/// 子 Agent 列表优先显示 Codex thread_spawn 昵称，缺失时回退到历史标题和短 ID。
-function subagentDisplayName(agent: CodexSubagentUsageAgent): string {
-  return (
-    agent.agentNickname ||
-    agent.title ||
-    (agent.sessionId ? agent.sessionId.slice(0, 8) : "未命名子 Agent")
-  );
-}
-
-/// 将会话同步时间转换成本地可读时间，未产生 token_count 时回退到线程更新时间。
-function formatUsageTimestamp(lastUsedAt?: number, updatedAt?: string): string {
-  if (typeof lastUsedAt === "number" && Number.isFinite(lastUsedAt)) {
-    return new Date(lastUsedAt * 1000).toLocaleString();
-  }
-  return updatedAt || "无用量";
 }
 
 /// 测试发布页只做本地匹配预览，并展示下一步如何发布到 Codex。

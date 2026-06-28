@@ -1,5 +1,13 @@
 # CC Switch Repository Memory
 
+## 2026-06-28 MultiRouter Subagent Usage Model Aggregation Fix
+
+- “今日子 Agent 会话流量”全 0 的根因不是前端数值格式化，而是 Codex 子 Agent JSONL 的 `session_meta.payload.session_id` 在当前 Codex Desktop 中指向父线程 ID；子 Agent 自己的线程 ID 在 `state_5.sqlite.threads.id` 和 rollout 文件名后缀里。旧 `session_usage_codex.rs` 同步时把 `proxy_request_logs.session_id` 写成父线程，导致 `build_codex_subagent_usage_stats_from_history()` 用子 Agent id 做 `data_source='codex_session' AND session_id IN (...)` 时查不到当天用量。
+- 修复边界分两层：后续同步在 `session_meta` 标记为 `source.subagent.thread_spawn` / `source.thread_spawn` 时，优先用 rollout 文件名里的 36 位线程 ID 作为 `session_id`；已有错归到父线程的历史/当天数据不迁移 DB，而是在子 Agent 统计页按子 Agent rollout JSONL 只读回退解析 `token_count`，恢复 request/token/model 聚合。
+- 模型聚合不能依赖是否已有 token_count 命中。`modelStats.agentCount` 现在从子 Agent 的 `turn_context` / `token_count` primary model 归并，每个模型一行展示子 Agent 数、请求、Tokens、费用；即使某个模型的子 Agent 暂无用量，也要显示 agentCount，避免页面退化成几百个子 Agent 明细行。
+- 前端 `CodexRouterWorkspacePage.tsx` 的子 Agent 会话流量区默认只保留模型聚合表和一行数据源摘要，不再默认渲染逐子 Agent 明细表。这样状态页回答“每个模型有多少子 Agent、消耗多少 token”，而不是“每个子 Agent 用了什么模型”。
+- 回归测试落点：`cargo test --manifest-path src-tauri/Cargo.toml codex_subagent_usage_stats --lib`、`cargo test --manifest-path src-tauri/Cargo.toml test_codex_subagent_model_stats_counts_agents_without_usage --lib`、`cargo test --manifest-path src-tauri/Cargo.toml test_sync_codex_subagent_uses_rollout_thread_id --lib`，并配合 `cargo fmt --manifest-path src-tauri/Cargo.toml --check`、`pnpm typecheck`、`git diff --check`。
+
 ## 2026-06-28 CCSwitchMulti v3.16.4-2 Formal Release
 
 - `v3.16.4-2` 已作为 BigStrongSun/ccswitchmulti 的 GitHub 正式 release 发布：`https://github.com/BigStrongSun/ccswitchmulti/releases/tag/v3.16.4-2`。Release 为非 draft、`prerelease=false`，发布时间为 `2026-06-28T05:00:55Z`。本地 tag `v3.16.4-2` 为 annotated tag，tag 对象为 `cf874abd37e10f767971deea69e0178edfd0aa71`，解引用到版本提交 `d81abacdccb6915e31ebf829e50155ae95f64a37`（`chore(release): prepare CCSwitchMulti v3.16.4-2`）。
