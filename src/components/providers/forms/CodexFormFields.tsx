@@ -107,6 +107,9 @@ interface CodexFormFieldsProps {
   onSpawnAgentModelsChange?: (models: string[]) => void;
   codexRouting?: CodexRoutingConfig;
   onCodexRoutingChange?: (routing: CodexRoutingConfig) => void;
+  onProviderSplitSuggestionChange?: (
+    suggestion: CodexProviderSplitSuggestion | null,
+  ) => void;
 
   // Speed Test Endpoints
   speedTestEndpoints: EndpointCandidate[];
@@ -123,6 +126,12 @@ interface CodexFormFieldsProps {
 type CodexCatalogRow = CodexCatalogModel & { rowId: string };
 
 type CodexRoutingRow = CodexRoutingRoute & { rowId: string };
+
+export interface CodexProviderSplitSuggestion {
+  providerName: string;
+  responsesModels: string[];
+  chatModels: string[];
+}
 
 function createCatalogRow(seed?: Partial<CodexCatalogModel>): CodexCatalogRow {
   return {
@@ -291,7 +300,8 @@ function mergeFetchedModelsIntoCatalogRows(
 export function isLikelyCodexResponsesModel(model: string): boolean {
   const normalized = model.trim().toLowerCase();
   if (!normalized) return false;
-  const lastSegment = normalized.split(/[/:]/).filter(Boolean).pop() ?? normalized;
+  const lastSegment =
+    normalized.split(/[/:]/).filter(Boolean).pop() ?? normalized;
   return /^(gpt-|gpt\d|o[1345](?:-|$)|chatgpt-|codex-)/.test(lastSegment);
 }
 
@@ -317,54 +327,22 @@ export function splitFetchedModelsByLikelyCodexProtocol(
   return { responses, chat };
 }
 
-// 为同一个中转 provider 自动生成二分协议 route：GPT-like 走 Responses，非 GPT-like 走 Chat 转换。
-export function buildSplitCodexRoutingForFetchedModels({
+// 为同一个中转 provider 生成“拆成两个 provider”的建议；GPT-like 走 Responses，非 GPT-like 走 Chat 转换。
+export function buildSplitCodexProviderSuggestionForFetchedModels({
   providerName,
-  baseUrl,
-  apiKey,
   models,
 }: {
   providerName?: string;
-  baseUrl: string;
-  apiKey: string;
   models: FetchedModel[];
-}): CodexRoutingConfig | null {
+}): CodexProviderSplitSuggestion | null {
   const split = splitFetchedModelsByLikelyCodexProtocol(models);
   if (split.responses.length === 0 || split.chat.length === 0) return null;
 
   const labelBase = providerName?.trim() || "provider";
-  const chatModelMap = Object.fromEntries(split.chat.map((model) => [model, model]));
-
   return {
-    enabled: true,
-    defaultRouteId: "auto-responses",
-    routes: [
-      {
-        id: "auto-responses",
-        label: `${labelBase}-responses`,
-        enabled: true,
-        match: { models: split.responses, prefixes: [] },
-        upstream: {
-          baseUrl,
-          apiFormat: "openai_responses",
-          auth: { source: "provider_config" },
-          apiKey,
-        },
-      },
-      {
-        id: "auto-chat",
-        label: `${labelBase}-chat`,
-        enabled: true,
-        match: { models: split.chat, prefixes: [] },
-        upstream: {
-          baseUrl,
-          apiFormat: "openai_chat",
-          auth: { source: "provider_config" },
-          apiKey,
-          modelMap: chatModelMap,
-        },
-      },
-    ],
+    providerName: labelBase,
+    responsesModels: split.responses,
+    chatModels: split.chat,
   };
 }
 
@@ -400,6 +378,7 @@ export function CodexFormFields({
   onSpawnAgentModelsChange,
   codexRouting = { enabled: false, defaultRouteId: "", routes: [] },
   onCodexRoutingChange,
+  onProviderSplitSuggestionChange,
   speedTestEndpoints,
   customUserAgent,
   onCustomUserAgentChange,
@@ -413,7 +392,7 @@ export function CodexFormFields({
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [pendingSplitRouting, setPendingSplitRouting] =
-    useState<CodexRoutingConfig | null>(null);
+    useState<CodexProviderSplitSuggestion | null>(null);
   const [editingRouteIndex, setEditingRouteIndex] = useState<number | null>(
     null,
   );
@@ -622,15 +601,14 @@ export function CodexFormFields({
         }
         const shouldAutoSplitRouting =
           models.length > 0 &&
-          onCodexRoutingChange &&
+          onProviderSplitSuggestionChange &&
           (codexRouting.routes?.length ?? 0) === 0;
         if (shouldAutoSplitRouting) {
-          const splitRouting = buildSplitCodexRoutingForFetchedModels({
-            providerName,
-            baseUrl: codexBaseUrl,
-            apiKey: codexApiKey,
-            models,
-          });
+          const splitRouting =
+            buildSplitCodexProviderSuggestionForFetchedModels({
+              providerName,
+              models,
+            });
           if (splitRouting) {
             setPendingSplitRouting(splitRouting);
           }
@@ -658,7 +636,7 @@ export function CodexFormFields({
     websiteUrl,
     onCatalogModelsChange,
     onSpawnAgentModelsChange,
-    onCodexRoutingChange,
+    onProviderSplitSuggestionChange,
     codexRouting.routes,
     spawnAgentModels.length,
     t,
@@ -782,25 +760,23 @@ export function CodexFormFields({
   );
 
   const handleConfirmSplitRouting = useCallback(() => {
-    if (!pendingSplitRouting || !onCodexRoutingChange) return;
+    if (!pendingSplitRouting || !onProviderSplitSuggestionChange) return;
     onTakeoverEnabledChange(true);
-    onApiFormatChange("openai_responses");
-    const rows =
-      pendingSplitRouting.routes?.map((route) => createRoutingRow(route)) ?? [];
-    setRoutingRows(rows);
-    lastSentRoutingRef.current = pendingSplitRouting;
-    onCodexRoutingChange(pendingSplitRouting);
+    onProviderSplitSuggestionChange(pendingSplitRouting);
     setPendingSplitRouting(null);
     toast.info(
-      `已生成 ${providerName?.trim() || "provider"}-responses / ${providerName?.trim() || "provider"}-chat 两条路由。`,
+      `保存时将生成 ${pendingSplitRouting.providerName}-responses / ${pendingSplitRouting.providerName}-chat 两个 provider。`,
     );
   }, [
-    onApiFormatChange,
-    onCodexRoutingChange,
     onTakeoverEnabledChange,
+    onProviderSplitSuggestionChange,
     pendingSplitRouting,
-    providerName,
   ]);
+
+  const handleCancelSplitRouting = useCallback(() => {
+    setPendingSplitRouting(null);
+    onProviderSplitSuggestionChange?.(null);
+  }, [onProviderSplitSuggestionChange]);
 
   // 路由行的增删改必须同步写回父表单，避免用户切换开关后立即保存时仍提交上一帧旧值。
   const publishRoutingRows = useCallback(
@@ -884,12 +860,8 @@ export function CodexFormFields({
     editingRoute?.capabilities?.inputModalities?.includes("image") ??
     !editingRouteTextOnly;
   const splitRoutingProviderName = providerName?.trim() || "provider";
-  const pendingResponsesRoute = pendingSplitRouting?.routes?.find(
-    (route) => route.id === "auto-responses",
-  );
-  const pendingChatRoute = pendingSplitRouting?.routes?.find(
-    (route) => route.id === "auto-chat",
-  );
+  const pendingResponsesModels = pendingSplitRouting?.responsesModels ?? [];
+  const pendingChatModels = pendingSplitRouting?.chatModels ?? [];
 
   const renderCatalogActionButtons = (onAdd: () => void, addLabel: string) => (
     <div className="flex gap-1">
@@ -1123,16 +1095,17 @@ export function CodexFormFields({
       <Dialog
         open={Boolean(pendingSplitRouting)}
         onOpenChange={(open) => {
-          if (!open) setPendingSplitRouting(null);
+          if (!open) handleCancelSplitRouting();
         }}
       >
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>检测到混合协议模型</DialogTitle>
             <DialogDescription>
-              当前中转同时返回了 GPT-like 模型和非 GPT-like 模型。建议拆成
-              Responses 与 Chat 两条路由，避免不支持 Responses 的模型在 Codex
-              请求里失败。确认后才会写入路由配置；暂不拆分会保留已获取的模型列表。
+              当前中转同时返回了 GPT-like 模型和非 GPT-like 模型。建议保存时拆成
+              Responses 与 Chat 两个
+              provider，避免把两种协议混在同一个配置里导致后续分不清。
+              确认后不会立即保存；点击新增时才会创建两个 provider。
             </DialogDescription>
           </DialogHeader>
 
@@ -1144,12 +1117,12 @@ export function CodexFormFields({
                   OpenAI Responses
                 </span>
                 <span className="rounded bg-background/70 px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                  不做模型映射
+                  单独 provider
                 </span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 匹配模型：
-                {pendingResponsesRoute?.match.models?.join(", ") || "-"}
+                {pendingResponsesModels.join(", ") || "-"}
               </p>
             </div>
             <div className="rounded-md border border-sky-500/40 bg-sky-500/10 p-3">
@@ -1159,11 +1132,11 @@ export function CodexFormFields({
                   OpenAI Chat Completions
                 </span>
                 <span className="rounded bg-background/70 px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                  启用本地转换
+                  单独 provider
                 </span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                匹配模型：{pendingChatRoute?.match.models?.join(", ") || "-"}
+                匹配模型：{pendingChatModels.join(", ") || "-"}
               </p>
             </div>
           </div>
@@ -1172,12 +1145,12 @@ export function CodexFormFields({
             <Button
               type="button"
               variant="outline"
-              onClick={() => setPendingSplitRouting(null)}
+              onClick={handleCancelSplitRouting}
             >
               暂不拆分
             </Button>
             <Button type="button" onClick={handleConfirmSplitRouting}>
-              确认生成路由
+              确认生成两个 provider
             </Button>
           </DialogFooter>
         </DialogContent>

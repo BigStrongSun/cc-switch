@@ -77,7 +77,10 @@ import { ProviderPresetSelector } from "./ProviderPresetSelector";
 import { BasicFormFields } from "./BasicFormFields";
 import { ClaudeFormFields } from "./ClaudeFormFields";
 import { ClaudeDesktopProviderForm } from "./ClaudeDesktopProviderForm";
-import { CodexFormFields } from "./CodexFormFields";
+import {
+  CodexFormFields,
+  type CodexProviderSplitSuggestion,
+} from "./CodexFormFields";
 import { GeminiFormFields } from "./GeminiFormFields";
 import { OmoFormFields } from "./OmoFormFields";
 import { parseOmoOtherFieldsObject } from "@/types/omo";
@@ -291,6 +294,9 @@ export interface ProviderFormProps {
   onUniversalPresetSelect?: (preset: UniversalProviderPreset) => void;
   onManageUniversalProviders?: () => void;
   onSubmittingChange?: (isSubmitting: boolean) => void;
+  onCodexProviderSplitChange?: (
+    suggestion: CodexProviderSplitSuggestion | null,
+  ) => void;
   initialData?: {
     name?: string;
     websiteUrl?: string;
@@ -322,6 +328,7 @@ function ProviderFormFull({
   onUniversalPresetSelect,
   onManageUniversalProviders,
   onSubmittingChange,
+  onCodexProviderSplitChange,
   initialData,
   showButtons = true,
   isProxyTakeover = false,
@@ -599,6 +606,8 @@ function ProviderFormFull({
   const [codexFastMode, setCodexFastMode] = useState<boolean>(
     () => initialData?.meta?.codexFastMode ?? false,
   );
+  const [codexProviderSplit, setCodexProviderSplit] =
+    useState<CodexProviderSplitSuggestion | null>(null);
   const [codexChatReasoning, setCodexChatReasoning] =
     useState<CodexChatReasoning>(
       () => initialData?.meta?.codexChatReasoning ?? {},
@@ -1454,6 +1463,10 @@ function ProviderFormFull({
       payload.presetCategory = category;
     }
 
+    if (appId === "codex" && !isEditMode && codexProviderSplit) {
+      payload.codexProviderSplit = codexProviderSplit;
+    }
+
     if (activePreset) {
       payload.presetId = activePreset.id;
       if (activePreset.category) {
@@ -2261,6 +2274,14 @@ function ProviderFormFull({
               onSpawnAgentModelsChange={setCodexSpawnAgentModels}
               codexRouting={codexRouting}
               onCodexRoutingChange={setCodexRouting}
+              onProviderSplitSuggestionChange={
+                !isEditMode
+                  ? (suggestion) => {
+                      setCodexProviderSplit(suggestion);
+                      onCodexProviderSplitChange?.(suggestion);
+                    }
+                  : undefined
+              }
               speedTestEndpoints={speedTestEndpoints}
               customUserAgent={customUserAgent}
               onCustomUserAgentChange={setCustomUserAgent}
@@ -2630,4 +2651,5 @@ export type ProviderFormValues = ProviderFormData & {
   meta?: ProviderMeta;
   providerKey?: string; // OpenCode/OpenClaw: user-defined provider key
   suggestedDefaults?: OpenClawSuggestedDefaults; // OpenClaw: suggested default model configuration
+  codexProviderSplit?: CodexProviderSplitSuggestion;
 };

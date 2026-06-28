@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildSplitCodexRoutingForFetchedModels,
+  buildSplitCodexProviderSuggestionForFetchedModels,
   CodexFormFields,
   splitFetchedModelsByLikelyCodexProtocol,
 } from "@/components/providers/forms/CodexFormFields";
@@ -22,7 +22,9 @@ vi.mock("@/lib/api/model-fetch", () => ({
 }));
 
 vi.mock("@/components/ui/form", () => ({
-  FormLabel: ({ children }: { children: ReactNode }) => <label>{children}</label>,
+  FormLabel: ({ children }: { children: ReactNode }) => (
+    <label>{children}</label>
+  ),
 }));
 
 beforeEach(() => {
@@ -34,8 +36,11 @@ function renderRoutingHarness(
   options: { shouldShowSpeedTest?: boolean } = {},
 ) {
   const onRoutingChange = vi.fn();
-  let latestRouting: CodexRoutingConfig =
-    initialRouting ?? { enabled: true, defaultRouteId: "", routes: [] };
+  let latestRouting: CodexRoutingConfig = initialRouting ?? {
+    enabled: true,
+    defaultRouteId: "",
+    routes: [],
+  };
 
   function Harness() {
     const [routing, setRouting] = useState<CodexRoutingConfig>(latestRouting);
@@ -92,8 +97,7 @@ function renderCatalogHarness(initialCatalog: CodexCatalogModel[]) {
   let latestCatalog = initialCatalog;
 
   function Harness() {
-    const [catalog, setCatalog] =
-      useState<CodexCatalogModel[]>(initialCatalog);
+    const [catalog, setCatalog] = useState<CodexCatalogModel[]>(initialCatalog);
 
     // 测试壳模拟 ProviderForm 对 modelCatalog 的受控回写。
     const handleCatalogChange = (next: CodexCatalogModel[]) => {
@@ -151,6 +155,7 @@ function renderAutoSplitHarness() {
   const onRoutingChange = vi.fn();
   const onTakeoverEnabledChange = vi.fn();
   const onApiFormatChange = vi.fn();
+  const onProviderSplitSuggestionChange = vi.fn();
   let latestRouting: CodexRoutingConfig = {
     enabled: false,
     defaultRouteId: "",
@@ -200,6 +205,7 @@ function renderAutoSplitHarness() {
         onSpawnAgentModelsChange={vi.fn()}
         codexRouting={routing}
         onCodexRoutingChange={handleRoutingChange}
+        onProviderSplitSuggestionChange={onProviderSplitSuggestionChange}
         speedTestEndpoints={[]}
         customUserAgent=""
         onCustomUserAgentChange={vi.fn()}
@@ -218,6 +224,7 @@ function renderAutoSplitHarness() {
     onRoutingChange,
     onTakeoverEnabledChange,
     onApiFormatChange,
+    onProviderSplitSuggestionChange,
   };
 }
 
@@ -236,47 +243,23 @@ describe("CodexFormFields local model routing", () => {
     });
   });
 
-  it("builds split routing with -responses and -chat labels", () => {
-    const routing = buildSplitCodexRoutingForFetchedModels({
+  it("builds split provider suggestion with -responses and -chat model groups", () => {
+    const split = buildSplitCodexProviderSuggestionForFetchedModels({
       providerName: "Relay",
-      baseUrl: "https://relay.example/v1",
-      apiKey: "sk-relay",
       models: [
         { id: "gpt-5.5", ownedBy: null },
         { id: "qwen3.6", ownedBy: null },
       ],
     });
 
-    expect(routing).toMatchObject({
-      enabled: true,
-      defaultRouteId: "auto-responses",
-      routes: [
-        {
-          id: "auto-responses",
-          label: "Relay-responses",
-          match: { models: ["gpt-5.5"] },
-          upstream: {
-            baseUrl: "https://relay.example/v1",
-            apiFormat: "openai_responses",
-            apiKey: "sk-relay",
-          },
-        },
-        {
-          id: "auto-chat",
-          label: "Relay-chat",
-          match: { models: ["qwen3.6"] },
-          upstream: {
-            baseUrl: "https://relay.example/v1",
-            apiFormat: "openai_chat",
-            apiKey: "sk-relay",
-            modelMap: { "qwen3.6": "qwen3.6" },
-          },
-        },
-      ],
+    expect(split).toMatchObject({
+      providerName: "Relay",
+      responsesModels: ["gpt-5.5"],
+      chatModels: ["qwen3.6"],
     });
   });
 
-  it("prompts before generating split routing after fetching mixed relay models", async () => {
+  it("prompts before preparing split providers after fetching mixed relay models", async () => {
     vi.mocked(fetchModelsForConfig).mockResolvedValueOnce([
       { id: "gpt-5.5", ownedBy: null, contextWindow: 272000 },
       { id: "qwen3.6", ownedBy: null, contextWindow: 128000 },
@@ -286,9 +269,12 @@ describe("CodexFormFields local model routing", () => {
       onRoutingChange,
       onTakeoverEnabledChange,
       onApiFormatChange,
+      onProviderSplitSuggestionChange,
     } = renderAutoSplitHarness();
 
-    fireEvent.click(screen.getByRole("button", { name: "providerForm.fetchModels" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "providerForm.fetchModels" }),
+    );
 
     expect(await screen.findByText("检测到混合协议模型")).toBeInTheDocument();
     expect(screen.getByText("Relay-responses")).toBeInTheDocument();
@@ -296,33 +282,26 @@ describe("CodexFormFields local model routing", () => {
     expect(onRoutingChange).not.toHaveBeenCalled();
     expect(latestRouting().routes).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "确认生成路由" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "确认生成两个 provider" }),
+    );
 
     await waitFor(() => {
-      expect(onRoutingChange).toHaveBeenCalledWith(
+      expect(onProviderSplitSuggestionChange).toHaveBeenCalledWith(
         expect.objectContaining({
-          enabled: true,
-          defaultRouteId: "auto-responses",
+          providerName: "Relay",
+          responsesModels: ["gpt-5.5"],
+          chatModels: ["qwen3.6"],
         }),
       );
-      expect(latestRouting().routes).toHaveLength(2);
     });
-    expect(latestRouting().routes?.[0]).toMatchObject({
-      label: "Relay-responses",
-      upstream: { apiFormat: "openai_responses" },
-    });
-    expect(latestRouting().routes?.[1]).toMatchObject({
-      label: "Relay-chat",
-      upstream: {
-        apiFormat: "openai_chat",
-        modelMap: { "qwen3.6": "qwen3.6" },
-      },
-    });
+    expect(onRoutingChange).not.toHaveBeenCalled();
+    expect(latestRouting().routes).toHaveLength(0);
     expect(onTakeoverEnabledChange).toHaveBeenCalledWith(true);
-    expect(onApiFormatChange).toHaveBeenCalledWith("openai_responses");
+    expect(onApiFormatChange).not.toHaveBeenCalled();
   });
 
-  it("keeps routing untouched when mixed relay split prompt is cancelled", async () => {
+  it("keeps routing and provider split untouched when mixed relay split prompt is cancelled", async () => {
     vi.mocked(fetchModelsForConfig).mockResolvedValueOnce([
       { id: "gpt-5.5", ownedBy: null, contextWindow: 272000 },
       { id: "qwen3.6", ownedBy: null, contextWindow: 128000 },
@@ -332,9 +311,12 @@ describe("CodexFormFields local model routing", () => {
       onRoutingChange,
       onTakeoverEnabledChange,
       onApiFormatChange,
+      onProviderSplitSuggestionChange,
     } = renderAutoSplitHarness();
 
-    fireEvent.click(screen.getByRole("button", { name: "providerForm.fetchModels" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "providerForm.fetchModels" }),
+    );
 
     expect(await screen.findByText("检测到混合协议模型")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "暂不拆分" }));
@@ -343,6 +325,7 @@ describe("CodexFormFields local model routing", () => {
       expect(screen.queryByText("检测到混合协议模型")).not.toBeInTheDocument();
     });
     expect(onRoutingChange).not.toHaveBeenCalled();
+    expect(onProviderSplitSuggestionChange).toHaveBeenCalledWith(null);
     expect(latestRouting().routes).toHaveLength(0);
     expect(onTakeoverEnabledChange).not.toHaveBeenCalled();
     expect(onApiFormatChange).not.toHaveBeenCalled();
@@ -379,7 +362,9 @@ describe("CodexFormFields local model routing", () => {
       },
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "providerForm.fetchModels" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "providerForm.fetchModels" }),
+    );
 
     await waitFor(() => {
       expect(latestCatalog()).toEqual([
@@ -400,7 +385,9 @@ describe("CodexFormFields local model routing", () => {
     );
 
     expect(screen.getByText("Codex 多模型路由")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "添加路由" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "添加路由" }),
+    ).toBeInTheDocument();
   });
 
   it("adds and edits a route through the dialog without persisting rowId", async () => {
