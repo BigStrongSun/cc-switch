@@ -132,6 +132,15 @@ pub fn setup_panic_hook() {
         } else {
             "Unknown location".to_string()
         };
+        let structured_location = panic_info
+            .location()
+            .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()));
+        let thread = std::thread::current();
+        let thread_name = thread.name().unwrap_or("unnamed");
+        let thread_id = format!("{:?}", thread.id());
+        let structured_thread = Some(format!("{thread_name} ({thread_id})"));
+
+        crate::app_exit_monitor::record_panic(&message, structured_location, structured_thread);
 
         // 捕获 backtrace（完整调用栈）
         let backtrace = std::backtrace::Backtrace::force_capture();

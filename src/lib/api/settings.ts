@@ -299,6 +299,11 @@ export const settingsApi = {
   async setLogConfig(config: LogConfig): Promise<boolean> {
     return await invoke("set_log_config", { config });
   },
+
+  /** 打开包含运行日志、异常退出记录和路由诊断的本地日志目录。 */
+  async openLogDir(): Promise<boolean> {
+    return await invoke("open_log_dir");
+  },
 };
 
 /** 单处工具安装的诊断信息（多处安装冲突检测）。字段对应后端 ToolInstallation。 */

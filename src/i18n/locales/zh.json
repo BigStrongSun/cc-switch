@@ -408,6 +408,9 @@
         "enabledDescription": "总开关，关闭后所有日志将被禁用",
         "level": "日志级别",
         "levelDescription": "设置输出的最低日志级别",
+        "logDirectory": "日志目录",
+        "logDirectoryDescription": "包含运行日志、异常退出记录和路由诊断日志",
+        "openLogDirectory": "打开日志目录",
         "levels": {
           "error": "错误",
           "warn": "警告",

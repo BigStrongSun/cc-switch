@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::UpdaterExt;
 
 /// 应用更新下载进度（通过 `update-download-progress` 事件发给前端）。
@@ -239,6 +240,7 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
         // 因此清理只能放在 install 前执行，且必须显式移除托盘图标。
         crate::save_window_state_before_exit(&app);
         crate::cleanup_before_exit(&app).await;
+        crate::app_exit_monitor::record_clean_exit("windows_update_install", 0);
         crate::remove_tray_icon_before_exit(&app);
         crate::destroy_single_instance_lock(&app);
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -744,5 +746,23 @@ pub async fn set_log_config(
         config.enabled,
         config.level
     );
+    Ok(true)
+}
+
+/// 打开应用日志目录。
+///
+/// 目录中包含 `cc-switch.log`、`app-exit-events.jsonl`、`app-run-marker.json`，
+/// 以及 Codex MultiRouter 的 `codex-router.log`。`crash.log` 位于同级配置目录。
+#[tauri::command]
+pub async fn open_log_dir(app: AppHandle) -> Result<bool, String> {
+    let log_dir = crate::app_exit_monitor::log_dir_path();
+    if !log_dir.exists() {
+        std::fs::create_dir_all(&log_dir).map_err(|e| format!("创建日志目录失败: {e}"))?;
+    }
+
+    app.opener()
+        .open_path(log_dir.to_string_lossy().to_string(), None::<String>)
+        .map_err(|e| format!("打开日志目录失败: {e}"))?;
+
     Ok(true)
 }

@@ -408,6 +408,9 @@
         "enabledDescription": "Master switch, all logging will be disabled when turned off",
         "level": "Log Level",
         "levelDescription": "Set the minimum log level to output",
+        "logDirectory": "Log Directory",
+        "logDirectoryDescription": "Contains runtime logs, abnormal exit records, and router diagnostics",
+        "openLogDirectory": "Open Log Directory",
         "levels": {
           "error": "Error",
           "warn": "Warning",

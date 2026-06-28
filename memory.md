@@ -53,6 +53,13 @@
 - 现有“异常退出恢复”只针对代理/Live 接管残留：启动时检查 DB live backup 和 live config 占位符，必要时调用 `recover_from_crash()` 恢复配置。这不是通用的频繁退出检测，也不会统计崩溃次数。
 - 当前没有现成的“频繁退出/崩溃频率”检测：没有启动 marker、正常退出 marker 清理、退出原因/退出码统一记录、时间窗口计数、watchdog、最近 crash 自动提示，也没有“打开日志目录”的设置页按钮。排查别人频繁退出时，先让对方收集 `~/.cc-switch/crash.log`、`~/.cc-switch/logs/cc-switch.log`，若涉及 Codex MultiRouter 再收集 `~/.cc-switch/logs/codex-router.log`；如果 `crash.log` 没有新条目，就要考虑非 Rust panic 路径（前端/WebView、系统杀进程、安装器重启、进程 abort）。
 
+## 2026-06-28 Abnormal Exit And Crash Cause Logging
+
+- 新增 `src-tauri/src/app_exit_monitor.rs` 作为不依赖数据库的异常退出记录层：启动时写 `<app_config_dir>/logs/app-run-marker.json`，正常退出时删除 marker 并向 `<app_config_dir>/logs/app-exit-events.jsonl` 追加 `clean_exit`，下次启动如果发现 marker 残留则追加 `abnormal_exit_detected` 并在 `cc-switch.log` 打 warn。这样数据库初始化失败、配置迁移失败或 Tauri 事件循环异常退出也能留下证据。
+- `panic_hook` 现在除了继续写完整 `<app_config_dir>/crash.log`，还会向 `app-exit-events.jsonl` 写结构化 `panic` 事件，包含 panic message、源码位置和线程摘要；完整 backtrace 仍只在 `crash.log`，避免 JSONL 过大。
+- 已挂接的正常/显式退出路径包括窗口关闭退出、用户主动退出、Tauri restart、自定义 `restart_process`、Windows updater install 前退出、旧 config 加载失败用户退出、数据库初始化失败用户退出。系统强杀/abort 仍无法在退出前写 clean event，但会因 marker 残留在下次启动被识别。
+- 设置页高级日志配置新增“打开日志目录”入口，调用 `open_log_dir` 打开 `<app_config_dir>/logs`，方便用户收集 `cc-switch.log`、`app-exit-events.jsonl`、`app-run-marker.json` 和 `codex-router.log`。完整 Rust backtrace 的 `crash.log` 仍位于 `<app_config_dir>` 根目录。
+
 ## 2026-06-26 CCSwitchMulti v3.16.3-22 Prerelease
 
 - `v3.16.3-22` 已作为 GitHub prerelease 发布：`https://github.com/BigStrongSun/ccswitchmulti/releases/tag/v3.16.3-22`。Release 为非 draft、`prerelease=true`，发布时间为 `2026-06-26T04:16:52Z`，tag 指向 `d4260d1aeb89ade1859f4a341612a8453fc57cbb chore(release): prepare v3.16.3-22 prerelease`。

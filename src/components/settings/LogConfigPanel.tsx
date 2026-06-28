@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FolderOpen } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import {
@@ -39,6 +41,16 @@ export function LogConfigPanel() {
       console.error("Failed to save log config:", e);
       toast.error(String(e));
       setConfig(config);
+    }
+  };
+
+  // 打开本地日志目录，便于用户把运行日志和异常退出记录一起发给排障人员。
+  const handleOpenLogDir = async () => {
+    try {
+      await settingsApi.openLogDir();
+    } catch (e) {
+      console.error("Failed to open log directory:", e);
+      toast.error(String(e));
     }
   };
 
@@ -84,6 +96,19 @@ export function LogConfigPanel() {
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5">
+          <Label>{t("settings.advanced.logConfig.logDirectory")}</Label>
+          <p className="text-xs text-muted-foreground">
+            {t("settings.advanced.logConfig.logDirectoryDescription")}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={handleOpenLogDir}>
+          <FolderOpen className="h-4 w-4" />
+          {t("settings.advanced.logConfig.openLogDirectory")}
+        </Button>
       </div>
 
       {/* 日志级别说明 */}

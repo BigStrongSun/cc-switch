@@ -1,4 +1,5 @@
 mod app_config;
+mod app_exit_monitor;
 mod app_store;
 mod auto_launch;
 mod claude_desktop_config;
@@ -277,6 +278,7 @@ pub fn run() {
                     .unwrap_or(false);
                 if in_db_recovery {
                     api.prevent_close();
+                    crate::app_exit_monitor::record_clean_exit("window_close_during_db_recovery", 0);
                     window.app_handle().exit(0);
                     return;
                 }
@@ -296,6 +298,7 @@ pub fn run() {
                     }
                 } else {
                     api.prevent_close();
+                    crate::app_exit_monitor::record_clean_exit("window_close_exit", 0);
                     window.app_handle().exit(0);
                 }
             }
@@ -314,7 +317,9 @@ pub fn run() {
 
             // 预先刷新 Store 覆盖配置，确保后续路径读取正确（日志/数据库等）
             app_store::refresh_app_config_dir_override(app.handle());
-            panic_hook::init_app_config_dir(crate::config::get_app_config_dir());
+            let app_config_dir = crate::config::get_app_config_dir();
+            panic_hook::init_app_config_dir(app_config_dir.clone());
+            app_exit_monitor::init_app_config_dir(app_config_dir);
             #[cfg(target_os = "windows")]
             set_windows_app_user_model_id(app.handle());
 
@@ -368,6 +373,15 @@ pub fn run() {
             // 放在日志系统初始化之后，确保 init 的日志能正常输出。
             usage_events::init(app.handle().clone());
 
+            if let Some(previous) = app_exit_monitor::record_startup() {
+                log::warn!(
+                    "检测到上次应用未正常退出: started_at={}, pid={}, crash_log_modified_at={:?}",
+                    previous.marker.started_at,
+                    previous.marker.pid,
+                    previous.crash_log_modified_at
+                );
+            }
+
             // 初始化数据库
             let app_config_dir = crate::config::get_app_config_dir();
             let db_path = app_config_dir.join("cc-switch.db");
@@ -395,6 +409,11 @@ pub fn run() {
                             if !show_migration_error_dialog(app.handle(), &e.to_string()) {
                                 // 用户选择退出（此时数据库还没创建，下次启动可以重试）
                                 log::info!("用户选择退出程序");
+                                app_exit_monitor::record_forced_exit(
+                                    "legacy_config_load_failed_user_exit",
+                                    1,
+                                    Some(e.to_string()),
+                                );
                                 std::process::exit(1);
                             }
                             // 用户选择重试，继续循环
@@ -449,6 +468,11 @@ pub fn run() {
                         if !show_database_init_error_dialog(app.handle(), &db_path, &e.to_string())
                         {
                             log::info!("用户选择退出程序");
+                            app_exit_monitor::record_forced_exit(
+                                "database_init_failed_user_exit",
+                                1,
+                                Some(e.to_string()),
+                            );
                             std::process::exit(1);
                         }
 
@@ -1242,6 +1266,7 @@ pub fn run() {
             commands::set_copilot_optimizer_config,
             commands::get_log_config,
             commands::set_log_config,
+            commands::open_log_dir,
             commands::restart_app,
             commands::install_update_and_restart,
             commands::check_app_update_available,
@@ -1563,6 +1588,7 @@ pub fn run() {
                 //   - 100ms 落盘等待：重启前的 DB 写入均为命令驱动、此刻已完成，
                 //     与所有 Tauri 应用默认重启路径的行为一致，无需额外等待
                 ExitRequestAction::DeferToTauriRestart => {
+                    app_exit_monitor::record_clean_exit("tauri_restart", code.unwrap_or(0));
                     log::info!("收到重启请求 (code={code:?})，交由 Tauri 默认重启流程 re-exec");
                     return;
                 }
@@ -1578,6 +1604,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 save_window_state_before_exit(&app_handle);
                 cleanup_before_exit(&app_handle).await;
+                app_exit_monitor::record_clean_exit("user_requested_exit", 0);
                 // 先于 std::process::exit 显式移除托盘图标。
                 // 进程直接退出时 Tauri 运行时不走正常 Drop 流程，
                 // 不会向 Windows Shell 发送 NIM_DELETE，导致已退出的进程
@@ -2093,6 +2120,7 @@ pub fn destroy_single_instance_lock(app_handle: &tauri::AppHandle) {
 /// 图标，而 macOS 的 NSStatusItem 操作要求主线程；`set_visible(false)` 走
 /// `run_item_main_thread` 代理，跨线程安全（见 `remove_tray_icon_before_exit`）。
 pub fn restart_process(app_handle: &tauri::AppHandle) -> ! {
+    app_exit_monitor::record_clean_exit("process_restart", 0);
     remove_tray_icon_before_exit(app_handle);
     destroy_single_instance_lock(app_handle);
     tauri::process::restart(&app_handle.env());
