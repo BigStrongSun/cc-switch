@@ -1,5 +1,6 @@
 import type {
   CodexApiFormat,
+  CodexCacheConfig,
   CodexCatalogModel,
   CodexModelCatalogConfig,
   CodexRoutingConfig,
@@ -354,6 +355,68 @@ export function inferWizardApiFormat(provider: Provider): CodexApiFormat {
   );
 }
 
+// 推断 provider 的缓存能力；这里只生成安全默认，不会让自动缓存平台收到 OpenAI 私有参数。
+export function inferWizardCacheConfig(provider: Provider): CodexCacheConfig {
+  const text = `${provider.id} ${provider.name} ${provider.category ?? ""} ${
+    provider.meta?.providerType ?? ""
+  }`.toLowerCase();
+  const models = readWizardModelCatalog(provider).map((model) =>
+    String(model.upstreamModel ?? model.upstream_model ?? model.model)
+      .trim()
+      .toLowerCase(),
+  );
+  const hasModel = (needle: string) =>
+    models.some((model) => model.includes(needle));
+  if (isOfficialCodexSource(provider) || hasOpenAiResponsesNativeModels(provider)) {
+    return {
+      cacheMode: "openai_prompt_cache",
+      supportsPromptCacheKey: true,
+      supportsPromptCacheRetention: true,
+      promptCacheKey: provider.meta?.promptCacheKey,
+      promptCacheRetention: provider.meta?.promptCacheRetention,
+      usageFields: [
+        "usage.input_tokens_details.cached_tokens",
+        "usage.prompt_tokens_details.cached_tokens",
+      ],
+    };
+  }
+  if (text.includes("deepseek") || hasModel("deepseek")) {
+    return {
+      cacheMode: "deepseek_context_cache",
+      usageFields: [
+        "usage.prompt_cache_hit_tokens",
+        "usage.prompt_cache_miss_tokens",
+      ],
+    };
+  }
+  if (
+    text.includes("z.ai") ||
+    text.includes("zai") ||
+    text.includes("glm") ||
+    hasModel("glm")
+  ) {
+    return {
+      cacheMode: "glm_context_cache",
+      usageFields: ["usage.prompt_tokens_details.cached_tokens"],
+    };
+  }
+  if (
+    text.includes("dashscope") ||
+    text.includes("qwen") ||
+    hasModel("qwen")
+  ) {
+    return {
+      cacheMode: "qwen_context_cache",
+      usageFields: [
+        "usage.input_tokens_details.cached_tokens",
+        "usage.prompt_tokens_details.cached_tokens",
+        "usage.prompt_tokens_details.cache_creation_input_tokens",
+      ],
+    };
+  }
+  return { cacheMode: "unknown" };
+}
+
 // 每个 provider 默认探测其 modelCatalog 暴露的全部可见模型；这是用户显式点击的真实请求，不在向导自动执行。
 export function getWizardConnectivityProbeModels(provider: Provider): string[] {
   return Array.from(
@@ -554,6 +617,9 @@ export function buildWizardRoutesFromSources(
       upstream: {
         apiFormat: inferWizardApiFormat(provider),
         auth: { source: "provider_config" },
+      },
+      capabilities: {
+        codexCache: inferWizardCacheConfig(provider),
       },
     };
   });

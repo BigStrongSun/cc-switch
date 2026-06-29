@@ -9,6 +9,7 @@ import {
   collectWizardModelNameCollisions,
   getWizardConfigIssues,
   inferWizardApiFormat,
+  inferWizardCacheConfig,
   resolveWizardModelNameCollisions,
 } from "@/lib/codexMultiRouterWizard";
 
@@ -247,6 +248,39 @@ describe("codexMultiRouterWizard helpers", () => {
       "deepseek",
       "qwen-local",
     ]);
+    expect(routes[0].capabilities?.codexCache).toMatchObject({
+      cacheMode: "openai_prompt_cache",
+      supportsPromptCacheKey: true,
+    });
+    expect(routes[1].capabilities?.codexCache).toMatchObject({
+      cacheMode: "deepseek_context_cache",
+      usageFields: [
+        "usage.prompt_cache_hit_tokens",
+        "usage.prompt_cache_miss_tokens",
+      ],
+    });
+    expect(routes[2].capabilities?.codexCache).toMatchObject({
+      cacheMode: "qwen_context_cache",
+    });
+  });
+
+  it("keeps OpenAI cache parameters off automatic-prefix providers", () => {
+    const deepseek = provider({
+      id: "deepseek",
+      name: "DeepSeek",
+      meta: { promptCacheKey: "do-not-forward-to-deepseek" },
+      settingsConfig: {
+        modelCatalog: { models: [{ model: "deepseek-chat" }] },
+      },
+    });
+
+    expect(inferWizardCacheConfig(deepseek)).toEqual({
+      cacheMode: "deepseek_context_cache",
+      usageFields: [
+        "usage.prompt_cache_hit_tokens",
+        "usage.prompt_cache_miss_tokens",
+      ],
+    });
   });
 
   it("builds a MultiRouter plan whose routes and catalog expose the same visible models", () => {

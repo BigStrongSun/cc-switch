@@ -225,6 +225,10 @@ export interface ProviderMeta {
   isFullUrl?: boolean;
   // Prompt cache key for OpenAI Responses-compatible endpoints (improves cache hit rate)
   promptCacheKey?: string;
+  // OpenAI prompt cache retention policy; only used when codexCache declares support.
+  promptCacheRetention?: "in_memory" | "24h" | string;
+  // Codex route/provider cache capability metadata.
+  codexCache?: CodexCacheConfig;
   // Codex OAuth FAST mode: injects service_tier="priority" on ChatGPT Codex requests
   codexFastMode?: boolean;
   // Codex Responses -> Chat Completions reasoning capability metadata
@@ -279,6 +283,25 @@ export interface CodexCatalogModel {
   vision?: boolean;
 }
 
+export type CodexCacheMode =
+  | "openai_prompt_cache"
+  | "auto_prefix_cache"
+  | "deepseek_context_cache"
+  | "glm_context_cache"
+  | "zai_context_cache"
+  | "qwen_context_cache"
+  | "anthropic_cache_control"
+  | "unknown";
+
+export interface CodexCacheConfig {
+  cacheMode?: CodexCacheMode;
+  supportsPromptCacheKey?: boolean;
+  supportsPromptCacheRetention?: boolean;
+  promptCacheKey?: string;
+  promptCacheRetention?: "in_memory" | "24h" | string;
+  usageFields?: string[];
+}
+
 export interface CodexModelCatalogConfig {
   models: CodexCatalogModel[];
   spawnAgentModels?: string[];
@@ -299,6 +322,7 @@ export interface CodexRoutingCapabilities {
   inputModalities?: Array<"text" | "image">;
   textOnly?: boolean;
   supportsReasoning?: boolean;
+  codexCache?: CodexCacheConfig;
 }
 
 export interface CodexRoutingRoute {

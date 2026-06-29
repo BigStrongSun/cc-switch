@@ -1594,10 +1594,12 @@ impl RequestForwarder {
             let reasoning_config =
                 super::providers::resolve_codex_chat_reasoning_config(provider, &mapped_body);
             let text_only_override = super::providers::codex_provider_text_only_input(provider);
-            super::providers::transform_codex_chat::responses_to_chat_completions_with_reasoning_and_text_only(
+            let cache_config = super::providers::resolve_codex_cache_config(provider, &mapped_body);
+            super::providers::transform_codex_chat::responses_to_chat_completions_with_reasoning_text_only_and_cache(
                 mapped_body,
                 reasoning_config.as_ref(),
                 text_only_override,
+                Some(&cache_config),
             )?
         } else if needs_transform {
             if adapter.name() == "Claude" {

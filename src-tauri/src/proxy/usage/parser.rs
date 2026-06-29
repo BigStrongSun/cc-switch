@@ -49,6 +49,57 @@ impl TokenUsage {
             || self.cache_read_tokens > 0
             || self.cache_creation_tokens > 0
     }
+
+    /// 从 OpenAI 兼容 usage 中读取缓存读取 token。
+    ///
+    /// OpenAI/Z.AI/Qwen 常用 `*_tokens_details.cached_tokens`，DeepSeek 使用
+    /// `prompt_cache_hit_tokens`。统一在这里处理，避免不同响应入口漏记缓存命中。
+    fn cache_read_tokens_from_openai_compatible_usage(usage: &Value) -> u32 {
+        usage
+            .get("prompt_cache_hit_tokens")
+            .and_then(|v| v.as_u64())
+            .or_else(|| {
+                usage
+                    .get("prompt_tokens_details")
+                    .and_then(|d| d.get("cached_tokens"))
+                    .and_then(|v| v.as_u64())
+            })
+            .or_else(|| {
+                usage
+                    .get("input_tokens_details")
+                    .and_then(|d| d.get("cached_tokens"))
+                    .and_then(|v| v.as_u64())
+            })
+            .or_else(|| {
+                usage
+                    .get("cache_read_input_tokens")
+                    .and_then(|v| v.as_u64())
+            })
+            .unwrap_or(0) as u32
+    }
+
+    /// 从 OpenAI 兼容 usage 中读取缓存写入 token。
+    ///
+    /// Qwen/DashScope 的显式缓存可能把 cache creation 放进 details；标准 OpenAI
+    /// Responses 转换也可能给出顶层 `cache_creation_input_tokens`。
+    fn cache_creation_tokens_from_openai_compatible_usage(usage: &Value) -> u32 {
+        usage
+            .get("cache_creation_input_tokens")
+            .and_then(|v| v.as_u64())
+            .or_else(|| {
+                usage
+                    .get("prompt_tokens_details")
+                    .and_then(|d| d.get("cache_creation_input_tokens"))
+                    .and_then(|v| v.as_u64())
+            })
+            .or_else(|| {
+                usage
+                    .get("input_tokens_details")
+                    .and_then(|d| d.get("cache_creation_input_tokens"))
+                    .and_then(|v| v.as_u64())
+            })
+            .unwrap_or(0) as u32
+    }
 }
 
 /// API 类型
@@ -250,25 +301,13 @@ impl TokenUsage {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let cached_tokens = usage
-            .get("cache_read_input_tokens")
-            .and_then(|v| v.as_u64())
-            .or_else(|| {
-                usage
-                    .get("input_tokens_details")
-                    .and_then(|d| d.get("cached_tokens"))
-                    .and_then(|v| v.as_u64())
-            })
-            .unwrap_or(0) as u32;
+        let cached_tokens = Self::cache_read_tokens_from_openai_compatible_usage(usage);
 
         Some(Self {
             input_tokens: input_tokens? as u32,
             output_tokens: output_tokens? as u32,
             cache_read_tokens: cached_tokens,
-            cache_creation_tokens: usage
-                .get("cache_creation_input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
+            cache_creation_tokens: Self::cache_creation_tokens_from_openai_compatible_usage(usage),
             model,
             message_id: None,
         })
@@ -285,16 +324,7 @@ impl TokenUsage {
         let output_tokens = usage.get("output_tokens")?.as_u64()? as u32;
 
         // 获取 cached_tokens (可能在 cache_read_input_tokens 或 input_tokens_details 中)
-        let cached_tokens = usage
-            .get("cache_read_input_tokens")
-            .and_then(|v| v.as_u64())
-            .or_else(|| {
-                usage
-                    .get("input_tokens_details")
-                    .and_then(|d| d.get("cached_tokens"))
-                    .and_then(|v| v.as_u64())
-            })
-            .unwrap_or(0) as u32;
+        let cached_tokens = Self::cache_read_tokens_from_openai_compatible_usage(usage);
 
         // 调整 input_tokens: 减去 cached_tokens
         let adjusted_input = input_tokens.saturating_sub(cached_tokens);
@@ -309,10 +339,7 @@ impl TokenUsage {
             input_tokens: adjusted_input,
             output_tokens,
             cache_read_tokens: cached_tokens,
-            cache_creation_tokens: usage
-                .get("cache_creation_input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
+            cache_creation_tokens: Self::cache_creation_tokens_from_openai_compatible_usage(usage),
             model,
             message_id: None,
         })
@@ -391,11 +418,7 @@ impl TokenUsage {
         let completion_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64())?;
 
         // 获取 cached_tokens (可能在 prompt_tokens_details 中)
-        let cached_tokens = usage
-            .get("prompt_tokens_details")
-            .and_then(|d| d.get("cached_tokens"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
+        let cached_tokens = Self::cache_read_tokens_from_openai_compatible_usage(usage);
 
         // 提取响应中的模型名称
         let model = body
@@ -407,7 +430,7 @@ impl TokenUsage {
             input_tokens: prompt_tokens as u32,
             output_tokens: completion_tokens as u32,
             cache_read_tokens: cached_tokens,
-            cache_creation_tokens: 0,
+            cache_creation_tokens: Self::cache_creation_tokens_from_openai_compatible_usage(usage),
             model,
             message_id: None,
         })
@@ -795,6 +818,47 @@ mod tests {
         assert_eq!(usage.input_tokens, 1000);
         assert_eq!(usage.output_tokens, 500);
         assert_eq!(usage.cache_read_tokens, 300);
+    }
+
+    #[test]
+    fn test_openai_response_parses_deepseek_context_cache_fields() {
+        let response = json!({
+            "model": "deepseek-v3.2",
+            "usage": {
+                "prompt_tokens": 1200,
+                "completion_tokens": 80,
+                "prompt_cache_hit_tokens": 900,
+                "prompt_cache_miss_tokens": 300
+            }
+        });
+
+        let usage = TokenUsage::from_openai_response(&response).unwrap();
+        assert_eq!(usage.input_tokens, 1200);
+        assert_eq!(usage.output_tokens, 80);
+        assert_eq!(usage.cache_read_tokens, 900);
+        assert_eq!(usage.cache_creation_tokens, 0);
+        assert_eq!(usage.model, Some("deepseek-v3.2".to_string()));
+    }
+
+    #[test]
+    fn test_openai_response_parses_qwen_cache_creation_details() {
+        let response = json!({
+            "model": "qwen3.7-max",
+            "usage": {
+                "prompt_tokens": 1605,
+                "completion_tokens": 50,
+                "prompt_tokens_details": {
+                    "cached_tokens": 1200,
+                    "cache_creation_input_tokens": 405
+                }
+            }
+        });
+
+        let usage = TokenUsage::from_openai_response(&response).unwrap();
+        assert_eq!(usage.input_tokens, 1605);
+        assert_eq!(usage.output_tokens, 50);
+        assert_eq!(usage.cache_read_tokens, 1200);
+        assert_eq!(usage.cache_creation_tokens, 405);
     }
 
     #[test]

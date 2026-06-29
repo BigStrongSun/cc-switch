@@ -398,6 +398,42 @@ pub struct CodexChatReasoningConfig {
     pub output_format: Option<String>,
 }
 
+/// Codex 路由的缓存能力描述。
+///
+/// 这个结构只声明上游“接受什么缓存协议”和“应该展示什么 usage 证据”，
+/// 不负责主动构造缓存命中；真实命中仍取决于请求前缀、上游缓存策略和 usage 回传。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct CodexCacheConfig {
+    /// 缓存机制类型，例如 openai_prompt_cache / auto_prefix_cache /
+    /// deepseek_context_cache / qwen_context_cache / anthropic_cache_control。
+    #[serde(rename = "cacheMode", skip_serializing_if = "Option::is_none")]
+    pub cache_mode: Option<String>,
+    /// Chat/Responses 上游是否明确支持 OpenAI 的 prompt_cache_key 参数。
+    #[serde(
+        rename = "supportsPromptCacheKey",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub supports_prompt_cache_key: Option<bool>,
+    /// Chat/Responses 上游是否明确支持 OpenAI 的 prompt_cache_retention 参数。
+    #[serde(
+        rename = "supportsPromptCacheRetention",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub supports_prompt_cache_retention: Option<bool>,
+    /// 显式缓存 key；只有在 supportsPromptCacheKey 为 true 时才会被透传。
+    #[serde(rename = "promptCacheKey", skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
+    /// OpenAI prompt cache retention，例如 in_memory 或 24h。
+    #[serde(
+        rename = "promptCacheRetention",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prompt_cache_retention: Option<String>,
+    /// UI/日志可参考的缓存 usage 字段名，便于解释“真实命中看哪里”。
+    #[serde(default, rename = "usageFields", skip_serializing_if = "Vec::is_empty")]
+    pub usage_fields: Vec<String>,
+}
+
 /// Local proxy request overrides applied after route/protocol transforms.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LocalProxyRequestOverrides {
@@ -488,6 +524,15 @@ pub struct ProviderMeta {
     /// identity when available; generated session IDs are not sent upstream.
     #[serde(rename = "promptCacheKey", skip_serializing_if = "Option::is_none")]
     pub prompt_cache_key: Option<String>,
+    /// OpenAI prompt cache retention policy for endpoints that explicitly support it.
+    #[serde(
+        rename = "promptCacheRetention",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prompt_cache_retention: Option<String>,
+    /// Codex route/provider cache capability metadata.
+    #[serde(rename = "codexCache", skip_serializing_if = "Option::is_none")]
+    pub codex_cache: Option<CodexCacheConfig>,
     /// Codex OAuth FAST mode: inject `service_tier = "priority"` for ChatGPT Codex requests.
     #[serde(rename = "codexFastMode", skip_serializing_if = "Option::is_none")]
     pub codex_fast_mode: Option<bool>,

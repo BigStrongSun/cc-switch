@@ -9,7 +9,7 @@ use super::codex_chat_common::{
     response_function_call_item, response_function_call_item_with_namespace,
     split_leading_think_block,
 };
-use crate::provider::CodexChatReasoningConfig;
+use crate::provider::{CodexCacheConfig, CodexChatReasoningConfig};
 use crate::proxy::{
     error::ProxyError,
     json_canonical::{
@@ -257,7 +257,12 @@ pub fn responses_to_chat_completions_with_reasoning(
     body: Value,
     reasoning_config: Option<&CodexChatReasoningConfig>,
 ) -> Result<Value, ProxyError> {
-    responses_to_chat_completions_with_reasoning_and_text_only(body, reasoning_config, None)
+    responses_to_chat_completions_with_reasoning_text_only_and_cache(
+        body,
+        reasoning_config,
+        None,
+        None,
+    )
 }
 
 /// Convert an OpenAI Responses request into Chat Completions with an optional
@@ -266,6 +271,22 @@ pub fn responses_to_chat_completions_with_reasoning_and_text_only(
     body: Value,
     reasoning_config: Option<&CodexChatReasoningConfig>,
     text_only_override: Option<bool>,
+) -> Result<Value, ProxyError> {
+    responses_to_chat_completions_with_reasoning_text_only_and_cache(
+        body,
+        reasoning_config,
+        text_only_override,
+        None,
+    )
+}
+
+/// Convert an OpenAI Responses request into Chat Completions with route-level
+/// reasoning, modality and cache capability metadata.
+pub fn responses_to_chat_completions_with_reasoning_text_only_and_cache(
+    body: Value,
+    reasoning_config: Option<&CodexChatReasoningConfig>,
+    text_only_override: Option<bool>,
+    cache_config: Option<&CodexCacheConfig>,
 ) -> Result<Value, ProxyError> {
     let mut result = json!({});
     let tool_context = build_codex_tool_context_from_request(&body);
@@ -339,6 +360,7 @@ pub fn responses_to_chat_completions_with_reasoning_and_text_only(
             result[*key] = value.clone();
         }
     }
+    apply_openai_prompt_cache_options(&mut result, &body, cache_config);
 
     // Strict OpenAI-compatible upstreams (vLLM, enterprise gateways) reject
     // requests that carry tool_choice or parallel_tool_calls without a non-empty
@@ -361,6 +383,70 @@ pub fn responses_to_chat_completions_with_reasoning_and_text_only(
     super::transform::inject_openai_stream_include_usage(&mut result);
 
     Ok(result)
+}
+
+/// 按 provider/route 明确声明的能力透传 OpenAI prompt cache 参数。
+///
+/// DeepSeek、GLM/Z.AI、Qwen/DashScope 的自动前缀缓存不需要这些 OpenAI 私有字段；
+/// 因此这里必须由 capability 显式放行，避免向未知 Chat 兼容上游发送它们。
+fn apply_openai_prompt_cache_options(
+    result: &mut Value,
+    source_body: &Value,
+    cache_config: Option<&CodexCacheConfig>,
+) {
+    let Some(cache_config) = cache_config else {
+        return;
+    };
+    let mode = cache_config
+        .cache_mode
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let supports_key =
+        cache_config.supports_prompt_cache_key == Some(true) || mode == "openai_prompt_cache";
+    let supports_retention =
+        cache_config.supports_prompt_cache_retention == Some(true) || mode == "openai_prompt_cache";
+
+    if supports_key {
+        let key = source_body
+            .get("prompt_cache_key")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .or_else(|| {
+                cache_config
+                    .prompt_cache_key
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+            });
+        if let Some(key) = key {
+            result["prompt_cache_key"] = json!(key);
+        }
+    }
+
+    if supports_retention {
+        let retention = source_body
+            .get("prompt_cache_retention")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .or_else(|| {
+                cache_config
+                    .prompt_cache_retention
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+            });
+        if let Some(retention) = retention {
+            result["prompt_cache_retention"] = json!(retention);
+        }
+    }
 }
 
 /// 根据 provider/route 声明抬高 Chat 上游的最小输出预算。
@@ -2090,6 +2176,56 @@ mod tests {
         assert_eq!(result["tool_choice"]["function"]["name"], "get_weather");
         assert_eq!(result["max_tokens"], 100);
         assert_eq!(result["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn responses_request_to_chat_passes_openai_prompt_cache_options_when_capable() {
+        let input = json!({
+            "model": "gpt-5.5",
+            "input": "hello",
+            "prompt_cache_key": "codex-thread-1"
+        });
+        let cache_config = CodexCacheConfig {
+            cache_mode: Some("openai_prompt_cache".to_string()),
+            prompt_cache_retention: Some("24h".to_string()),
+            ..CodexCacheConfig::default()
+        };
+
+        let result = responses_to_chat_completions_with_reasoning_text_only_and_cache(
+            input,
+            None,
+            None,
+            Some(&cache_config),
+        )
+        .unwrap();
+
+        assert_eq!(result["prompt_cache_key"], "codex-thread-1");
+        assert_eq!(result["prompt_cache_retention"], "24h");
+    }
+
+    #[test]
+    fn responses_request_to_chat_does_not_pass_cache_options_for_auto_prefix_cache() {
+        let input = json!({
+            "model": "deepseek-v3.2",
+            "input": "hello",
+            "prompt_cache_key": "must-not-leak",
+            "prompt_cache_retention": "24h"
+        });
+        let cache_config = CodexCacheConfig {
+            cache_mode: Some("deepseek_context_cache".to_string()),
+            ..CodexCacheConfig::default()
+        };
+
+        let result = responses_to_chat_completions_with_reasoning_text_only_and_cache(
+            input,
+            None,
+            None,
+            Some(&cache_config),
+        )
+        .unwrap();
+
+        assert!(result.get("prompt_cache_key").is_none());
+        assert!(result.get("prompt_cache_retention").is_none());
     }
 
     #[test]

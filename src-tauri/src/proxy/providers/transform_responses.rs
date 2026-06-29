@@ -43,6 +43,7 @@ pub(crate) fn sanitize_anthropic_tool_use_input_json(name: &str, raw: &str) -> S
 /// Anthropic 请求 → OpenAI Responses 请求
 ///
 /// `cache_key`: optional prompt_cache_key to inject for improved cache routing
+/// `cache_retention`: optional OpenAI prompt_cache_retention policy for capable endpoints
 /// `is_codex_oauth`: 当目标后端是 ChatGPT Plus/Pro 反代 (`chatgpt.com/backend-api/codex`) 时为 true。
 /// 该后端强制要求 `store: false`，并要求 `include` 包含 `reasoning.encrypted_content`
 /// 以便在无服务端状态下保持多轮 reasoning 上下文。
@@ -51,6 +52,25 @@ pub(crate) fn sanitize_anthropic_tool_use_input_json(name: &str, raw: &str) -> S
 pub fn anthropic_to_responses(
     body: Value,
     cache_key: Option<&str>,
+    is_codex_oauth: bool,
+    codex_fast_mode: bool,
+) -> Result<Value, ProxyError> {
+    anthropic_to_responses_with_cache_retention(
+        body,
+        cache_key,
+        None,
+        is_codex_oauth,
+        codex_fast_mode,
+    )
+}
+
+/// Anthropic 请求 → OpenAI Responses 请求，并允许显式透传 prompt cache retention。
+///
+/// 仅调用方已确认上游支持 OpenAI prompt cache 参数时使用；未知第三方 provider 不应传入。
+pub fn anthropic_to_responses_with_cache_retention(
+    body: Value,
+    cache_key: Option<&str>,
+    cache_retention: Option<&str>,
     is_codex_oauth: bool,
     codex_fast_mode: bool,
 ) -> Result<Value, ProxyError> {
@@ -143,6 +163,9 @@ pub fn anthropic_to_responses(
     if let Some(key) = cache_key {
         result["prompt_cache_key"] = json!(key);
     }
+    if let Some(retention) = cache_retention {
+        result["prompt_cache_retention"] = json!(retention);
+    }
 
     // Codex OAuth (ChatGPT Plus/Pro 反代) 特殊协议约束：
     // 整体依据：OpenAI 官方 codex-rs 的 `ResponsesApiRequest` 结构体
@@ -161,9 +184,14 @@ pub fn anthropic_to_responses(
     //   （cc-switch 的 transform 当前是"条件写入"，可能产生缺失）
     // - service_tier: 仅在 FAST mode 开启时写入 "priority"
     //   （与 OpenAI 官方 codex-rs 当前请求结构保持一致）
+    // - prompt_cache_retention: OpenAI API 支持，但 ChatGPT Codex 反代结构未确认；
+    //   若误带可能触发 400，故 Codex OAuth 反代路径移除，仅保留既有 prompt_cache_key。
     // - stream: 必须永远 true（codex-rs 硬编码 true，且 cc-switch 的
     //   SSE 解析层只处理流式响应，强制覆盖避免客户端误传 false）
     if is_codex_oauth {
+        if let Some(obj) = result.as_object_mut() {
+            obj.remove("prompt_cache_retention");
+        }
         result["store"] = json!(false);
         if codex_fast_mode {
             result["service_tier"] = json!("priority");
@@ -1114,6 +1142,26 @@ mod tests {
 
         let result = anthropic_to_responses(input, Some("my-provider-id"), false, false).unwrap();
         assert_eq!(result["prompt_cache_key"], "my-provider-id");
+    }
+
+    #[test]
+    fn test_anthropic_to_responses_with_cache_retention() {
+        let input = json!({
+            "model": "gpt-5.5",
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": "Hello"}]
+        });
+
+        let result = anthropic_to_responses_with_cache_retention(
+            input,
+            Some("thread-1"),
+            Some("24h"),
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(result["prompt_cache_key"], "thread-1");
+        assert_eq!(result["prompt_cache_retention"], "24h");
     }
 
     #[test]

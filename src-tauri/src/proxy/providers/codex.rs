@@ -7,7 +7,8 @@
 
 use super::{AuthInfo, AuthStrategy, ProviderAdapter};
 use crate::provider::{
-    AuthBinding, AuthBindingSource, CodexChatReasoningConfig, Provider, ProviderMeta,
+    AuthBinding, AuthBindingSource, CodexCacheConfig, CodexChatReasoningConfig, Provider,
+    ProviderMeta,
 };
 use crate::proxy::error::ProxyError;
 use regex::Regex;
@@ -861,6 +862,9 @@ fn build_codex_routed_provider(
     if let Some(reasoning_config) = codex_route_chat_reasoning_config(upstream, route) {
         meta.codex_chat_reasoning = Some(reasoning_config);
     }
+    if let Some(cache_config) = codex_route_cache_config(upstream, route) {
+        meta.codex_cache = Some(cache_config);
+    }
     routed.meta = Some(meta);
 
     routed
@@ -1088,6 +1092,31 @@ fn codex_route_chat_reasoning_config(
         .and_then(|value| serde_json::from_value(value.clone()).ok())
         .map(normalize_codex_chat_reasoning_config)
 }
+
+/// 从单条 Codex route 中读取缓存能力覆盖配置。
+///
+/// MultiRouter 里同一个外层 provider 可能同时路由到 OpenAI、DeepSeek、Qwen 等不同
+/// 上游；缓存机制必须跟 route 走，不能只看外层 provider 名称。
+fn codex_route_cache_config(upstream: &JsonValue, route: &JsonValue) -> Option<CodexCacheConfig> {
+    upstream
+        .get("codexCache")
+        .or_else(|| upstream.get("codex_cache"))
+        .or_else(|| route.get("codexCache"))
+        .or_else(|| route.get("codex_cache"))
+        .or_else(|| {
+            route
+                .get("capabilities")
+                .and_then(|capabilities| capabilities.get("codexCache"))
+        })
+        .or_else(|| {
+            route
+                .get("capabilities")
+                .and_then(|capabilities| capabilities.get("codex_cache"))
+        })
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .map(normalize_codex_cache_config)
+}
+
 /// Extract the real upstream model configured for a Codex provider.
 pub fn codex_provider_upstream_model(provider: &Provider) -> Option<String> {
     provider
@@ -1208,6 +1237,158 @@ pub fn resolve_codex_chat_reasoning_config(
     }
 
     infer_codex_chat_reasoning_config(provider, body)
+}
+
+/// 解析 Codex provider 当前请求应采用的缓存能力。
+///
+/// 读取顺序为显式 meta、route 物化后的 capabilities、最后按 provider/model 做保守推断；
+/// 推断只用于解释和安全透传，绝不为未知第三方注入 OpenAI 私有缓存参数。
+pub fn resolve_codex_cache_config(provider: &Provider, body: &JsonValue) -> CodexCacheConfig {
+    if let Some(config) = provider
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.codex_cache.clone())
+    {
+        return normalize_codex_cache_config(config);
+    }
+
+    if let Some(config) = provider
+        .settings_config
+        .get("codexResolvedCapabilities")
+        .and_then(|capabilities| capabilities.get("codexCache"))
+        .or_else(|| {
+            provider
+                .settings_config
+                .get("codexResolvedCapabilities")
+                .and_then(|capabilities| capabilities.get("codex_cache"))
+        })
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+    {
+        return normalize_codex_cache_config(config);
+    }
+
+    infer_codex_cache_config(provider, body)
+}
+
+/// 归一化缓存能力配置，兼容只写 cacheMode 的简化 route。
+fn normalize_codex_cache_config(mut config: CodexCacheConfig) -> CodexCacheConfig {
+    let mode = config
+        .cache_mode
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if mode == "openai_prompt_cache" {
+        config.supports_prompt_cache_key = Some(config.supports_prompt_cache_key.unwrap_or(true));
+        config.supports_prompt_cache_retention =
+            Some(config.supports_prompt_cache_retention.unwrap_or(true));
+        if config.usage_fields.is_empty() {
+            config.usage_fields = vec![
+                "usage.input_tokens_details.cached_tokens".to_string(),
+                "usage.prompt_tokens_details.cached_tokens".to_string(),
+            ];
+        }
+    }
+    if mode == "deepseek_context_cache" && config.usage_fields.is_empty() {
+        config.usage_fields = vec![
+            "usage.prompt_cache_hit_tokens".to_string(),
+            "usage.prompt_cache_miss_tokens".to_string(),
+        ];
+    }
+    if matches!(
+        mode.as_str(),
+        "auto_prefix_cache" | "zai_context_cache" | "glm_context_cache"
+    ) && config.usage_fields.is_empty()
+    {
+        config.usage_fields = vec!["usage.prompt_tokens_details.cached_tokens".to_string()];
+    }
+    config
+}
+
+/// 按 provider 家族做保守缓存能力推断。
+///
+/// 这里只有“不会破坏请求”的默认值：DeepSeek/GLM/Qwen 标成自动缓存但不启用
+/// OpenAI cache 参数；只有官方 OpenAI/Codex OAuth 或明确 OpenAI provider 才启用
+/// prompt_cache_key / prompt_cache_retention。
+fn infer_codex_cache_config(provider: &Provider, body: &JsonValue) -> CodexCacheConfig {
+    let model = body
+        .get("model")
+        .and_then(|value| value.as_str())
+        .map(str::to_ascii_lowercase)
+        .or_else(|| codex_provider_upstream_model(provider).map(|value| value.to_ascii_lowercase()))
+        .unwrap_or_default();
+    let provider_type = provider
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.provider_type.as_deref())
+        .unwrap_or("");
+    let provider_text =
+        format!("{} {} {}", provider.id, provider.name, provider_type).to_ascii_lowercase();
+
+    let mut config = if provider_text.contains("deepseek") || model.contains("deepseek") {
+        CodexCacheConfig {
+            cache_mode: Some("deepseek_context_cache".to_string()),
+            usage_fields: vec![
+                "usage.prompt_cache_hit_tokens".to_string(),
+                "usage.prompt_cache_miss_tokens".to_string(),
+            ],
+            ..CodexCacheConfig::default()
+        }
+    } else if provider_text.contains("z.ai")
+        || provider_text.contains("zai")
+        || provider_text.contains("glm")
+        || model.contains("glm")
+    {
+        CodexCacheConfig {
+            cache_mode: Some("glm_context_cache".to_string()),
+            usage_fields: vec!["usage.prompt_tokens_details.cached_tokens".to_string()],
+            ..CodexCacheConfig::default()
+        }
+    } else if provider_text.contains("dashscope")
+        || provider_text.contains("qwen")
+        || model.contains("qwen")
+    {
+        CodexCacheConfig {
+            cache_mode: Some("qwen_context_cache".to_string()),
+            usage_fields: vec![
+                "usage.input_tokens_details.cached_tokens".to_string(),
+                "usage.prompt_tokens_details.cached_tokens".to_string(),
+                "usage.prompt_tokens_details.cache_creation_input_tokens".to_string(),
+            ],
+            ..CodexCacheConfig::default()
+        }
+    } else if provider_text.contains("codex_oauth")
+        || provider_text.contains("openai official")
+        || provider_text.trim() == "openai openai"
+        || model.starts_with("gpt-")
+        || model.starts_with('o')
+    {
+        CodexCacheConfig {
+            cache_mode: Some("openai_prompt_cache".to_string()),
+            supports_prompt_cache_key: Some(true),
+            supports_prompt_cache_retention: Some(true),
+            usage_fields: vec![
+                "usage.input_tokens_details.cached_tokens".to_string(),
+                "usage.prompt_tokens_details.cached_tokens".to_string(),
+            ],
+            ..CodexCacheConfig::default()
+        }
+    } else {
+        CodexCacheConfig {
+            cache_mode: Some("unknown".to_string()),
+            ..CodexCacheConfig::default()
+        }
+    };
+
+    if let Some(meta) = provider.meta.as_ref() {
+        if config.prompt_cache_key.is_none() {
+            config.prompt_cache_key = meta.prompt_cache_key.clone();
+        }
+        if config.prompt_cache_retention.is_none() {
+            config.prompt_cache_retention = meta.prompt_cache_retention.clone();
+        }
+    }
+    normalize_codex_cache_config(config)
 }
 
 fn normalize_codex_chat_reasoning_config(
@@ -2231,6 +2412,47 @@ experimental_bearer_token = "PROXY_MANAGED"
         assert_eq!(config.thinking_param.as_deref(), Some("enable_thinking"));
         assert_eq!(config.effort_param.as_deref(), Some("none"));
         assert_eq!(config.min_output_tokens, Some(2048));
+    }
+
+    #[test]
+    fn test_codex_model_route_overrides_cache_config() {
+        let provider = create_provider(json!({
+            "codexRouting": {
+                "routes": [{
+                    "id": "routing-deepseek",
+                    "match": { "models": ["deepseek-chat"] },
+                    "upstream": {
+                        "apiFormat": "openai_chat",
+                        "auth": { "source": "provider_config" }
+                    },
+                    "capabilities": {
+                        "codexCache": {
+                            "cacheMode": "deepseek_context_cache",
+                            "usageFields": [
+                                "usage.prompt_cache_hit_tokens",
+                                "usage.prompt_cache_miss_tokens"
+                            ]
+                        }
+                    }
+                }],
+                "enabled": true
+            }
+        }));
+
+        let routed =
+            resolve_codex_model_routed_provider(&provider, &json!({ "model": "deepseek-chat" }))
+                .expect("deepseek route");
+        let config = resolve_codex_cache_config(&routed, &json!({ "model": "deepseek-chat" }));
+
+        assert_eq!(config.cache_mode.as_deref(), Some("deepseek_context_cache"));
+        assert_ne!(config.supports_prompt_cache_key, Some(true));
+        assert_eq!(
+            config.usage_fields,
+            vec![
+                "usage.prompt_cache_hit_tokens".to_string(),
+                "usage.prompt_cache_miss_tokens".to_string()
+            ]
+        );
     }
 
     #[test]

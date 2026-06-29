@@ -17,7 +17,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Provider } from "@/types";
-import type { CodexCatalogModel, CodexRoutingRoute } from "@/types";
+import type {
+  CodexCacheConfig,
+  CodexCatalogModel,
+  CodexRoutingRoute,
+} from "@/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -396,6 +400,27 @@ function modelSourceSummary(provider: Provider): string {
 function fetchConfigSummary(config: WizardModelFetchConfig | null): string {
   if (!config) return "缺少 Base URL 或 API Key";
   return `${config.baseUrl}${config.isFullUrl ? " (完整 URL)" : ""}`;
+}
+
+// 将 route 的缓存能力转换成向导里的说明，强调缓存验证看真实 usage，而不是基础连通性。
+function cacheCapabilitySummary(cache?: CodexCacheConfig): string {
+  switch (cache?.cacheMode) {
+    case "openai_prompt_cache":
+      return "OpenAI Prompt Cache：保留原生前缀缓存；支持时会透传 prompt_cache_key/retention，真实命中看 cached_tokens。";
+    case "deepseek_context_cache":
+      return "DeepSeek Context Cache：不注入 OpenAI 私有参数；真实命中看 prompt_cache_hit_tokens / miss_tokens。";
+    case "glm_context_cache":
+    case "zai_context_cache":
+      return "GLM/Z.AI 自动上下文缓存：保持稳定前缀，不注入 OpenAI 私有参数；真实命中看 cached_tokens。";
+    case "qwen_context_cache":
+      return "Qwen/DashScope 上下文缓存：按协议保持请求形态；真实命中看 cached_tokens / cache_creation_input_tokens。";
+    case "anthropic_cache_control":
+      return "Anthropic cache_control：只适用于 Anthropic/Bedrock 风格消息块。";
+    case "auto_prefix_cache":
+      return "自动前缀缓存：保持稳定前缀，不额外注入 OpenAI cache 参数。";
+    default:
+      return "缓存能力未知：只做基础连通性与路由验证，真实命中需看上游 usage。";
+  }
 }
 
 // 给配置页提供三态说明：能在线读取、已有目录可继续、确实需要补全。
@@ -1371,6 +1396,9 @@ export function CodexMultiRouterWizard({
                     <div className="mt-2 text-sm text-muted-foreground">
                       模型 {route.match.models?.length ?? 0} 个；前缀{" "}
                       {(route.match.prefixes ?? []).join(", ") || "无"}
+                    </div>
+                    <div className="mt-2 rounded-md bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
+                      {cacheCapabilitySummary(route.capabilities?.codexCache)}
                     </div>
                   </div>
                 ))}
