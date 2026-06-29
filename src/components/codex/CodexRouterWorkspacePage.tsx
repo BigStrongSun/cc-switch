@@ -4737,6 +4737,8 @@ function StatusTab({
   const latestForwardOk = latestLog
     ? latestLog.statusCode >= 200 && latestLog.statusCode < 400
     : false;
+  // 配置成功不能只看“任意 Codex 请求成功”，必须看到当前 MultiRouter 方案的 route 有成功转发证据。
+  const currentRouteForwardOk = trafficRows.some((row) => row.successCount > 0);
   const listenAddress = proxyStatus
     ? `${proxyStatus.address}:${proxyStatus.port}`
     : "未启动";
@@ -4766,7 +4768,7 @@ function StatusTab({
       routeEnabled &&
       hasEnabledRoutes,
   );
-  const trafficVerified = latestForwardOk;
+  const trafficVerified = currentRouteForwardOk;
   const linkOnline = Boolean(runtimeStatus.running && trafficVerified);
   const readinessIssues = [
     !isProxyRunning ? "本地代理未监听" : "",
@@ -4783,9 +4785,9 @@ function StatusTab({
 
   // 当状态页确认 MultiRouter 配置与真实转发都成功后，通知 App 进入“配置成功 -> 历史修复”收尾流程。
   useEffect(() => {
-    if (!selectedPlan || !linkOnline || !latestForwardOk) return;
+    if (!selectedPlan || !linkOnline || !currentRouteForwardOk) return;
     onRuntimeReady?.(selectedPlan);
-  }, [latestForwardOk, linkOnline, onRuntimeReady, selectedPlan]);
+  }, [currentRouteForwardOk, linkOnline, onRuntimeReady, selectedPlan]);
 
   /// 手动同步 Codex JSONL 会话用量，让子 Agent 统计立即看到最新 token_count。
   async function syncCodexSessionUsage() {
@@ -4941,7 +4943,7 @@ function StatusTab({
                 linkOnline
                   ? "Codex 请求会进入本地代理并按 model 分流"
                   : configReady
-                    ? "配置和监听已就绪，等待最近一次真实转发成功"
+                    ? "配置和监听已就绪，等待当前方案的路由转发成功"
                     : readinessIssues.join("；") || "等待状态刷新"
               }
             />
@@ -4966,20 +4968,24 @@ function StatusTab({
               detail={selectedPlan?.name ?? "暂无 MultiRouter provider"}
             />
             <StatusCard
-              ok={Boolean(latestLog && latestForwardOk)}
+              ok={currentRouteForwardOk}
               label="最近转发"
               value={
-                latestLog
-                  ? latestForwardOk
-                    ? `成功 ${latestLog.statusCode}`
-                    : `失败 ${latestLog.statusCode}`
-                  : "暂无请求"
+                currentRouteForwardOk
+                  ? "当前方案成功"
+                  : latestLog
+                    ? latestForwardOk
+                      ? `成功 ${latestLog.statusCode}`
+                      : `失败 ${latestLog.statusCode}`
+                    : "暂无请求"
               }
               detail={
-                latestLog?.errorMessage ||
-                latestLog?.requestModel ||
-                latestLog?.model ||
-                "等待 Codex 请求"
+                currentRouteForwardOk
+                  ? "已确认当前 MultiRouter route 命中并完成上游转发"
+                  : latestLog?.errorMessage ||
+                    latestLog?.requestModel ||
+                    latestLog?.model ||
+                    "等待 Codex 请求"
               }
             />
           </div>

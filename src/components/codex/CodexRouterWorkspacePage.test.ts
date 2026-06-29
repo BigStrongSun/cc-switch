@@ -1470,4 +1470,92 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
       expect(onRuntimeReady).toHaveBeenCalledWith(routedPlan),
     );
   });
+
+  // onRuntimeReady 负向测试：即使最近一条 Codex 代理日志成功，只要它没有命中当前
+  // MultiRouter 方案的 route，就不能提前进入“配置成功 -> 历史修复”收尾流程。
+  it("does not call onRuntimeReady when latest successful request is outside the selected route", async () => {
+    const source: Provider = {
+      id: "codex-online-source",
+      name: "Online Source",
+      category: "custom",
+      settingsConfig: {
+        modelCatalog: {
+          models: [{ model: "test-model" }],
+        },
+      },
+    };
+    const unrelatedSource: Provider = {
+      id: "codex-unrelated-source",
+      name: "Unrelated Source",
+      category: "custom",
+      settingsConfig: {
+        modelCatalog: {
+          models: [{ model: "other-model" }],
+        },
+      },
+    };
+    const plan = createDraftRoutingPlan([source], [source]);
+    const routes = [
+      normalizeCodexRouteForSave(
+        {
+          label: source.name,
+          targetProviderId: source.id,
+          match: { models: ["test-model"] },
+        },
+        0,
+        new Set<string>(),
+      ),
+    ];
+    const routedPlan: Provider = {
+      ...plan,
+      settingsConfig: {
+        ...plan.settingsConfig,
+        codexRouting: {
+          enabled: true,
+          defaultRouteId: routes[0].id,
+          routes,
+        },
+      },
+    };
+    const onRuntimeReady = vi.fn();
+
+    requestLogsFixture.value = {
+      data: {
+        data: [
+          createCodexProxyLog({
+            providerId: unrelatedSource.id,
+            providerName: unrelatedSource.name,
+            model: "other-model",
+            requestModel: "other-model",
+            statusCode: 200,
+          }),
+        ],
+        total: 1,
+        page: 0,
+        pageSize: 500,
+      },
+      isLoading: false,
+    };
+
+    renderWorkspace(
+      React.createElement(CodexRouterWorkspacePage, {
+        providers: [source, unrelatedSource, routedPlan],
+        isProxyRunning: true,
+        isCodexTakeoverActive: true,
+        activeProviderId: routedPlan.id,
+        initialProviderId: routedPlan.id,
+        initialTab: "status",
+        onEditProvider: vi.fn(),
+        onDeletePlan: vi.fn(),
+        onCreateProvider: vi.fn(),
+        onRuntimeReady,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("成功 200")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("当前方案成功")).not.toBeInTheDocument();
+    expect(onRuntimeReady).not.toHaveBeenCalled();
+  });
 });

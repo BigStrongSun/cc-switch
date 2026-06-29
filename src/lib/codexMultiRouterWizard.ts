@@ -367,7 +367,10 @@ export function inferWizardCacheConfig(provider: Provider): CodexCacheConfig {
   );
   const hasModel = (needle: string) =>
     models.some((model) => model.includes(needle));
-  if (isOfficialCodexSource(provider) || hasOpenAiResponsesNativeModels(provider)) {
+  if (
+    isOfficialCodexSource(provider) ||
+    hasOpenAiResponsesNativeModels(provider)
+  ) {
     return {
       cacheMode: "openai_prompt_cache",
       supportsPromptCacheKey: true,
@@ -400,11 +403,7 @@ export function inferWizardCacheConfig(provider: Provider): CodexCacheConfig {
       usageFields: ["usage.prompt_tokens_details.cached_tokens"],
     };
   }
-  if (
-    text.includes("dashscope") ||
-    text.includes("qwen") ||
-    hasModel("qwen")
-  ) {
+  if (text.includes("dashscope") || text.includes("qwen") || hasModel("qwen")) {
     return {
       cacheMode: "qwen_context_cache",
       usageFields: [
