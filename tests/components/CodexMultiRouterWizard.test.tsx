@@ -143,6 +143,32 @@ describe("CodexMultiRouterWizard", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("marks catalog-only providers as continuable instead of requiring full config", () => {
+    renderWithQueryClient(
+      <CodexMultiRouterWizard
+        open
+        providers={[
+          provider({
+            id: "catalog-only",
+            name: "Catalog Only",
+            settingsConfig: {
+              modelCatalog: { models: [{ model: "manual-model" }] },
+            },
+          }),
+        ]}
+        onOpenChange={vi.fn()}
+        onCreateProvider={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        onEnablePlan={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "配置核心参数" }));
+
+    expect(screen.getByText("已有模型目录，可继续")).toBeInTheDocument();
+    expect(screen.queryByText("需补全配置")).not.toBeInTheDocument();
+  });
+
   it("stays in needSources state when advancing without model sources", () => {
     renderWithQueryClient(
       <CodexMultiRouterWizard

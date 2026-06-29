@@ -30,6 +30,7 @@ interface AddProviderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   appId: AppId;
+  panelZIndexClassName?: string;
   onSubmit: (
     provider: Omit<Provider, "id"> & {
       providerKey?: string;
@@ -103,6 +104,7 @@ export function AddProviderDialog({
   open,
   onOpenChange,
   appId,
+  panelZIndexClassName,
   onSubmit,
 }: AddProviderDialogProps) {
   const { t } = useTranslation();
@@ -424,6 +426,7 @@ export function AddProviderDialog({
       }
       onClose={() => onOpenChange(false)}
       footer={footer}
+      zIndexClassName={panelZIndexClassName}
       contentClassName="pt-3"
     >
       {isCodexRouterEntry && (

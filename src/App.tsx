@@ -1817,6 +1817,9 @@ function App() {
         open={isAddOpen}
         onOpenChange={setIsAddOpen}
         appId={activeApp}
+        panelZIndexClassName={
+          isCodexMultiRouterWizardOpen ? "z-[140]" : undefined
+        }
         onSubmit={addProvider}
       />
 

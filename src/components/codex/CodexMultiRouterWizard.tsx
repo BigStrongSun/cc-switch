@@ -35,6 +35,7 @@ import {
   getWizardConnectivityProbeModels,
   getWizardConfigIssues,
   getWizardModelFetchConfig,
+  hasWizardModelCatalog,
   mergeFetchedModelsIntoWizardProvider,
   isCodexMultiRouterPlan,
   readWizardModelCatalog,
@@ -384,6 +385,34 @@ function modelSourceSummary(provider: Provider): string {
 function fetchConfigSummary(config: WizardModelFetchConfig | null): string {
   if (!config) return "缺少 Base URL 或 API Key";
   return `${config.baseUrl}${config.isFullUrl ? " (完整 URL)" : ""}`;
+}
+
+// 给配置页提供三态说明：能在线读取、已有目录可继续、确实需要补全。
+function providerConfigStatus(provider: Provider): {
+  badge: string;
+  badgeVariant: "outline" | "secondary" | "destructive";
+  summary: string;
+} {
+  const config = getWizardModelFetchConfig(provider);
+  if (config) {
+    return {
+      badge: "可自动获取模型",
+      badgeVariant: "outline",
+      summary: fetchConfigSummary(config),
+    };
+  }
+  if (hasWizardModelCatalog(provider)) {
+    return {
+      badge: "已有模型目录，可继续",
+      badgeVariant: "secondary",
+      summary: "未配置在线获取参数，将使用当前 modelCatalog 生成路由",
+    };
+  }
+  return {
+    badge: "需补全配置",
+    badgeVariant: "destructive",
+    summary: "缺少 Base URL/API Key，且没有可用 modelCatalog",
+  };
 }
 
 // 将内部状态机状态转换为用户能理解的短句，便于在向导顶部持续暴露当前进度。
@@ -1103,18 +1132,20 @@ export function CodexMultiRouterWizard({
                     添加 Provider
                   </Button>
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {draftSources.map((provider) => (
-                    <div key={provider.id} className="rounded-lg border p-3">
-                      <div className="font-medium">{provider.name}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {provider.id}
+                <div className="max-h-[min(42vh,28rem)] overflow-y-auto pr-2">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {draftSources.map((provider) => (
+                      <div key={provider.id} className="rounded-lg border p-3">
+                        <div className="font-medium">{provider.name}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {provider.id}
+                        </div>
+                        <Badge variant="outline" className="mt-3">
+                          {modelSourceSummary(provider)}
+                        </Badge>
                       </div>
-                      <Badge variant="outline" className="mt-3">
-                        {modelSourceSummary(provider)}
-                      </Badge>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
                 {draftSources.length === 0 && (
                   <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -1134,32 +1165,34 @@ export function CodexMultiRouterWizard({
                     Key，或继续使用已有 modelCatalog。
                   </div>
                 )}
-                {draftSources.map((provider) => {
-                  const config = getWizardModelFetchConfig(provider);
-                  return (
-                    <div
-                      key={provider.id}
-                      className="rounded-lg border p-4 text-sm"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="font-medium">{provider.name}</div>
-                        <Badge variant={config ? "outline" : "destructive"}>
-                          {config ? "可自动获取模型" : "需补全配置"}
-                        </Badge>
+                <div className="max-h-[min(46vh,32rem)] space-y-3 overflow-y-auto pr-2">
+                  {draftSources.map((provider) => {
+                    const status = providerConfigStatus(provider);
+                    return (
+                      <div
+                        key={provider.id}
+                        className="rounded-lg border p-4 text-sm"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="font-medium">{provider.name}</div>
+                          <Badge variant={status.badgeVariant}>
+                            {status.badge}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 text-muted-foreground">
+                          {status.summary}
+                        </div>
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          API 格式：
+                          {provider.meta?.apiFormat ??
+                            provider.settingsConfig?.apiFormat ??
+                            provider.settingsConfig?.api_format ??
+                            "未显式设置，向导保存路由时默认 Chat Completions"}
+                        </div>
                       </div>
-                      <div className="mt-2 text-muted-foreground">
-                        {fetchConfigSummary(config)}
-                      </div>
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        API 格式：
-                        {provider.meta?.apiFormat ??
-                          provider.settingsConfig?.apiFormat ??
-                          provider.settingsConfig?.api_format ??
-                          "未显式设置，向导保存路由时默认 Chat Completions"}
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             )}
 

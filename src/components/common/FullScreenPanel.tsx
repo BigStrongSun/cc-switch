@@ -19,6 +19,10 @@ interface FullScreenPanelProps {
   children: React.ReactNode;
   footer?: React.ReactNode;
   /**
+   * 面板所在 portal 的层级。向导内部再打开全屏面板时需要高于向导遮罩。
+   */
+  zIndexClassName?: string;
+  /**
    * 覆盖内容区滚动容器的内边距/间距类。默认 `px-6 py-6 space-y-6`。
    * 通过 `cn`(twMerge) 合并，传入如 `pt-3` 只覆盖顶部内边距，其余保持默认。
    */
@@ -39,6 +43,7 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
   onClose,
   children,
   footer,
+  zIndexClassName = "z-[60]",
   contentClassName,
 }) => {
   React.useEffect(() => {
@@ -91,7 +96,7 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-[60] flex flex-col"
+          className={cn("fixed inset-0 flex flex-col", zIndexClassName)}
           style={{ backgroundColor: "hsl(var(--background))" }}
         >
           {/* Drag region - match App.tsx. Linux 上 DRAG_BAR_HEIGHT=0，
