@@ -4722,6 +4722,10 @@ function StatusTab({
   >(null);
   const [isUnlockingModelPicker, setIsUnlockingModelPicker] = useState(false);
   const [statusView, setStatusView] = useState<StatusView>("link");
+  const [isRefreshingValidation, setIsRefreshingValidation] = useState(false);
+  const [validationRefreshMessage, setValidationRefreshMessage] = useState<
+    string | null
+  >(null);
   const [isSyncingSessionUsage, setIsSyncingSessionUsage] = useState(false);
   const [sessionSyncMessage, setSessionSyncMessage] = useState<string | null>(
     null,
@@ -4834,6 +4838,42 @@ function StatusTab({
     onRuntimeReady?.(selectedPlan);
   }, [currentRouteForwardOk, linkOnline, onRuntimeReady, selectedPlan]);
 
+  /// 配置完成返回状态页后，手动刷新所有校验数据，避免用户等待轮询才看到最新监听、接管和转发日志。
+  async function refreshValidationState() {
+    setIsRefreshingValidation(true);
+    setValidationRefreshMessage(null);
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["proxyStatus"] }),
+        queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] }),
+        queryClient.invalidateQueries({ queryKey: ["providers", "codex"] }),
+        queryClient.invalidateQueries({ queryKey: usageKeys.all }),
+      ]);
+      await Promise.all([
+        queryClient.refetchQueries({
+          queryKey: ["proxyStatus"],
+          type: "active",
+        }),
+        queryClient.refetchQueries({
+          queryKey: ["proxyTakeoverStatus"],
+          type: "active",
+        }),
+        queryClient.refetchQueries({
+          queryKey: ["providers", "codex"],
+          type: "active",
+        }),
+        queryClient.refetchQueries({ queryKey: usageKeys.all, type: "active" }),
+      ]);
+      setValidationRefreshMessage("已刷新校验状态，请查看链路卡片和最近转发表。");
+    } catch (error) {
+      setValidationRefreshMessage(
+        `刷新校验失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      setIsRefreshingValidation(false);
+    }
+  }
+
   /// 手动同步 Codex JSONL 会话用量，让子 Agent 统计立即看到最新 token_count。
   async function syncCodexSessionUsage() {
     setIsSyncingSessionUsage(true);
@@ -4909,6 +4949,21 @@ function StatusTab({
             detail="默认先看这里：只有监听、Codex 接管、路由入口和至少一条匹配规则都通过，Codex 请求才会进入 MultiRouter。"
             action={
               <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={refreshValidationState}
+                  disabled={isRefreshingValidation}
+                  className="gap-2 border-slate-300 bg-background/70 text-slate-700 hover:bg-slate-50 dark:border-slate-500/50 dark:bg-slate-500/10 dark:text-slate-100 dark:hover:bg-slate-500/20"
+                >
+                  <RefreshCw
+                    className={cn(
+                      "h-4 w-4",
+                      isRefreshingValidation ? "animate-spin" : "",
+                    )}
+                  />
+                  {isRefreshingValidation ? "刷新中" : "刷新校验"}
+                </Button>
                 <Button
                   size="sm"
                   variant="outline"
@@ -5034,6 +5089,11 @@ function StatusTab({
               }
             />
           </div>
+          {validationRefreshMessage ? (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700 dark:border-slate-600/50 dark:bg-slate-900/60 dark:text-slate-200">
+              {validationRefreshMessage}
+            </div>
+          ) : null}
           {modelPickerUnlockError ? (
             <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-700/50 dark:bg-rose-950/30 dark:text-rose-100">
               模型菜单解锁失败：{modelPickerUnlockError}

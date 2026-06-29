@@ -41,6 +41,7 @@ import {
 } from "@/lib/api";
 import { checkAllEnvConflicts, checkEnvConflicts } from "@/lib/api/env";
 import { useProviderActions } from "@/hooks/useProviderActions";
+import { usageKeys } from "@/lib/query/usage";
 import { openclawKeys, useOpenClawHealth } from "@/hooks/useOpenClaw";
 import { hermesKeys, useOpenHermesWebUI } from "@/hooks/useHermes";
 import { hermesApi } from "@/lib/api/hermes";
@@ -968,6 +969,19 @@ function App() {
       queryClient.invalidateQueries({ queryKey: ["proxyStatus"] }),
       queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] }),
       queryClient.invalidateQueries({ queryKey: ["providers", "codex"] }),
+      queryClient.invalidateQueries({ queryKey: usageKeys.all }),
+    ]);
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: ["proxyStatus"], type: "active" }),
+      queryClient.refetchQueries({
+        queryKey: ["proxyTakeoverStatus"],
+        type: "active",
+      }),
+      queryClient.refetchQueries({
+        queryKey: ["providers", "codex"],
+        type: "active",
+      }),
+      queryClient.refetchQueries({ queryKey: usageKeys.all, type: "active" }),
     ]);
     codexPostSetupGuideRef.current = {
       planId: provider.id,

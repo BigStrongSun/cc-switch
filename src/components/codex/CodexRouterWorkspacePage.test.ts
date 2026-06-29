@@ -1536,6 +1536,44 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
     );
   });
 
+  it("shows a visible result after refreshing multirouter validation state", async () => {
+    const source: Provider = {
+      id: "codex-refresh-source",
+      name: "Refresh Source",
+      category: "custom",
+      settingsConfig: {
+        modelCatalog: {
+          models: [{ model: "refresh-model" }],
+        },
+      },
+    };
+    const plan = createDraftRoutingPlan([source], [source]);
+
+    renderWorkspace(
+      React.createElement(CodexRouterWorkspacePage, {
+        providers: [source, plan],
+        isProxyRunning: true,
+        isCodexTakeoverActive: true,
+        activeProviderId: plan.id,
+        initialProviderId: plan.id,
+        initialTab: "status",
+        onEditProvider: vi.fn(),
+        onDeletePlan: vi.fn(),
+        onCreateProvider: vi.fn(),
+      }),
+    );
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "刷新校验" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("已刷新校验状态，请查看链路卡片和最近转发表。"),
+      ).toBeInTheDocument(),
+    );
+  });
+
   // onRuntimeReady 负向测试：即使最近一条 Codex 代理日志成功，只要它没有命中当前
   // MultiRouter 方案的 route，就不能提前进入“配置成功 -> 历史修复”收尾流程。
   it("does not call onRuntimeReady when latest successful request is outside the selected route", async () => {

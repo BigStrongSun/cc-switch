@@ -1,5 +1,11 @@
 # CC Switch Repository Memory
 
+## 2026-06-30 Codex MultiRouter Post-Setup Validation Refresh
+
+- 用户追问“配置完返回的校验和刷新流程”，排查范围仍只限 Codex MultiRouter。现有成功判定已经正确：`StatusTab` 只在本地代理运行、Codex 接管、当前 provider 是选中 MultiRouter、入口/规则启用，并且当前方案 route 有真实成功转发证据时才触发 `onRuntimeReady`，不会因为其它 Codex 请求 200 就提前进入历史修复。
+- 新发现的刷新体验缺口：向导 finish 页启用 MultiRouter 后，父级只 `invalidateQueries` proxyStatus/proxyTakeoverStatus/providers，状态页要等轮询或后台 refetch 才显示最新监听/接管/current provider/日志；用户配置完返回后可能短时间看到旧校验状态。修复为启用后显式 `refetchQueries` proxyStatus、proxyTakeoverStatus、providers/codex 和 usage/logs。
+- 状态页新增“刷新校验”手动入口：刷新同一组校验源并显示完成/失败提示，便于用户从 Codex 发出一次请求后立即重新检查链路卡片、最近转发和历史修复触发条件。不改变成功判定、route 归因、诊断探测或模型源刷新逻辑。
+
 ## 2026-06-30 Codex MultiRouter Configuration Guide Navigation Audit
 
 - 用户明确收窄排查范围：只处理 Codex 分支配置和 Codex 多路路由配置指南，不泛化到 Claude Desktop、Gemini、OpenCode、OpenClaw 或 Hermes。上一轮误扩展改动已撤回，当前只沿 `CodexRouterWorkspacePage` / `CodexMultiRouterWizard` / Codex provider 表单查同类“点击后状态已变但用户看不到下一步”的问题。
