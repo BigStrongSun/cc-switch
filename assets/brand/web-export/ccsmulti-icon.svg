@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">CCSwitchMulti Codex multi-route app icon</title>
+  <desc id="desc">A dark app icon using the Codex SVG mark as the base, with three compact route channels for multi-provider switching.</desc>
+  <defs>
+    <path id="codex-mark" fill-rule="evenodd" clip-rule="evenodd" d="M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"/>
+    <linearGradient id="bg" x1="120" y1="72" x2="904" y2="952" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#151a21"/>
+      <stop offset=".55" stop-color="#0b1117"/>
+      <stop offset="1" stop-color="#131920"/>
+    </linearGradient>
+    <linearGradient id="capsuleA" x1="680" y1="304" x2="900" y2="720" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f7d86a"/>
+      <stop offset=".46" stop-color="#88f3b5"/>
+      <stop offset="1" stop-color="#67d8ff"/>
+    </linearGradient>
+    <linearGradient id="capsuleB" x1="678" y1="400" x2="900" y2="764" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67d8ff"/>
+      <stop offset=".55" stop-color="#77f3d0"/>
+      <stop offset="1" stop-color="#b7f27e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="48%" r="50%">
+      <stop offset="0" stop-color="#dff8ff" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#dff8ff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="markShadow" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="24" flood-color="#000" flood-opacity=".34"/>
+    </filter>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity=".30"/>
+    </filter>
+    <clipPath id="squircle">
+      <path d="M216 56h592c88 0 160 72 160 160v592c0 88-72 160-160 160H216c-88 0-160-72-160-160V216C56 128 128 56 216 56z"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#squircle)">
+    <path d="M216 56h592c88 0 160 72 160 160v592c0 88-72 160-160 160H216c-88 0-160-72-160-160V216C56 128 128 56 216 56z" fill="url(#bg)"/>
+    <circle cx="512" cy="512" r="356" fill="url(#glow)"/>
+    <path d="M108 760c148-18 238-70 336-152 118-98 248-122 468-38v398H108V760z" fill="#13201e" opacity=".34"/>
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".88">
+      <path d="M604 420c46-32 91-43 148-43" stroke="#f7d86a" stroke-width="28"/>
+      <path d="M616 512h152" stroke="#77f3d0" stroke-width="28"/>
+      <path d="M604 604c46 32 91 43 148 43" stroke="#67d8ff" stroke-width="28"/>
+    </g>
+    <g filter="url(#softShadow)">
+      <rect x="718" y="326" width="188" height="86" rx="43" fill="url(#capsuleA)"/>
+      <rect x="748" y="469" width="188" height="86" rx="43" fill="url(#capsuleB)"/>
+      <rect x="718" y="612" width="188" height="86" rx="43" fill="url(#capsuleA)"/>
+      <g fill="#0c1319" opacity=".94">
+        <circle cx="766" cy="369" r="19"/>
+        <circle cx="796" cy="512" r="20"/>
+        <circle cx="766" cy="655" r="19"/>
+      </g>
+      <g fill="none" stroke="#0c1319" stroke-width="16" stroke-linecap="round" opacity=".72">
+        <path d="M810 369h46"/>
+        <path d="M842 512h46"/>
+        <path d="M810 655h46"/>
+      </g>
+    </g>
+    <g transform="translate(190 242) scale(21.95)" filter="url(#markShadow)">
+      <use href="#codex-mark" fill="#f3fbff"/>
+    </g>
+  </g>
+</svg>
