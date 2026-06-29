@@ -27,6 +27,7 @@ import {
 } from "@/lib/api/model-fetch";
 import {
   CODEX_MULTI_ROUTER_WIZARD_DISMISSED_KEY,
+  applyWizardConnectivityApiFormatOverrides,
   buildCodexMultiRouterWizardPlan,
   canContinueAfterConnectivity,
   classifyWizardConnectivityResult,
@@ -879,9 +880,13 @@ export function CodexMultiRouterWizard({
     dispatchFlow({ type: "SAVE_START" });
     clearWizardIssuesForStage("publish");
     try {
+      const routeReadySources = applyWizardConnectivityApiFormatOverrides(
+        draftSources,
+        connectivityResults,
+      );
       const result = buildCodexMultiRouterWizardPlan(
         providers,
-        draftSources,
+        routeReadySources,
         existingPlan,
       );
       if (existingPlan) {
@@ -940,9 +945,13 @@ export function CodexMultiRouterWizard({
 
   if (!open) return null;
 
+  const routeReadySources = applyWizardConnectivityApiFormatOverrides(
+    draftSources,
+    connectivityResults,
+  );
   const planPreview = buildCodexMultiRouterWizardPlan(
     providers,
-    draftSources,
+    routeReadySources,
     existingPlan,
   ).plan;
   const previewRoutes = (planPreview.settingsConfig.codexRouting?.routes ??

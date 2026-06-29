@@ -420,6 +420,42 @@ export function canContinueAfterConnectivity(
   return results.length > 0 && results.every((result) => result.canContinue);
 }
 
+// 将显式 `/v1/responses` 探测结果反写到向导草稿；实测通过的 provider 不再沿用旧的 openai_chat 元数据。
+export function applyWizardConnectivityApiFormatOverrides(
+  providers: Provider[],
+  results: WizardConnectivityResult[],
+): Provider[] {
+  if (results.length === 0) return providers;
+  const resultsByProvider = new Map<string, WizardConnectivityResult[]>();
+  for (const result of results) {
+    const bucket = resultsByProvider.get(result.providerId) ?? [];
+    bucket.push(result);
+    resultsByProvider.set(result.providerId, bucket);
+  }
+
+  return providers.map((provider) => {
+    const providerResults = resultsByProvider.get(provider.id) ?? [];
+    const hasResponsesPass = providerResults.some(
+      (result) => result.status === "pass",
+    );
+    const hasBlockingFailure = providerResults.some(
+      (result) => result.status === "fail",
+    );
+    if (!hasResponsesPass || hasBlockingFailure) return provider;
+    return {
+      ...provider,
+      meta: {
+        ...(provider.meta ?? {}),
+        apiFormat: "openai_responses",
+      },
+      settingsConfig: {
+        ...(provider.settingsConfig ?? {}),
+        apiFormat: "openai_responses",
+      },
+    };
+  });
+}
+
 // 为模型源生成 provider 分组 route；只引用 targetProviderId，不复制第三方 bearer 密钥。
 export function buildWizardRoutesFromSources(
   providers: Provider[],

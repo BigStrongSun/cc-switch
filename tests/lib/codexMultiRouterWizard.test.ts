@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Provider } from "@/types";
 import {
+  applyWizardConnectivityApiFormatOverrides,
   buildCodexMultiRouterWizardPlan,
   buildWizardRoutesFromSources,
   canContinueAfterConnectivity,
@@ -140,6 +141,73 @@ describe("codexMultiRouterWizard helpers", () => {
     });
 
     expect(inferWizardApiFormat(openaiBackup)).toBe("openai_responses");
+  });
+
+  it("uses successful Responses probes to override stale chat metadata before route generation", () => {
+    const relay = provider({
+      id: "relay",
+      name: "Relay",
+      category: "aggregator",
+      meta: { apiFormat: "openai_chat" },
+      settingsConfig: {
+        apiFormat: "openai_chat",
+        modelCatalog: {
+          models: [{ model: "gpt-5.5", upstreamModel: "gpt-5.5" }],
+        },
+      },
+    });
+
+    const [resolvedRelay] = applyWizardConnectivityApiFormatOverrides(
+      [relay],
+      [
+        {
+          providerId: "relay",
+          providerName: "Relay",
+          model: "gpt-5.5",
+          status: "pass",
+          canContinue: true,
+          detail: "直接 /v1/responses 探测通过。",
+        },
+      ],
+    );
+
+    expect(inferWizardApiFormat(resolvedRelay)).toBe("openai_responses");
+    expect(buildWizardRoutesFromSources([resolvedRelay])[0].upstream).toMatchObject(
+      {
+        apiFormat: "openai_responses",
+      },
+    );
+  });
+
+  it("keeps stale chat metadata when Responses probes warn or fail", () => {
+    const relay = provider({
+      id: "relay",
+      name: "Relay",
+      category: "aggregator",
+      meta: { apiFormat: "openai_chat" },
+      settingsConfig: {
+        apiFormat: "openai_chat",
+        modelCatalog: {
+          models: [{ model: "gpt-5.5", upstreamModel: "gpt-5.5" }],
+        },
+      },
+    });
+
+    const [resolvedRelay] = applyWizardConnectivityApiFormatOverrides(
+      [relay],
+      [
+        {
+          providerId: "relay",
+          providerName: "Relay",
+          model: "gpt-5.5",
+          status: "warn",
+          canContinue: true,
+          detail: "直接 /v1/responses 失败，保留 Chat Completions。",
+        },
+      ],
+    );
+
+    expect(inferWizardApiFormat(resolvedRelay)).toBe("openai_chat");
   });
 
   it("groups generated routes by provider and infers common model prefixes", () => {
