@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -370,6 +370,7 @@ function ProviderFormFull({
   const [isEndpointModalOpen, setIsEndpointModalOpen] = useState(false);
   const [isCodexEndpointModalOpen, setIsCodexEndpointModalOpen] =
     useState(false);
+  const codexProviderDetailsRef = useRef<HTMLDivElement | null>(null);
 
   const [draftCustomEndpoints, setDraftCustomEndpoints] = useState<string[]>(
     () => {
@@ -1711,6 +1712,18 @@ function ProviderFormFull({
     initialData,
   });
 
+  // Codex 多路路由入口的预设网格很高；选择预设后把视口带到
+  // API Key / Base URL 等关键字段，避免用户停在按钮区误以为页面卡死。
+  const scrollCodexProviderDetailsIntoView = useCallback(() => {
+    if (appId !== "codex" || initialData) return;
+    window.setTimeout(() => {
+      codexProviderDetailsRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 0);
+  }, [appId, initialData]);
+
   const handlePresetChange = (value: string) => {
     setSelectedPresetId(value);
     if (value === "custom") {
@@ -1729,6 +1742,7 @@ function ProviderFormFull({
         // 自定义模板无模型映射，路由默认关闭
         setCodexTakeoverEnabled(false);
       }
+      scrollCodexProviderDetailsIntoView();
       if (appId === "gemini") {
         resetGeminiConfig({}, {});
       }
@@ -1781,6 +1795,7 @@ function ProviderFormFull({
         icon: preset.icon ?? "",
         iconColor: preset.iconColor ?? "",
       });
+      scrollCodexProviderDetailsIntoView();
       return;
     }
 
@@ -2240,56 +2255,58 @@ function ProviderFormFull({
           )}
 
           {appId === "codex" && (
-            <CodexFormFields
-              providerId={providerId}
-              providerName={form.watch("name")}
-              codexApiKey={codexApiKey}
-              onApiKeyChange={handleCodexApiKeyChange}
-              category={category}
-              shouldShowApiKeyLink={shouldShowCodexApiKeyLink}
-              websiteUrl={codexWebsiteUrl}
-              isPartner={isCodexPartner}
-              partnerPromotionKey={codexPartnerPromotionKey}
-              shouldShowSpeedTest={shouldShowSpeedTest}
-              codexBaseUrl={codexBaseUrl}
-              onBaseUrlChange={handleCodexBaseUrlChange}
-              isFullUrl={localIsFullUrl}
-              onFullUrlChange={setLocalIsFullUrl}
-              isEndpointModalOpen={isCodexEndpointModalOpen}
-              onEndpointModalToggle={setIsCodexEndpointModalOpen}
-              onCustomEndpointsChange={
-                isEditMode ? undefined : setDraftCustomEndpoints
-              }
-              autoSelect={endpointAutoSelect}
-              onAutoSelectChange={setEndpointAutoSelect}
-              takeoverEnabled={codexTakeoverEnabled}
-              onTakeoverEnabledChange={setCodexTakeoverEnabled}
-              apiFormat={localCodexApiFormat}
-              onApiFormatChange={handleCodexApiFormatChange}
-              codexChatReasoning={codexChatReasoning}
-              onCodexChatReasoningChange={setCodexChatReasoning}
-              catalogModels={codexCatalogModels}
-              onCatalogModelsChange={setCodexCatalogModels}
-              spawnAgentModels={codexSpawnAgentModels}
-              onSpawnAgentModelsChange={setCodexSpawnAgentModels}
-              codexRouting={codexRouting}
-              onCodexRoutingChange={setCodexRouting}
-              onProviderSplitSuggestionChange={
-                !isEditMode
-                  ? (suggestion) => {
-                      setCodexProviderSplit(suggestion);
-                      onCodexProviderSplitChange?.(suggestion);
-                    }
-                  : undefined
-              }
-              speedTestEndpoints={speedTestEndpoints}
-              customUserAgent={customUserAgent}
-              onCustomUserAgentChange={setCustomUserAgent}
-              localProxyHeadersOverride={localProxyHeadersOverride}
-              onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
-              localProxyBodyOverride={localProxyBodyOverride}
-              onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
-            />
+            <div ref={codexProviderDetailsRef}>
+              <CodexFormFields
+                providerId={providerId}
+                providerName={form.watch("name")}
+                codexApiKey={codexApiKey}
+                onApiKeyChange={handleCodexApiKeyChange}
+                category={category}
+                shouldShowApiKeyLink={shouldShowCodexApiKeyLink}
+                websiteUrl={codexWebsiteUrl}
+                isPartner={isCodexPartner}
+                partnerPromotionKey={codexPartnerPromotionKey}
+                shouldShowSpeedTest={shouldShowSpeedTest}
+                codexBaseUrl={codexBaseUrl}
+                onBaseUrlChange={handleCodexBaseUrlChange}
+                isFullUrl={localIsFullUrl}
+                onFullUrlChange={setLocalIsFullUrl}
+                isEndpointModalOpen={isCodexEndpointModalOpen}
+                onEndpointModalToggle={setIsCodexEndpointModalOpen}
+                onCustomEndpointsChange={
+                  isEditMode ? undefined : setDraftCustomEndpoints
+                }
+                autoSelect={endpointAutoSelect}
+                onAutoSelectChange={setEndpointAutoSelect}
+                takeoverEnabled={codexTakeoverEnabled}
+                onTakeoverEnabledChange={setCodexTakeoverEnabled}
+                apiFormat={localCodexApiFormat}
+                onApiFormatChange={handleCodexApiFormatChange}
+                codexChatReasoning={codexChatReasoning}
+                onCodexChatReasoningChange={setCodexChatReasoning}
+                catalogModels={codexCatalogModels}
+                onCatalogModelsChange={setCodexCatalogModels}
+                spawnAgentModels={codexSpawnAgentModels}
+                onSpawnAgentModelsChange={setCodexSpawnAgentModels}
+                codexRouting={codexRouting}
+                onCodexRoutingChange={setCodexRouting}
+                onProviderSplitSuggestionChange={
+                  !isEditMode
+                    ? (suggestion) => {
+                        setCodexProviderSplit(suggestion);
+                        onCodexProviderSplitChange?.(suggestion);
+                      }
+                    : undefined
+                }
+                speedTestEndpoints={speedTestEndpoints}
+                customUserAgent={customUserAgent}
+                onCustomUserAgentChange={setCustomUserAgent}
+                localProxyHeadersOverride={localProxyHeadersOverride}
+                onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
+                localProxyBodyOverride={localProxyBodyOverride}
+                onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
+              />
+            </div>
           )}
 
           {appId === "gemini" && (

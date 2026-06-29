@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-06-30 MultiRouter Provider Preset Click Perceived Freeze Fix
+
+- 用户截图里“创建多路路由 -> 单独接入模型源”点击 `Zhipu GLM` 后并不是走 `UniversalProviderPanel`，而是 `ProviderForm(appId="codex") -> ProviderPresetSelector -> handlePresetChange("codex-<index>")`。`Zhipu GLM` 来自 `src/config/codexProviderPresets.ts`，不在 `universalProviderPresets`。
+- 只读追踪确认 GLM 预设切换会一次性批量更新 Codex auth/config/modelCatalog/reasoning/takeover/form reset，但 `CodexFormFields` 的 catalog/routing 父子回写已有 ref + JSON 比对守卫，没有发现无限 setState 循环。用户感知“卡死”的主要交互根因是预设网格很高，点击后仍停在预设按钮区，API Key/Base URL/模型映射等实际要填写的字段在下方首屏外，视觉上像没有继续。
+- 修复边界：`src/components/providers/forms/ProviderForm.tsx` 给 Codex 字段区加 `ref`，在 Codex 新建模式选择任意预设或自定义模型源后，用 `setTimeout(0)` 等 React 提交完成再 `scrollIntoView({ behavior: "smooth", block: "start" })`，把视口带到关键配置区；不改 GLM 协议、modelCatalog、reasoning 或保存逻辑。
+- 回归测试：`tests/components/ProviderForm.codexPreset.test.tsx` 直接渲染 `ProviderForm appId="codex"`，先后点击 `DeepSeek` 与 `Zhipu GLM` 两个不同 Codex 预设，断言对应 Base URL、GLM 的 `glm-5.2` catalog、本地接管开启，并确认每次选择都触发滚动；配合 `tests/components/CodexFormFields.test.tsx` 验证 catalog/routing 受控回写仍稳定。
+
 ## 2026-06-30 Promote v3.16.4-4wizard To Latest Release
 
 - 用户在 GitHub releases 列表截图里看到 `v3.16.4-3` 仍显示 `Latest`，原因不是 `main` 未推送，而是 `v3.16.4-4wizard` 仍标记为 prerelease。GitHub 只会把 `Latest` 标给正式 release，prerelease 即使发布时间更新也不会替代正式版 latest。
