@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-06-29 Codex MultiRouter 502 Official Route Diagnosis
+
+- 用户截图里 `OpenAI Multi-Model Router` 在 `06/29 16:07` 连续出现 5 条 502，但同一时间段 `codex-router.log` 证明每次都已命中 `route_id=openai-official`，`effective_provider=codex-openai-router::route::openai-official`，`effective_endpoint=/responses`，`upstream_url=https://chatgpt.com/backend-api/codex/responses`，`responses_to_chat=false`，`auth_strategy=CodexOAuth`。因此这不是 route miss、不是官方 GPT 被错误转 Chat、也不是模型重名映射错误。
+- 502 的直接原因是本机转发到官方 Codex Responses 上游时连接失败：`upstream_send_error ... elapsed_ms=3121/3128/4127 error=请求转发失败:_连接失败:_error_sending_request_for_url_(https://chatgpt.com/backend-api/codex/responses)`。数据库对应 5 条 `status_code=502`，随后 `16:07:20` 同一 session/model/route 立刻成功 200，说明是间歇性出站连接问题。
+- 网络边界证据：当场 `Resolve-DnsName chatgpt.com` 返回 `198.18.0.6`（常见代理/TUN fake-ip 网段），`Test-NetConnection chatgpt.com -Port 443` 当前成功；CCSwitchMulti 日志显示 `GlobalProxy Initialized: direct connection`，WinHTTP 也是 direct。也就是说 CCSM 没有显式走全局代理，而是依赖系统 TUN/fake-ip 接管；502 更像本机代理/TUN/VPN 或官方链路短时抖动，不是 CCSM MultiRouter 配置本身。
+- 修复一个会误导排障的产品问题：失败路径历史上会把 usage/error 落库到外层 router provider，导致 UI 只显示 `OpenAI Multi-Model Router` 502。`src-tauri/src/proxy/handlers.rs` 现在在 forward error 落库前复用 Codex route 解析和 target materialize 逻辑，把失败归因修正到真实 route/effective provider；未来同类失败应显示 `codex-openai-router::route::openai-official` 等 route 身份。
+
 ## 2026-06-29 CCSwitchMulti v3.16.4-4wizard Wizard Prerelease
 
 - `v3.16.4-4wizard` 已作为 BigStrongSun/ccswitchmulti 的 GitHub 预发布版发布：`https://github.com/BigStrongSun/ccswitchmulti/releases/tag/v3.16.4-4wizard`。这是 `codex/multirouter-wizard` 分支的向导试用包，`isPrerelease=true`、`isDraft=false`，不是正式无向导 release 线。

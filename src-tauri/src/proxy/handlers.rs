@@ -338,9 +338,7 @@ async fn handle_messages_for_app(
     {
         Ok(result) => result,
         Err(mut err) => {
-            if let Some(provider) = err.provider.take() {
-                ctx.provider = provider;
-            }
+            update_context_provider_for_forward_error(&state, &mut ctx, err.provider.take());
             log_forward_error(&state, &ctx, is_stream, &err.error);
             return Err(err.error);
         }
@@ -840,9 +838,7 @@ pub async fn handle_chat_completions(
     {
         Ok(result) => result,
         Err(mut err) => {
-            if let Some(provider) = err.provider.take() {
-                ctx.provider = provider;
-            }
+            update_context_provider_for_forward_error(&state, &mut ctx, err.provider.take());
             log_forward_error(&state, &ctx, is_stream, &err.error);
             if codex_chat_to_responses {
                 return build_chat_proxy_error_response(&ctx, &endpoint, &err.error);
@@ -1781,9 +1777,7 @@ pub async fn handle_responses(
     {
         Ok(result) => result,
         Err(mut err) => {
-            if let Some(provider) = err.provider.take() {
-                ctx.provider = provider;
-            }
+            update_context_provider_for_forward_error(&state, &mut ctx, err.provider.take());
             log_forward_error(&state, &ctx, is_stream, &err.error);
             return build_codex_proxy_error_response(&ctx, &endpoint, &err.error);
         }
@@ -1900,9 +1894,7 @@ pub async fn handle_responses_compact(
     {
         Ok(result) => result,
         Err(mut err) => {
-            if let Some(provider) = err.provider.take() {
-                ctx.provider = provider;
-            }
+            update_context_provider_for_forward_error(&state, &mut ctx, err.provider.take());
             log_forward_error(&state, &ctx, is_stream, &err.error);
             return build_codex_proxy_error_response(&ctx, &endpoint, &err.error);
         }
@@ -2507,9 +2499,7 @@ pub async fn handle_gemini(
     {
         Ok(result) => result,
         Err(mut err) => {
-            if let Some(provider) = err.provider.take() {
-                ctx.provider = provider;
-            }
+            update_context_provider_for_forward_error(&state, &mut ctx, err.provider.take());
             log_forward_error(&state, &ctx, is_stream, &err.error);
             return Err(err.error);
         }
@@ -3100,6 +3090,98 @@ fn merge_tool_call_delta(
 // 使用量记录（保留用于 Claude 转换逻辑）
 // ============================================================================
 
+/// 将 forwarder 返回的失败 provider 修正为本次请求真正命中的 route provider。
+///
+/// 参数:
+/// - `state`: 代理共享状态，用于读取 route 引用的目标 provider。
+/// - `ctx`: 当前请求上下文，会被原地更新。
+/// - `reported_provider`: forwarder 错误携带的 provider；旧路径可能仍是外层 MultiRouter。
+///
+/// 副作用:
+/// - 只修改 `ctx.provider`，不会写数据库或用户配置。
+fn update_context_provider_for_forward_error(
+    state: &ProxyState,
+    ctx: &mut RequestContext,
+    reported_provider: Option<crate::provider::Provider>,
+) {
+    if let Some(provider) = reported_provider {
+        ctx.provider = provider;
+    }
+    ctx.provider = resolve_forward_error_provider_for_logging(
+        state,
+        &ctx.app_type,
+        ctx.app_type_str,
+        &ctx.request_model,
+        &ctx.provider,
+    );
+}
+
+/// 为失败日志和错误响应推断更准确的 effective provider。
+///
+/// Codex MultiRouter 的 `forward()` 会在内部解析 route；成功路径会把 effective
+/// provider 带回调用方，但失败路径历史上只留下外层 router，导致 UI 里 502 显示为
+/// “OpenAI Multi-Model Router” 而不是 `router::route::<id>`。这里复用同一套
+/// route 解析和 target materialize 逻辑，在落库前补回可诊断的真实 route 身份。
+fn resolve_forward_error_provider_for_logging(
+    state: &ProxyState,
+    app_type: &AppType,
+    app_type_str: &str,
+    request_model: &str,
+    provider: &crate::provider::Provider,
+) -> crate::provider::Provider {
+    if !matches!(app_type, AppType::Codex)
+        || provider
+            .settings_config
+            .get("codexRouting")
+            .or_else(|| provider.settings_config.get("codexModelRoutes"))
+            .or_else(|| provider.settings_config.get("modelRoutes"))
+            .is_none()
+    {
+        return provider.clone();
+    }
+
+    let probe_body = json!({ "model": request_model });
+    let Some(route_provider) =
+        super::providers::resolve_codex_model_routed_provider(provider, &probe_body)
+    else {
+        return provider.clone();
+    };
+
+    let Some(target_provider_id) =
+        super::providers::codex_route_target_provider_id(&route_provider)
+    else {
+        return route_provider;
+    };
+
+    match state
+        .provider_router
+        .get_provider_by_id(target_provider_id, app_type_str)
+    {
+        Ok(Some(target_provider)) => {
+            super::providers::materialize_codex_routed_provider_from_target(
+                &route_provider,
+                &target_provider,
+            )
+        }
+        Ok(None) => {
+            log::warn!(
+                "[codex] MultiRouter route {} 引用了不存在的目标 provider {}，失败日志保留 route 身份",
+                route_provider.name,
+                target_provider_id
+            );
+            route_provider
+        }
+        Err(err) => {
+            log::warn!(
+                "[codex] 读取 MultiRouter route 目标 provider {} 失败，失败日志保留 route 身份: {}",
+                target_provider_id,
+                err
+            );
+            route_provider
+        }
+    }
+}
+
 fn log_forward_error(
     state: &ProxyState,
     ctx: &RequestContext,
@@ -3192,10 +3274,12 @@ mod tests {
         body_looks_like_sse, body_snippet, chat_sse_to_response_value,
         codex_catalog_models_response, codex_proxy_error_json, external_openai_api_models_response,
         external_openai_api_unsupported_response, resolve_external_codex_router_target,
-        responses_sse_to_response_value, should_handle_as_codex_client,
-        should_use_claude_transform_streaming, transform, upstream_body_parse_error,
+        resolve_forward_error_provider_for_logging, responses_sse_to_response_value,
+        should_handle_as_codex_client, should_use_claude_transform_streaming, transform,
+        upstream_body_parse_error,
     };
     use crate::{
+        app_config::AppType,
         database::Database,
         provider::{Provider, ProviderMeta},
         proxy::{
@@ -3954,6 +4038,65 @@ data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\"}}\n
         assert_eq!(body["error"]["code"], "cc_switch_forward_failed");
         assert_eq!(body["error"]["provider"], "DeepSeek");
         assert_eq!(body["error"]["model"], "deepseek-chat");
+    }
+
+    /// 验证 MultiRouter 请求失败时，usage/error 归因回到已命中的 route provider。
+    #[test]
+    fn codex_forward_error_logging_resolves_multirouter_route_provider() {
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let router = Provider::with_id(
+            "codex-router".to_string(),
+            "OpenAI Multi-Model Router".to_string(),
+            json!({
+                "codexRouting": {
+                    "enabled": true,
+                    "routes": [{
+                        "id": "openai-official",
+                        "label": "OpenAI Official",
+                        "enabled": true,
+                        "targetProviderId": "codex-official",
+                        "match": { "models": ["gpt-5.5"], "prefixes": ["gpt-"] },
+                        "upstream": {
+                            "apiFormat": "openai_responses",
+                            "auth": { "source": "provider_config" }
+                        }
+                    }]
+                }
+            }),
+            None,
+        );
+        db.save_provider("codex", &router).expect("save router");
+
+        let target = Provider::with_id(
+            "codex-official".to_string(),
+            "OpenAI Official Backup".to_string(),
+            json!({
+                "base_url": "https://chatgpt.com/backend-api/codex",
+                "auth": { "source": "managed_codex_oauth" }
+            }),
+            None,
+        );
+        db.save_provider("codex", &target).expect("save target");
+
+        let state = build_state(db);
+        let resolved = resolve_forward_error_provider_for_logging(
+            &state,
+            &AppType::Codex,
+            "codex",
+            "gpt-5.5",
+            &router,
+        );
+
+        assert_eq!(resolved.id, "codex-router::route::openai-official");
+        assert_eq!(resolved.name, "OpenAI Official");
+        assert_eq!(
+            resolved.settings_config["base_url"],
+            "https://chatgpt.com/backend-api/codex"
+        );
+        assert_eq!(
+            resolved.settings_config["codexResolvedRouteId"],
+            "openai-official"
+        );
     }
 
     #[test]
