@@ -7,6 +7,14 @@
 - `/models` 获取能力和可路由模型目录是两回事：没有 Base URL/API Key 只代表不能在线刷新模型列表，不代表不能生成路由。已有 `modelCatalog` 的 provider 应显示“已有 modelCatalog，可跳过 /models 在线读取；如需刷新再补 Base URL/API Key”，不要再写“未配置在线获取参数”这种像错误的提示。
 - 回归测试：`tests/components/CodexMultiRouterWizard.test.tsx` 覆盖 catalog-only provider 不显示旧提示，以及 `OpenAI Official Backup` 带旧 `openai_chat` metadata 时配置页展示 `Responses API` 并提示覆盖旧配置；数据层已有 `inferWizardApiFormat` 测试覆盖最终 route 保存为 `openai_responses`。
 
+## 2026-06-29 Windows Taskbar Icon Embedded Resource Root Fix
+
+- 用户再次截图反馈任务栏图标仍像白色圆团后，重新沿真实链路排查：`src-tauri/icons/icon.ico` 已更新且小帧仍是 DIB，但 `src-tauri/target/release/cc-switch.exe` 与 `%LOCALAPPDATA%\CCSwitchMulti\cc-switch.exe` 的 `ExtractAssociatedIcon()` hash 仍是旧值。根因不是安装覆盖失败，而是 Cargo/Tauri 构建复用了旧 `resource.lib`，`build.rs` 没有声明 `icons/icon.ico`/相关 PNG 为 `rerun-if-changed`。
+- 修复：`src-tauri/build.rs` 显式声明 `icons/icon.ico`、`32x32.png`、`128x128.png`、`128x128@2x.png` 和 `tauri.conf.json` 的构建依赖。修改图标后必须触发 native resource 重新生成，不能只看 `icon.ico` 文件时间。
+- 图标生成策略调整：`scripts/generate-windows-icons.py` 不再手绘一套任务栏小图；`16/24/32/48/64` 也从 `assets/brand/ccswitchmulti-codex-app-icon-1024.png` 缩放生成，保持任务栏、安装器、应用内和网站图标同一个品牌 master。ICO 小帧仍写入 32-bit DIB，保留 Windows shell 兼容性。
+- 安装链路补强：`src-tauri/nsis/installer-hooks.nsh` 继续修开始菜单/桌面快捷方式，并额外修存在时的任务栏固定项 `CCSwitchMulti.lnk`；`scripts/verify-windows-install-icon.ps1` 也检查可选任务栏固定项。
+- 验证：运行 `python scripts/generate-windows-icons.py` 和 `python -m py_compile scripts/generate-windows-icons.py`；执行 `cargo clean --manifest-path src-tauri\Cargo.toml -p cc-switch` 后重新 `scripts\export-latest-ccswitchmulti.ps1 -ReleaseRoot C:\Users\sunda\Documents\LLMservice\ccswitchmulti-iconfix-install`，确认源 `icon.ico`、`src-tauri\target\release\cc-switch.exe`、raw exe 的 associated icon hash 全部为 `3E1F633E16DBD922D6A7A4538B1450276803745DDCC20C0BE5F8AB3875A9F3E5`；静默安装后 `scripts\verify-windows-install-icon.ps1` 通过，安装目录 exe hash 与源 ico 一致，开始菜单/桌面快捷方式 `IconLocation` 均为 `%LOCALAPPDATA%\CCSwitchMulti\cc-switch.exe,0`。刷新 Explorer 图标缓存并重启安装版后，任务栏截图确认图标为暗色圆角底的新品牌图。
+
 ## 2026-06-29 Codex MultiRouter 502 Official Route Diagnosis
 
 - 用户截图里 `OpenAI Multi-Model Router` 在 `06/29 16:07` 连续出现 5 条 502，但同一时间段 `codex-router.log` 证明每次都已命中 `route_id=openai-official`，`effective_provider=codex-openai-router::route::openai-official`，`effective_endpoint=/responses`，`upstream_url=https://chatgpt.com/backend-api/codex/responses`，`responses_to_chat=false`，`auth_strategy=CodexOAuth`。因此这不是 route miss、不是官方 GPT 被错误转 Chat、也不是模型重名映射错误。

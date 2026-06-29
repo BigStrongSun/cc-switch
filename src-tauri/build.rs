@@ -1,4 +1,13 @@
 fn main() {
+    // Windows 任务栏图标最终来自 build script 生成的 native resource。
+    // Tauri 默认配置文件变化会触发构建，但 Cargo 不一定知道 icons/icon.ico
+    // 已更新；显式声明依赖，避免复用旧 resource.lib 后 exe 仍嵌旧图标。
+    println!("cargo:rerun-if-changed=icons/icon.ico");
+    println!("cargo:rerun-if-changed=icons/32x32.png");
+    println!("cargo:rerun-if-changed=icons/128x128.png");
+    println!("cargo:rerun-if-changed=icons/128x128@2x.png");
+    println!("cargo:rerun-if-changed=tauri.conf.json");
+
     tauri_build::build();
 
     // Windows: Embed Common Controls v6 manifest for test binaries

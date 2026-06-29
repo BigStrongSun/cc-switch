@@ -115,9 +115,11 @@ if ($sourceHash -ne $installedHash) {
 
 $startMenuLink = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$AppName.lnk"
 $desktopLink = Join-Path $env:USERPROFILE "Desktop\$AppName.lnk"
+$taskbarLink = Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\$AppName.lnk"
 $shortcutResults = @(
     (Assert-ShortcutIcon -ShortcutPath $startMenuLink -ExpectedTarget $installedExe -Required $true)
     (Assert-ShortcutIcon -ShortcutPath $desktopLink -ExpectedTarget $installedExe -Required $false)
+    (Assert-ShortcutIcon -ShortcutPath $taskbarLink -ExpectedTarget $installedExe -Required $false)
 )
 
 [pscustomobject]@{

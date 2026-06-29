@@ -7,7 +7,7 @@ import io
 import struct
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,68 +16,11 @@ BRAND_ICON = REPO_ROOT / "assets" / "brand" / "ccswitchmulti-codex-app-icon-1024
 APP_ICON = REPO_ROOT / "src" / "assets" / "icons" / "app-icon.png"
 
 
-def rounded_rectangle(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], radius: int, fill) -> None:
-    """绘制圆角矩形，统一小尺寸和大尺寸图标的背景形状。"""
-    draw.rounded_rectangle(box, radius=radius, fill=fill)
-
-
-def draw_cloud(draw: ImageDraw.ImageDraw, scale: float, offset_x: float, offset_y: float, fill: str) -> None:
-    """绘制简化云形主体，小尺寸下只保留高对比轮廓。"""
-    def p(value: float) -> int:
-        return int(round(value * scale))
-
-    ox = int(round(offset_x))
-    oy = int(round(offset_y))
-    circles = [
-        (15, 31, 25),
-        (28, 24, 29),
-        (44, 29, 27),
-        (23, 43, 26),
-        (41, 44, 26),
-    ]
-    for cx, cy, r in circles:
-        draw.ellipse((ox + p(cx - r), oy + p(cy - r), ox + p(cx + r), oy + p(cy + r)), fill=fill)
-    draw.rounded_rectangle((ox + p(12), oy + p(30), ox + p(58), oy + p(56)), radius=p(12), fill=fill)
-
-
 def draw_small_icon(size: int) -> Image.Image:
-    """生成专门给 Windows 任务栏使用的小尺寸图标，避免复杂阴影被缓存缩放成糊块。"""
-    supersample = 4
-    canvas_size = size * supersample
-    image = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    s = canvas_size / 64
-
-    rounded_rectangle(
-        draw,
-        (int(4 * s), int(4 * s), int(60 * s), int(60 * s)),
-        int(14 * s),
-        (15, 22, 29, 255),
-    )
-    draw_cloud(draw, s * 0.8, 4 * s, 8 * s, "#f4fbff")
-
-    stroke = max(2, int(round(5.5 * s)))
-    dark = (15, 24, 31, 255)
-    draw.line(
-        [(int(27 * s), int(27 * s)), (int(34 * s), int(38 * s)), (int(27 * s), int(49 * s))],
-        fill=dark,
-        width=stroke,
-        joint="curve",
-    )
-    draw.line(
-        [(int(39 * s), int(43 * s)), (int(50 * s), int(43 * s))],
-        fill=dark,
-        width=max(2, int(round(4.5 * s))),
-    )
-
-    if size >= 32:
-        route_width = max(2, int(round(4 * s)))
-        draw.line([(int(48 * s), int(25 * s)), (int(58 * s), int(23 * s))], fill=(247, 216, 106, 255), width=route_width)
-        draw.line([(int(49 * s), int(34 * s)), (int(60 * s), int(34 * s))], fill=(119, 243, 208, 255), width=route_width)
-        draw.line([(int(48 * s), int(43 * s)), (int(58 * s), int(45 * s))], fill=(103, 216, 255, 255), width=route_width)
-
+    """从品牌 master 生成任务栏小尺寸图标，保持任务栏、安装器和网站图标一致。"""
+    source = Image.open(BRAND_ICON).convert("RGBA")
     resample = Image.Resampling.LANCZOS if size >= 32 else Image.Resampling.BICUBIC
-    return image.resize((size, size), resample)
+    return source.resize((size, size), resample)
 
 
 def load_large_icon(size: int) -> Image.Image:
