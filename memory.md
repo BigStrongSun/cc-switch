@@ -1,5 +1,14 @@
 # CC Switch Repository Memory
 
+## 2026-06-29 CCSwitchMulti v3.16.4-4wizard Wizard Prerelease
+
+- `v3.16.4-4wizard` 已作为 BigStrongSun/ccswitchmulti 的 GitHub 预发布版发布：`https://github.com/BigStrongSun/ccswitchmulti/releases/tag/v3.16.4-4wizard`。这是 `codex/multirouter-wizard` 分支的向导试用包，`isPrerelease=true`、`isDraft=false`，不是正式无向导 release 线。
+- 本地 release pipeline 成功导出到 `C:\Users\sunda\Documents\LLMservice\最新版ccswitchmulti`，构建 metadata 指向提交 `ea455656521b8e53cbb448788ecb679f0b29e0b5`，版本面为 `3.16.4-4wizard`。本地 staging 目录为 `C:\Users\sunda\Documents\LLMservice\ccswitchmulti-release-v3.16.4-4wizard-assets`。
+- GitHub release 上传 10 个资产：`CCSwitchMulti_3.16.4-4wizard_x64-setup.exe`、安装包 `.sig`、`CCSwitchMulti_3.16.4-4wizard_x64-portable.zip`、`CCSwitchMulti_3.16.4-4wizard_x64.exe`、`latest.json`、`SHA256SUMS.txt`、`linux-build-note.md`、`macos-build-note.md`、`RELEASE-METADATA.md`、`v3.16.4-4wizard-zh.md`。Linux/macOS 仍只上传平台构建说明，Windows 本地未生成正式二进制。
+- 发布后验证：`latest.json` 版本为 `3.16.4-4wizard`；raw exe 的 `FileVersion/ProductVersion` 为 `3.16.4-4wizard`；GitHub asset digest 与本地主资产 SHA256 对齐，安装包为 `85825ada0fb485cc8c533e972c0cfce2717f87e9f3d5d60ef86aefc90c271c67`，portable zip 为 `5bcb76ef458f4bde734f4759fad79c69efee0a702a3cfabb044731f5285f5144`，raw exe 为 `61ee6f96129c512c88805faed1bac7bb42b54516dbf9933f2c3b9e123ecf05db`。
+- 注意：`gh release view` 的 `targetCommitish` 可能显示 `main`，但 annotated tag `v3.16.4-4wizard` 本身的 tag object 指向 `ea455656521b8e53cbb448788ecb679f0b29e0b5`。在 PowerShell 里查询 peeled tag 必须给 `v3.16.4-4wizard^{}` 加引号，否则 `^`/`{}` 可能被 shell 或宿主参数解析干扰，出现误导输出。
+- 发布时仍保留未跟踪文件 `docs/release-notes/v3.16.4-4-zh.md` 和 `scripts/logs/`：前者是无向导 release note，不能混入 wizard 试用 release；后者是本地日志/构建产物，不应随 release memory commit 提交。
+
 ## 2026-06-29 Windows Taskbar Icon Compatibility Fix
 
 - 用户截图确认任务栏图标问题更像 Windows shell 兼容性/缓存问题，不是单纯 1024 源素材低清。根因排查：旧 `src-tauri/icons/icon.ico` 虽含 `16/24/32/48/64/128/256` 全尺寸，但所有 frame 都是 PNG-in-ICO；部分 Windows 任务栏、Explorer 缓存或快捷方式场景会对 PNG 小帧抽取/缩放异常，出现发糊或旧缓存视觉。
