@@ -1,5 +1,17 @@
 # CC Switch Repository Memory
 
+## 2026-06-29 Windows Taskbar Icon Compatibility Fix
+
+- 用户截图确认任务栏图标问题更像 Windows shell 兼容性/缓存问题，不是单纯 1024 源素材低清。根因排查：旧 `src-tauri/icons/icon.ico` 虽含 `16/24/32/48/64/128/256` 全尺寸，但所有 frame 都是 PNG-in-ICO；部分 Windows 任务栏、Explorer 缓存或快捷方式场景会对 PNG 小帧抽取/缩放异常，出现发糊或旧缓存视觉。
+- 新增 `scripts/generate-windows-icons.py` 作为可复现图标生成脚本：`16/24/32/48/64` 使用专门为任务栏简化的高对比小图，并写入传统 32-bit DIB ICO frame；`128/256` 仍使用品牌 1024 图压缩为 PNG frame；同时更新 Tauri PNG、Windows Square logo 和应用内 `src/assets/icons/app-icon.png`。
+- 验证点：解析 `src-tauri/icons/icon.ico` 时 `16/24/32/48/64` 的 frame 签名应为 `28 00 00 00...`（DIB），`128/256` 为 PNG；不要再回退到所有 frame 都是 PNG 的 ICO。实际安装后仍需确认快捷方式 `IconLocation` 为 `%LOCALAPPDATA%\CCSwitchMulti\cc-switch.exe,0`，并在 Windows 图标缓存较旧时重启 Explorer 或清理 icon cache。
+
+## 2026-06-29 CCSwitchMulti v3.16.4-4 No-Wizard Release Boundary
+
+- 用户确认 v3.16.4-3 不应作为正式无向导版发布，因为 tag `v3.16.4-3` 指向的 `1534a0e45dc17acd4b792de484f1c6b724cb7e18` 来自 `codex/multirouter-wizard`，仍包含 `CodexMultiRouterWizard`、`codexMultiRouterWizard` helper、ProviderList 的“配置多路模型”入口和向导测试。
+- 正确修正策略不是删除或破坏 `codex/multirouter-wizard` 分支里的向导功能；wizard 分支要保留用于继续试用/迭代。正式无向导 release 应从不含向导的基线/分支切出，只合入已确认正式要带的 bugfix、provider 拆分、Responses-Lite fallback、子 Agent 用量统计、Windows 图标安装链路和 spawn_agent 模型可见性修复。
+- 以后用户要求“发布当前版本”但近期分支名或 commit 含 `wizard/trial/easy` 时，必须先确认是否是试用向导包还是正式无向导包；不要直接从 `codex/multirouter-wizard` HEAD 打正式 release，也不要为了正式 release 在 wizard 分支上删除向导代码。
+
 ## 2026-06-29 CCSwitchMulti v3.16.4-3 Formal Release
 
 - 2026-06-29 按用户要求准备 `easy` 后缀试用包：版本面从 `3.16.4-3` 临时同步为 `3.16.4-3-easy`，用于重新打包验证 MultiRouter 向导更宽窗口、首页说明简化和步骤不回跳修复。该版本是本地试用包命名，不代表新的正式 GitHub release。
