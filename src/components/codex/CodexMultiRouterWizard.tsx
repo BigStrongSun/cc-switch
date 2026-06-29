@@ -1056,7 +1056,7 @@ export function CodexMultiRouterWizard({
               )}
               {flowState.connectivitySummary && (
                 <div className="mt-2 text-xs text-muted-foreground">
-                  最近一次 Responses 连通性测试：通过{" "}
+                  最近一次 Chat / Responses 基础协议测试：通过{" "}
                   {flowState.connectivitySummary.passCount}，警告{" "}
                   {flowState.connectivitySummary.warnCount}，跳过{" "}
                   {flowState.connectivitySummary.skippedCount}，失败{" "}
@@ -1272,7 +1272,8 @@ export function CodexMultiRouterWizard({
                   连通性测试会对每个 provider 的每个可见模型分别发送
                   /v1/responses 与 /v1/chat/completions 真实请求，输出上限为
                   1024。测试结果会用来判断该 provider 应走 Responses 还是 Chat
-                  转换路径。
+                  转换路径；通过只代表基础协议入口可用，不代表工具调用、流式输出、长上下文、多模态或真实
+                  Codex 会话一定完整正常。
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   {draftSources.map((provider) => (
@@ -1451,6 +1452,11 @@ export function CodexMultiRouterWizard({
                   /v1/chat/completions，输出上限为
                   1024。都不通时通常不是协议问题，而是 API Key、Base
                   URL、模型权限、额度、网络或上游故障。
+                </span>
+                <span className="block">
+                  注意：Responses 通过只证明最小非流式请求能返回成功，不等于完整
+                  Codex 功能验证。保存启用后仍需要在状态页和真实 Codex
+                  会话里确认路由、流式响应、工具调用和历史修复流程。
                 </span>
               </DialogDescription>
             </DialogHeader>

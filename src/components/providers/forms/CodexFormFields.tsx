@@ -712,8 +712,8 @@ export function CodexFormFields({
         onApiFormatChange("openai_responses");
         const summary =
           chatPass > 0
-            ? `Responses 和 Chat 都有模型可用，已优先切换为 Responses。Responses 通过 ${responsesPass}/${models.length}，Chat 通过 ${chatPass}/${models.length}。${failureDetail}`
-            : `只有 Responses 可用，已切换为 Responses。Responses 通过 ${responsesPass}/${models.length}。${failureDetail}`;
+            ? `Responses 和 Chat 的基础请求都有模型可用，已优先切换为 Responses。Responses 通过 ${responsesPass}/${models.length}，Chat 通过 ${chatPass}/${models.length}。通过不等于完整 Codex 功能验证。${failureDetail}`
+            : `只有 Responses 基础请求可用，已切换为 Responses。Responses 通过 ${responsesPass}/${models.length}。通过不等于完整 Codex 功能验证。${failureDetail}`;
         setProtocolProbeSummary(summary);
         toast.success(summary, { closeButton: true });
         return;
@@ -1018,6 +1018,11 @@ export function CodexFormFields({
                 /v1/chat/completions，输出上限为
                 1024。都不通时通常不是协议问题，而是 API Key、Base
                 URL、模型权限、额度、网络或上游故障。
+              </span>
+              <span className="block">
+                注意：Responses 通过只证明最小非流式请求能返回成功，不等于完整
+                Codex
+                功能验证；真实会话里的流式输出、工具调用、长上下文和限流稳定性仍要继续观察。
               </span>
             </DialogDescription>
           </DialogHeader>
@@ -1678,7 +1683,8 @@ export function CodexFormFields({
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
                     不确定该选哪个时，可以测试 Chat /
                     Responses。测试会发送真实模型请求， 输出上限为
-                    1024，可能产生少量额度或流量消耗。
+                    1024，可能产生少量额度或流量消耗。通过只代表基础协议入口可用，不等于完整
+                    Codex 功能验证。
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Button

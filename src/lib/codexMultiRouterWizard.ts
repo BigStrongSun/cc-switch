@@ -424,7 +424,7 @@ export function classifyWizardDualProtocolConnectivityResult(args: {
       canContinue: true,
       recommendedApiFormat: "openai_responses",
       detail:
-        "Responses 和 Chat Completions 都可用；Codex 原生工具链优先使用 Responses。",
+        "Responses 和 Chat Completions 的基础请求都可用；这只能证明协议入口、鉴权和模型名可用，Codex 原生工具链仍优先使用 Responses。",
     };
   }
   if (args.responses.ok) {
@@ -433,7 +433,7 @@ export function classifyWizardDualProtocolConnectivityResult(args: {
       status: "pass",
       canContinue: true,
       recommendedApiFormat: "openai_responses",
-      detail: `Responses 可用，Chat Completions 不通；将使用 Responses。Chat 返回：${args.chat.detail}`,
+      detail: `Responses 基础请求可用，Chat Completions 不通；将使用 Responses。该结果不等于完整 Codex 功能验证，Chat 返回：${args.chat.detail}`,
     };
   }
   if (args.chat.ok) {

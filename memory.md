@@ -15,6 +15,7 @@
 ## 2026-06-29 CCSwitchMulti v3.16.4-3 Formal Release
 
 - 2026-06-29 继续完善 MultiRouter 向导和单独 Codex provider 的协议探测：真实连通性测试必须先弹确认框，明确会向上游发送 `/v1/responses` 与 `/v1/chat/completions` 请求，可能消耗额度/流量/触发限流，输出上限为 1024 而不是 1。判断策略改为双协议结果矩阵：两者都通或仅 Responses 通时优先 Responses，仅 Chat 通时切到 Chat Completions，两者都不通时不能说成“不支持 Responses”，应提示 API Key、Base URL、模型权限、额度、网络或上游故障等更宽的失败边界。
+- 2026-06-29 进一步明确：`/v1/responses` 探测通过不等于完整 Codex 功能正常。它只证明 Base URL/API Key/模型名/最小非流式 Responses 请求可用；完整功能还要看真实 Codex 会话里的 SSE/流式输出、工具调用、reasoning/上下文、多模态、限流稳定性、MultiRouter route 命中和历史修复后的 Desktop 状态。UI 文案必须称为“基础协议测试/基础请求可用”，不能把它包装成全功能验收。
 - 2026-06-29 按用户要求准备 `easy` 后缀试用包：版本面从 `3.16.4-3` 临时同步为 `3.16.4-3-easy`，用于重新打包验证 MultiRouter 向导更宽窗口、首页说明简化和步骤不回跳修复。该版本是本地试用包命名，不代表新的正式 GitHub release。
 - 2026-06-29 `3.16.4-3-easy` 本地 Windows 试用包已由 post-commit pipeline 成功导出到 `C:\Users\sunda\Documents\LLMservice\最新版ccswitchmulti`，metadata 指向 `codex/multirouter-wizard` 的 `50499816cd3fcfd3c80fcc28ec156d011a855480`。可试用文件包括 `windows/installer/CCSwitchMulti_3.16.4-3-easy_x64-setup.exe`、`windows/portable/CCSwitchMulti_3.16.4-3-easy_x64-portable.zip`、`windows/raw-exe/CCSwitchMulti_3.16.4-3-easy_x64.exe`；`SHA256SUMS.txt` 覆盖 easy 资产，raw exe `FileVersion/ProductVersion=3.16.4-3-easy` 已验证。
 - 2026-06-29 修复 MultiRouter 向导继续试用反馈：向导遮罩层级为 `z-[120]`，普通 `AddProviderDialog` 的 `FullScreenPanel` 只有 `z-[60]`，所以在向导第 2 步点击“添加 Provider/添加模型源”会像没反应；现在 `FullScreenPanel` 支持传入层级，App 只在向导打开时把 Add Provider 面板提升到 `z-[140]`。配置核心参数页也改为三态显示：可自动获取模型、已有模型目录可继续、需补全配置；创建模型源和配置页的 provider 卡片区有独立滚动高度，避免必须拉高整个窗口才能看到后续 provider。
