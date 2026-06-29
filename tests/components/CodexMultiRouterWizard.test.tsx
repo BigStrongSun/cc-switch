@@ -168,7 +168,45 @@ describe("CodexMultiRouterWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "配置核心参数" }));
 
     expect(screen.getByText("已有模型目录，可继续")).toBeInTheDocument();
+    expect(screen.getByText(/已有 modelCatalog，可跳过/)).toBeInTheDocument();
+    expect(screen.queryByText(/未配置在线获取参数/)).not.toBeInTheDocument();
     expect(screen.queryByText("需补全配置")).not.toBeInTheDocument();
+  });
+
+  it("shows inferred Responses format for official OpenAI sources with stale chat metadata", () => {
+    renderWithQueryClient(
+      <CodexMultiRouterWizard
+        open
+        providers={[
+          provider({
+            id: "openai-official-backup",
+            name: "OpenAI Official Backup",
+            category: "official",
+            meta: { apiFormat: "openai_chat" },
+            settingsConfig: {
+              modelCatalog: {
+                models: [{ model: "gpt-5.5", upstreamModel: "gpt-5.5" }],
+              },
+            },
+          }),
+        ]}
+        onOpenChange={vi.fn()}
+        onCreateProvider={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        onEnablePlan={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "配置核心参数" }));
+
+    expect(screen.getByText(/OpenAI Official Backup/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/API 格式：Responses API（向导推断/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/已覆盖旧配置里的 Chat Completions/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/默认 Chat Completions/)).not.toBeInTheDocument();
   });
 
   it("stays in needSources state when advancing without model sources", () => {

@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-06-29 MultiRouter Wizard Provider Config Protocol Display Fix
+
+- 用户试用向导时反馈配置核心参数页误导：`OpenAI Official Backup` 显示“API 格式：未显式设置，向导保存路由时默认 Chat Completions”，同时“已有模型目录”provider 显示“未配置在线获取参数”。根因是 `CodexMultiRouterWizard` 配置页直接读 `meta.apiFormat/settingsConfig.apiFormat` 和本地 `/models` 抓取参数，没有复用 `inferWizardApiFormat()` 这条已经用于保存 route 的事实来源。
+- 修复边界：配置页的 API 格式展示必须和最终 route 生成一致。官方 OpenAI/OAuth 或暴露 GPT/O 原生 Responses 模型的 provider，即使旧 metadata 写 `openai_chat` 或未写，也显示/保存为 `Responses API`；未知第三方没有实测结果时才保守显示 Chat Completions。若旧配置和推断不同，UI 要明确说“向导推断，已覆盖旧配置”，避免用户以为 official 会走 Chat。
+- `/models` 获取能力和可路由模型目录是两回事：没有 Base URL/API Key 只代表不能在线刷新模型列表，不代表不能生成路由。已有 `modelCatalog` 的 provider 应显示“已有 modelCatalog，可跳过 /models 在线读取；如需刷新再补 Base URL/API Key”，不要再写“未配置在线获取参数”这种像错误的提示。
+- 回归测试：`tests/components/CodexMultiRouterWizard.test.tsx` 覆盖 catalog-only provider 不显示旧提示，以及 `OpenAI Official Backup` 带旧 `openai_chat` metadata 时配置页展示 `Responses API` 并提示覆盖旧配置；数据层已有 `inferWizardApiFormat` 测试覆盖最终 route 保存为 `openai_responses`。
+
 ## 2026-06-29 Codex MultiRouter 502 Official Route Diagnosis
 
 - 用户截图里 `OpenAI Multi-Model Router` 在 `06/29 16:07` 连续出现 5 条 502，但同一时间段 `codex-router.log` 证明每次都已命中 `route_id=openai-official`，`effective_provider=codex-openai-router::route::openai-official`，`effective_endpoint=/responses`，`upstream_url=https://chatgpt.com/backend-api/codex/responses`，`responses_to_chat=false`，`auth_strategy=CodexOAuth`。因此这不是 route miss、不是官方 GPT 被错误转 Chat、也不是模型重名映射错误。

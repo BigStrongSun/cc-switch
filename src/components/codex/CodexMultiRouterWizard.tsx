@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import type { Provider } from "@/types";
 import type {
+  CodexApiFormat,
   CodexCacheConfig,
   CodexCatalogModel,
   CodexRoutingRoute,
@@ -51,6 +52,7 @@ import {
   getWizardConfigIssues,
   getWizardModelFetchConfig,
   hasWizardModelCatalog,
+  inferWizardApiFormat,
   mergeFetchedModelsIntoWizardProvider,
   isCodexMultiRouterPlan,
   readWizardModelCatalog,
@@ -172,7 +174,7 @@ const STEP_RULES: Record<WizardStepKey, WizardStepRule> = {
   providerConfig: {
     errors: [
       "缺少 Base URL/API Key 时无法自动获取模型，也无法做真实连通性测试。",
-      "apiFormat 未设置时按 Chat Completions 保守处理。",
+      "apiFormat 未显式设置时会按模型源和探测结果推断：官方 GPT/O 优先 Responses，未知第三方保守走 Chat Completions。",
     ],
     canContinue:
       "有可用 modelCatalog 时可继续；没有 modelCatalog 且缺配置会停在配置缺口状态。",
@@ -402,6 +404,33 @@ function fetchConfigSummary(config: WizardModelFetchConfig | null): string {
   return `${config.baseUrl}${config.isFullUrl ? " (完整 URL)" : ""}`;
 }
 
+// 将协议枚举转成用户能理解的名称，避免在配置页直接暴露 openai_chat 这种内部值。
+function apiFormatDisplayName(format: CodexApiFormat): string {
+  return format === "openai_responses" ? "Responses API" : "Chat Completions";
+}
+
+// 判断旧配置里是否有可识别的显式协议值；未知字符串只用于说明，不参与 route 生成。
+function normalizeApiFormat(value: unknown): CodexApiFormat | null {
+  return value === "openai_responses" || value === "openai_chat" ? value : null;
+}
+
+// 配置页统一调用向导的数据层推断协议，保证 UI 文案和最终 route 保存结果一致。
+function providerApiFormatSummary(provider: Provider): string {
+  const inferredFormat = inferWizardApiFormat(provider);
+  const explicitFormat = normalizeApiFormat(
+    provider.meta?.apiFormat ??
+      provider.settingsConfig?.apiFormat ??
+      provider.settingsConfig?.api_format,
+  );
+  if (explicitFormat === inferredFormat) {
+    return `${apiFormatDisplayName(inferredFormat)}（已显式设置）`;
+  }
+  if (explicitFormat) {
+    return `${apiFormatDisplayName(inferredFormat)}（向导推断；已覆盖旧配置里的 ${apiFormatDisplayName(explicitFormat)}）`;
+  }
+  return `${apiFormatDisplayName(inferredFormat)}（向导推断；官方 GPT/O 优先 Responses，未知第三方默认 Chat）`;
+}
+
 // 将 route 的缓存能力转换成向导里的说明，强调缓存验证看真实 usage，而不是基础连通性。
 function cacheCapabilitySummary(cache?: CodexCacheConfig): string {
   switch (cache?.cacheMode) {
@@ -441,7 +470,8 @@ function providerConfigStatus(provider: Provider): {
     return {
       badge: "已有模型目录，可继续",
       badgeVariant: "secondary",
-      summary: "未配置在线获取参数，将使用当前 modelCatalog 生成路由",
+      summary:
+        "已有 modelCatalog，可跳过 /models 在线读取；如需刷新模型，请补 Base URL/API Key 后再获取。",
     };
   }
   return {
@@ -1245,11 +1275,7 @@ export function CodexMultiRouterWizard({
                           {status.summary}
                         </div>
                         <div className="mt-2 text-xs text-muted-foreground">
-                          API 格式：
-                          {provider.meta?.apiFormat ??
-                            provider.settingsConfig?.apiFormat ??
-                            provider.settingsConfig?.api_format ??
-                            "未显式设置，向导保存路由时默认 Chat Completions"}
+                          API 格式：{providerApiFormatSummary(provider)}
                         </div>
                       </div>
                     );
