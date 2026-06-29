@@ -1,5 +1,10 @@
 # CC Switch Repository Memory
 
+## 2026-06-30 Promote v3.16.4-4wizard To Latest Release
+
+- 用户在 GitHub releases 列表截图里看到 `v3.16.4-3` 仍显示 `Latest`，原因不是 `main` 未推送，而是 `v3.16.4-4wizard` 仍标记为 prerelease。GitHub 只会把 `Latest` 标给正式 release，prerelease 即使发布时间更新也不会替代正式版 latest。
+- 已将 BigStrongSun/ccswitchmulti 的 `v3.16.4-4wizard` release 从 prerelease 改为正式 release，并通过 `gh release edit ... --latest` 显式标记为 Latest；该 tag 的 peeled commit 已在上一轮指向 `main` 的 `15c2d728ae04b857a5531859ce911de6c2665b57`。后续判断“页面看不到 latest”时要先检查 `isPrerelease` 和 GitHub 的 explicit latest 标记，不要只看 tag/main 是否推送。
+
 ## 2026-06-29 Merge Wizard Trial Branch Into Main
 
 - 用户纠正 `v3.16.4-4wizard` 不能只停留在 `codex/multirouter-wizard` 分支：需要把 wizard 试用线合入 `main`。合并前确认 `main...codex/multirouter-wizard` 为 `0 41`，即 `main` 没有独有提交、wizard 分支领先 41 个提交。
