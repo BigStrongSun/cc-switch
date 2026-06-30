@@ -1,5 +1,13 @@
 # CC Switch Repository Memory
 
+## 2026-06-30 Codex GLM 5.2 Responses-To-Chat 400 Diagnostics
+
+- 用户截图分析 Codex 26.623.61825 子 agent 经 CCSwitchMulti `/responses` 转 Zhipu GLM `/chat/completions` 后返回 HTTP 400，且日志里 `header_count=16` 失败较多。排查确认当前 `codex_router_log` 的 `header_count` 来自 `ordered_headers.len()`，是 HTTP 请求头数量，不是转换后 Chat body 顶层字段数量，不能直接按“body 字段数 16”归因。
+- 根修边界在 Codex Responses->Chat 转换链：`src-tauri/src/proxy/providers/transform_codex_chat.rs` 不再默认透传 `metadata` 和 `service_tier` 到第三方 Chat 兼容上游；这两个字段对 GLM/DeepSeek/Qwen 等自动缓存或普通 Chat 路径没有价值，且容易被严格兼容层拒绝。`stream_options.include_usage` 暂时保留，因为它支撑第三方流式 usage 记账，不能无证据全局移除。
+- 400 可观测性补强：`src-tauri/src/proxy/forwarder.rs` 在 Codex `responses_to_chat=true` 时给 `request_prepared` 和 `upstream_error` 追加脱敏 `request_shape`，只记录 `top_keys`、`messages` 数量、`tools` 数量/类型、`thinking`/`reasoning_effort`/`stream_options`/`parallel_tool_calls` 等字段形态，不记录 prompt、工具参数、API key 或工具函数名。后续遇到空 `body_summary` 的 400，应先看同 trace 的 `request_shape`，不要靠截图猜字段。
+- GLM 5.2 thinking 配置依据官方文档校正：智谱“迁移至 GLM-5.2”文档明确列出 `thinking={"type":"enabled"}` 和 `reasoning_effort="max"` 示例，因此 Codex 预设和后端推断都保留/补齐 `supportsEffort=true`、`effortParam="reasoning_effort"`、`effortValueMode="deepseek"`。不要仅因 z.ai 返回空 400 就回退成 `effortParam=none`；若后续 request_shape 证明某个 coding endpoint 拒绝该字段，再做 provider/endpoint 级 capability，而不是全局关掉 GLM effort。
+- 回归测试落点：`responses_request_to_chat_drops_responses_only_metadata_and_service_tier`、`test_resolve_codex_chat_reasoning_infers_glm_5_2_effort_support`、`codex_chat_request_shape_omits_prompt_text_and_records_field_shapes`、`tests/config/codexChatProviderPresets.test.ts` 的 GLM effort 预设断言。已验证：`cargo test --manifest-path src-tauri\Cargo.toml responses_request_to_chat_ --lib`、新增三条 Rust 单测、`pnpm vitest run tests/config/codexChatProviderPresets.test.ts`、`pnpm typecheck`、`cargo fmt --manifest-path src-tauri\Cargo.toml --check`、`git diff --check`。
+
 ## 2026-06-30 Codex Provider Chat / Responses Probe Visibility Fix
 
 - 用户截图反馈“创建多路路由 -> 单独接入模型源 -> 高级选项 -> 测试 Chat / Responses”点击后像页面卡死。该按钮属于 `ProviderForm(appId="codex") -> CodexFormFields`，不是 `CodexMultiRouterWizard`。根因之一是 AddProviderDialog 使用 `FullScreenPanel`，默认层级 `z-[60]`，而协议测试确认 Dialog 也使用 `zIndex="alert"` 即 `z-[60]`；同层级 portal/动画 stacking context 下，确认框可能被全屏面板压住，用户看不到任何反馈。

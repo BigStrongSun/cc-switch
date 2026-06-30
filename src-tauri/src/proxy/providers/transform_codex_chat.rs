@@ -24,13 +24,11 @@ const EXTRA_CHAT_PASSTHROUGH_FIELDS: &[&str] = &[
     "frequency_penalty",
     "logit_bias",
     "logprobs",
-    "metadata",
     "n",
     "parallel_tool_calls",
     "presence_penalty",
     "response_format",
     "seed",
-    "service_tier",
     "stop",
     "stream_options",
     "top_logprobs",
@@ -3810,6 +3808,25 @@ mod tests {
             result.get("parallel_tool_calls").is_none(),
             "parallel_tool_calls should be absent"
         );
+    }
+
+    #[test]
+    fn responses_request_to_chat_drops_responses_only_metadata_and_service_tier() {
+        // metadata/service_tier are OpenAI Responses or official-service fields.
+        // Sending them to strict third-party Chat-compatible APIs such as GLM can
+        // turn an otherwise valid converted request into HTTP 400.
+        let input = json!({
+            "model": "glm-5.2",
+            "input": "hi",
+            "metadata": {"codex_session": "session-1"},
+            "service_tier": "priority"
+        });
+
+        let result = responses_to_chat_completions(input).unwrap();
+
+        assert!(result.get("metadata").is_none());
+        assert!(result.get("service_tier").is_none());
+        assert_eq!(result["model"], "glm-5.2");
     }
 
     #[test]

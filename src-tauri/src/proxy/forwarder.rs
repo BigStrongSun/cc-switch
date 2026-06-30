@@ -1678,29 +1678,32 @@ impl RequestForwarder {
             || codex_responses_to_messages
             || request_is_streaming;
 
+        let codex_chat_request_shape =
+            codex_responses_to_chat.then(|| summarize_codex_chat_request_shape(&filtered_body));
         if let Some(trace_id) = codex_trace_id.as_deref() {
-            super::codex_router_log::append_event(
-                "request_prepared",
-                &[
-                    ("trace", trace_id.to_string()),
-                    ("session", self.session_id.clone()),
-                    ("endpoint", endpoint.to_string()),
-                    ("effective_endpoint", effective_endpoint.clone()),
-                    ("model", request_model_for_log.clone()),
-                    ("provider", provider.id.clone()),
-                    ("upstream_url", url.clone()),
-                    ("responses_to_chat", codex_responses_to_chat.to_string()),
-                    (
-                        "responses_to_messages",
-                        codex_responses_to_messages.to_string(),
-                    ),
-                    ("streaming", request_is_streaming.to_string()),
-                    (
-                        "elapsed_ms",
-                        request_prepare_started_at.elapsed().as_millis().to_string(),
-                    ),
-                ],
-            );
+            let mut fields = vec![
+                ("trace", trace_id.to_string()),
+                ("session", self.session_id.clone()),
+                ("endpoint", endpoint.to_string()),
+                ("effective_endpoint", effective_endpoint.clone()),
+                ("model", request_model_for_log.clone()),
+                ("provider", provider.id.clone()),
+                ("upstream_url", url.clone()),
+                ("responses_to_chat", codex_responses_to_chat.to_string()),
+                (
+                    "responses_to_messages",
+                    codex_responses_to_messages.to_string(),
+                ),
+                ("streaming", request_is_streaming.to_string()),
+                (
+                    "elapsed_ms",
+                    request_prepare_started_at.elapsed().as_millis().to_string(),
+                ),
+            ];
+            if let Some(shape) = codex_chat_request_shape.as_ref() {
+                fields.push(("request_shape", shape.clone()));
+            }
+            super::codex_router_log::append_event("request_prepared", &fields);
         }
 
         // Codex OAuth 需要注入的 ChatGPT-Account-Id（在动态 token 获取期间填充）
@@ -2342,6 +2345,7 @@ impl RequestForwarder {
                     &provider.id,
                     status_code,
                     body_text.as_deref(),
+                    codex_chat_request_shape.as_deref(),
                 );
             }
 
@@ -2475,6 +2479,7 @@ impl RequestForwarder {
                     &provider.id,
                     status_code,
                     body_text.as_deref(),
+                    codex_chat_request_shape.as_deref(),
                 );
             }
 
@@ -3260,23 +3265,25 @@ fn append_upstream_error_event(
     provider_id: &str,
     status: u16,
     body_text: Option<&str>,
+    request_shape: Option<&str>,
 ) {
-    super::codex_router_log::append_event(
-        "upstream_error",
-        &[
-            ("trace", trace_id.to_string()),
-            ("session", session_id.to_string()),
-            ("model", request_model.to_string()),
-            ("provider", provider_id.to_string()),
-            ("status", status.to_string()),
-            (
-                "body_summary",
-                body_text
-                    .map(summarize_upstream_body)
-                    .unwrap_or_else(|| "<empty>".to_string()),
-            ),
-        ],
-    );
+    let mut fields = vec![
+        ("trace", trace_id.to_string()),
+        ("session", session_id.to_string()),
+        ("model", request_model.to_string()),
+        ("provider", provider_id.to_string()),
+        ("status", status.to_string()),
+        (
+            "body_summary",
+            body_text
+                .map(summarize_upstream_body)
+                .unwrap_or_else(|| "<empty>".to_string()),
+        ),
+    ];
+    if let Some(shape) = request_shape {
+        fields.push(("request_shape", shape.to_string()));
+    }
+    super::codex_router_log::append_event("upstream_error", &fields);
 }
 
 /// 识别会触发上游 Responses-Lite 分支的 Codex 内部请求头。
@@ -3570,6 +3577,86 @@ fn prepare_upstream_request_body(request_body: Value) -> Value {
     canonicalize_value(filter_private_params_with_whitelist(request_body, &[]))
 }
 
+/// 生成 Codex Responses->Chat 出站请求的脱敏形态摘要。
+///
+/// 该摘要只记录顶层字段名、对象/数组形态和工具计数，不记录消息正文、工具参数、
+/// API Key 或任意用户 prompt。上游返回空 400 时可用它定位严格 Chat 接口拒绝的字段组合。
+fn summarize_codex_chat_request_shape(body: &Value) -> String {
+    let mut parts = Vec::new();
+    if let Some(object) = body.as_object() {
+        let mut keys = object.keys().map(String::as_str).collect::<Vec<_>>();
+        keys.sort_unstable();
+        parts.push(format!("top_keys=[{}]", keys.join(",")));
+    } else {
+        parts.push(format!("body={}", value_for_log(body)));
+    }
+
+    parts.push(format!(
+        "messages={}",
+        body.get("messages")
+            .and_then(Value::as_array)
+            .map(|values| values.len().to_string())
+            .unwrap_or_else(|| "absent".to_string())
+    ));
+
+    if let Some(tools) = body.get("tools").and_then(Value::as_array) {
+        let mut types = tools
+            .iter()
+            .filter_map(|tool| tool.get("type").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        types.sort_unstable();
+        types.dedup();
+        parts.push(format!("tools={}", tools.len()));
+        parts.push(format!("tool_types=[{}]", types.join(",")));
+    } else {
+        parts.push("tools=absent".to_string());
+    }
+
+    for key in [
+        "tool_choice",
+        "parallel_tool_calls",
+        "metadata",
+        "service_tier",
+        "stream_options",
+        "response_format",
+        "reasoning_effort",
+        "enable_thinking",
+        "reasoning",
+    ] {
+        parts.push(format!(
+            "{key}={}",
+            body.get(key)
+                .map(value_for_shape_log)
+                .unwrap_or_else(|| "absent".to_string())
+        ));
+    }
+
+    parts.push(format!(
+        "thinking={}",
+        body.get("thinking")
+            .map(value_for_shape_log)
+            .unwrap_or_else(|| "absent".to_string())
+    ));
+
+    parts.join(";")
+}
+
+/// 把 JSON 值压缩成不含正文内容的形态描述。
+fn value_for_shape_log(value: &Value) -> String {
+    match value {
+        Value::Object(object) => {
+            let mut keys = object.keys().map(String::as_str).collect::<Vec<_>>();
+            keys.sort_unstable();
+            format!("object(keys=[{}])", keys.join(","))
+        }
+        Value::Array(values) => format!("array(len={})", values.len()),
+        Value::Bool(_) => "bool".to_string(),
+        Value::Number(_) => "number".to_string(),
+        Value::String(_) => "string".to_string(),
+        Value::Null => "null".to_string(),
+    }
+}
+
 /// 构建本次转发要尝试的 provider 列表。
 ///
 /// Codex MultiRouter 必须保留父 provider 进入 `forward()`，再由 `forward()` 在请求上下文内解析
@@ -3823,6 +3910,38 @@ mod tests {
             now + CODEX_RESPONSES_LITE_FALLBACK_TTL + Duration::from_secs(1)
         ));
         assert!(!fallbacks.contains_key(&key));
+    }
+
+    #[test]
+    fn codex_chat_request_shape_omits_prompt_text_and_records_field_shapes() {
+        let body = json!({
+            "model": "glm-5.2",
+            "messages": [
+                {"role": "user", "content": "secret prompt should not appear"}
+            ],
+            "thinking": {"type": "enabled"},
+            "reasoning_effort": "max",
+            "stream_options": {"include_usage": true},
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "read_secret",
+                    "parameters": {"type": "object"}
+                }
+            }]
+        });
+
+        let summary = summarize_codex_chat_request_shape(&body);
+
+        assert!(summary.contains("model"));
+        assert!(summary.contains("messages=1"));
+        assert!(summary.contains("tools=1"));
+        assert!(summary.contains("tool_types=[function]"));
+        assert!(summary.contains("thinking=object(keys=[type])"));
+        assert!(summary.contains("reasoning_effort=string"));
+        assert!(summary.contains("stream_options=object(keys=[include_usage])"));
+        assert!(!summary.contains("secret prompt"));
+        assert!(!summary.contains("read_secret"));
     }
 
     #[test]

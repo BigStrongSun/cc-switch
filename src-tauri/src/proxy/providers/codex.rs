@@ -1478,10 +1478,10 @@ fn infer_codex_chat_reasoning_config(
     if haystack.contains("glm") || haystack.contains("zhipu") || haystack.contains("z.ai") {
         return Some(CodexChatReasoningConfig {
             supports_thinking: Some(true),
-            supports_effort: Some(false),
+            supports_effort: Some(true),
             thinking_param: Some("thinking".to_string()),
-            effort_param: Some("none".to_string()),
-            effort_value_mode: None,
+            effort_param: Some("reasoning_effort".to_string()),
+            effort_value_mode: Some("deepseek".to_string()),
             min_output_tokens: None,
             output_format: Some("reasoning_content".to_string()),
         });
@@ -3580,6 +3580,30 @@ wire_api = "chat"
 
         assert_eq!(config.supports_thinking, Some(true));
         assert_eq!(config.supports_effort, Some(true));
+        assert_eq!(config.effort_value_mode.as_deref(), Some("deepseek"));
+    }
+
+    #[test]
+    fn test_resolve_codex_chat_reasoning_infers_glm_5_2_effort_support() {
+        let provider = create_provider(json!({
+            "config": r#"
+model_provider = "zhipu_glm"
+model = "glm-5.2"
+
+[model_providers.zhipu_glm]
+name = "Zhipu GLM"
+base_url = "https://open.bigmodel.cn/api/coding/paas/v4"
+wire_api = "chat"
+"#
+        }));
+
+        let config =
+            resolve_codex_chat_reasoning_config(&provider, &json!({ "model": "glm-5.2" })).unwrap();
+
+        assert_eq!(config.supports_thinking, Some(true));
+        assert_eq!(config.thinking_param.as_deref(), Some("thinking"));
+        assert_eq!(config.supports_effort, Some(true));
+        assert_eq!(config.effort_param.as_deref(), Some("reasoning_effort"));
         assert_eq!(config.effort_value_mode.as_deref(), Some("deepseek"));
     }
 

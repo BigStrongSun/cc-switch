@@ -190,6 +190,21 @@ describe("Codex Chat provider presets", () => {
     );
   });
 
+  it("declares GLM 5.2 thinking and reasoning effort support", () => {
+    for (const name of ["Zhipu GLM", "Zhipu GLM en"]) {
+      const preset = codexProviderPresets.find((item) => item.name === name);
+
+      expect(preset?.codexChatReasoning).toMatchObject({
+        supportsThinking: true,
+        supportsEffort: true,
+        thinkingParam: "thinking",
+        effortParam: "reasoning_effort",
+        effortValueMode: "deepseek",
+        outputFormat: "reasoning_content",
+      });
+    }
+  });
+
   it("uses native Responses API for migrated CN providers without local route mapping", () => {
     const nativeResponsesPresets = [
       "DouBaoSeed",
