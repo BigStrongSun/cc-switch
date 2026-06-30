@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { UI_LAYER_CLASS } from "@/components/ui/layers";
 import { useUpdateModelPricing } from "@/lib/query/usage";
 import { isTextEditableTarget } from "@/utils/domUtils";
 
@@ -314,7 +315,9 @@ export function ModelsDevPickerDialog({
                   <SelectTrigger className="w-44 shrink-0">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="z-[120] max-h-[min(24rem,var(--radix-select-content-available-height))]">
+                  <SelectContent
+                    className={`${UI_LAYER_CLASS.topDialogFloating} max-h-[min(24rem,var(--radix-select-content-available-height))]`}
+                  >
                     <SelectItem value="all">
                       {t("usage.modelsDevAllProviders", "全部供应商")}
                     </SelectItem>

@@ -432,7 +432,7 @@ export function HermesFormFields({
                           </DropdownMenuTrigger>
                           <DropdownMenuContent
                             align="end"
-                            className="max-h-64 overflow-y-auto z-[200]"
+                            className="max-h-64 overflow-y-auto"
                           >
                             {groupedFetchedModels.map(
                               ([vendor, vModels], vi) => (

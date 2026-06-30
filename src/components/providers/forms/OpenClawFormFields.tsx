@@ -375,7 +375,7 @@ export function OpenClawFormFields({
                           </DropdownMenuTrigger>
                           <DropdownMenuContent
                             align="end"
-                            className="max-h-64 overflow-y-auto z-[200]"
+                            className="max-h-64 overflow-y-auto"
                           >
                             {Object.entries(
                               fetchedModels.reduce(

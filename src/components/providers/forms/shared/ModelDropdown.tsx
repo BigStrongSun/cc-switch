@@ -32,10 +32,7 @@ export function ModelDropdown({
           <ChevronDown className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        className="max-h-64 overflow-y-auto z-[200]"
-      >
+      <DropdownMenuContent align="end" className="max-h-64 overflow-y-auto">
         {vendors.map((vendor, vi) => (
           <div key={vendor}>
             {vi > 0 && <DropdownMenuSeparator />}

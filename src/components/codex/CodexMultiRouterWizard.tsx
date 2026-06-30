@@ -1506,7 +1506,7 @@ export function CodexMultiRouterWizard({
           open={isConnectivityConfirmOpen}
           onOpenChange={setIsConnectivityConfirmOpen}
         >
-          <DialogContent className="max-w-lg" zIndex="alert">
+          <DialogContent className="max-w-lg" zIndex="top">
             <DialogHeader>
               <DialogTitle>确认开始连通性测试</DialogTitle>
               <DialogDescription className="space-y-2 text-left">

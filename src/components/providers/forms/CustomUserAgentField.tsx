@@ -60,10 +60,7 @@ export function CustomUserAgentField({
               <ChevronDown className="h-3.5 w-3.5 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="max-h-64 overflow-y-auto z-[200]"
-          >
+          <DropdownMenuContent align="end" className="max-h-64 overflow-y-auto">
             {USER_AGENT_PRESETS.map((preset) => (
               <DropdownMenuItem
                 key={preset}

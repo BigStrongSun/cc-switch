@@ -445,7 +445,7 @@ export function ClaudeFormFields({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              className="max-h-64 overflow-y-auto z-[200]"
+              className="max-h-64 overflow-y-auto"
             >
               {vendors.map((vendor, vi) => (
                 <div key={vendor}>

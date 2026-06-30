@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
+import { DIALOG_LAYER_CLASS, type DialogLayer } from "./layers";
 
 const Dialog = DialogPrimitive.Root;
 
@@ -13,22 +14,15 @@ const DialogClose = DialogPrimitive.Close;
 const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay> & {
-    zIndex?: "base" | "nested" | "alert" | "top";
+    zIndex?: DialogLayer;
   }
 >(({ className, zIndex = "base", ...props }, ref) => {
-  const zIndexMap = {
-    base: "z-40",
-    nested: "z-50",
-    alert: "z-[60]",
-    top: "z-[200]",
-  };
-
   return (
     <DialogPrimitive.Overlay
       ref={ref}
       className={cn(
         "fixed inset-0 bg-black/50 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-        zIndexMap[zIndex],
+        DIALOG_LAYER_CLASS[zIndex],
         className,
       )}
       {...props}
@@ -40,7 +34,7 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
-    zIndex?: "base" | "nested" | "alert" | "top";
+    zIndex?: DialogLayer;
     variant?: "default" | "fullscreen";
     overlayClassName?: string;
   }
@@ -56,13 +50,6 @@ const DialogContent = React.forwardRef<
     },
     ref,
   ) => {
-    const zIndexMap = {
-      base: "z-40",
-      nested: "z-50",
-      alert: "z-[60]",
-      top: "z-[200]",
-    };
-
     const variantClass = {
       default:
         "fixed left-1/2 top-1/2 flex flex-col w-full max-w-lg max-h-[90vh] translate-x-[-50%] translate-y-[-50%] border border-border-default bg-background text-foreground shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
@@ -75,7 +62,7 @@ const DialogContent = React.forwardRef<
         <DialogOverlay zIndex={zIndex} className={overlayClassName} />
         <DialogPrimitive.Content
           ref={ref}
-          className={cn(variantClass, zIndexMap[zIndex], className)}
+          className={cn(variantClass, DIALOG_LAYER_CLASS[zIndex], className)}
           onInteractOutside={(e) => {
             // 防止点击遮罩层关闭对话框
             e.preventDefault();

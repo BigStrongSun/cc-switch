@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-06-30 UI Portal Layer Ordering Audit
+
+- Codex MultiRouter 向导相关的“点击后像卡死”不只来自单个 Dialog：全屏 provider panel 可到 `z-[140]`，但共享 Radix `SelectContent`/`PopoverContent`/`TooltipContent` 之前停在 `z-[100]`，`DropdownMenuContent` 甚至是 `z-50`，都会在向导上方打开 provider 表单时被面板遮住。
+- 统一层级落点在 `src/components/ui/layers.ts`：普通 dialog `40/50/60`，portal 浮层 `z-[180]`，top dialog `z-[200]`，top dialog 内部需要 portal 的下拉用 `z-[210]`。不要再在业务组件里随手写 `z-[1000]` 或 `z-[200]` 抢层级；需要例外时先判断它属于普通 panel 浮层还是 top dialog 内浮层。
+- `CodexMultiRouterWizard` 内部连通性测试确认框必须是 `zIndex="top"`，因为它从 `z-[120]` 的 wizard portal 内再打开 Radix dialog；如果仍用 `alert z-[60]`，确认框会被向导自身遮住。
+- models.dev 定价导入弹窗本身是 `zIndex="top"`，里面的 provider `SelectContent` 是 body portal，必须显式使用 `UI_LAYER_CLASS.topDialogFloating`，否则默认普通浮层 `z-[180]` 仍会落在自己的 top dialog 下方。
+
 ## 2026-06-30 Dialog Top Layer Above Codex Wizard Provider Panel
 
 - 用户截图显示 Codex provider 表单里点击“测试 Chat / Responses”后按钮旁出现“已打开测试确认框”，但确认 Dialog 仍不可见。根因不是 click/state 没触发，而是层级定义错误：MultiRouter 向导打开时 `AddProviderDialog` 的 `FullScreenPanel` 会提升到 `z-[140]`，而通用 Dialog 的 `zIndex="top"` 只有 `z-[110]`，仍在全屏 provider 面板下面。

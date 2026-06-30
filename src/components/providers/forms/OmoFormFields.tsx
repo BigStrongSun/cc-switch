@@ -183,7 +183,7 @@ function ModelCombobox({
         sideOffset={6}
         avoidCollisions={true}
         collisionPadding={8}
-        className="z-[1000] w-[var(--radix-popover-trigger-width)] p-0 border-border-default"
+        className="w-[var(--radix-popover-trigger-width)] p-0 border-border-default"
       >
         <Command>
           <CommandInput
