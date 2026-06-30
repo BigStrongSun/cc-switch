@@ -74,6 +74,28 @@ describe("CodexMultiRouterWizard", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps the wizard controls inside small app windows", () => {
+    renderWithQueryClient(
+      <CodexMultiRouterWizard
+        open
+        providers={[provider()]}
+        onOpenChange={vi.fn()}
+        onCreateProvider={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        onEnablePlan={vi.fn()}
+      />,
+    );
+
+    const shell = screen.getByTestId("codex-multirouter-wizard-shell");
+    const body = screen.getByTestId("codex-multirouter-wizard-body");
+    const footer = screen.getByRole("button", { name: "下一步" })
+      .parentElement?.parentElement;
+
+    expect(shell).toHaveClass("flex", "max-h-full", "flex-col");
+    expect(body).toHaveClass("min-h-0", "flex-1", "overflow-hidden");
+    expect(footer).toHaveClass("shrink-0");
+  });
+
   it("opens, navigates steps, and stores dismissed flag when skipped", () => {
     const onOpenChange = vi.fn();
 

@@ -1043,9 +1043,15 @@ export function CodexMultiRouterWizard({
     []) as CodexCatalogModel[];
 
   return createPortal(
-    <div className="fixed inset-0 z-[120] bg-black/70 text-foreground backdrop-blur-sm">
-      <div className="absolute inset-x-3 top-4 mx-auto w-[min(96vw,1280px)] rounded-lg border border-white/15 bg-background shadow-2xl">
-        <div className="flex items-start justify-between border-b px-5 py-4">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center overflow-hidden bg-black/70 p-3 text-foreground backdrop-blur-sm sm:p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="codex-multirouter-wizard-title"
+        data-testid="codex-multirouter-wizard-shell"
+        className="flex max-h-full w-[min(96vw,1280px)] min-h-0 flex-col rounded-lg border border-white/15 bg-background shadow-2xl"
+      >
+        <div className="flex shrink-0 items-start justify-between border-b px-5 py-4">
           <div className="flex items-start gap-3">
             <div className="rounded-md bg-primary/10 p-2 text-primary">
               <CurrentStepIcon className="h-5 w-5" />
@@ -1054,7 +1060,12 @@ export function CodexMultiRouterWizard({
               <div className="text-sm text-muted-foreground">
                 第 {stepIndex + 1} / {STEPS.length} 步
               </div>
-              <h2 className="text-xl font-semibold">{currentStep.title}</h2>
+              <h2
+                id="codex-multirouter-wizard-title"
+                className="text-xl font-semibold"
+              >
+                {currentStep.title}
+              </h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 {currentStep.description}
               </p>
@@ -1070,8 +1081,11 @@ export function CodexMultiRouterWizard({
           </Button>
         </div>
 
-        <div className="grid max-h-[82vh] grid-cols-[15rem_minmax(0,1fr)] overflow-hidden">
-          <div className="space-y-1 border-r bg-muted/30 p-3">
+        <div
+          data-testid="codex-multirouter-wizard-body"
+          className="grid min-h-0 flex-1 grid-cols-[15rem_minmax(0,1fr)] overflow-hidden"
+        >
+          <div className="space-y-1 overflow-y-auto border-r bg-muted/30 p-3">
             {STEPS.map((step, index) => {
               const StepIcon = step.icon;
               return (
@@ -1094,7 +1108,7 @@ export function CodexMultiRouterWizard({
             })}
           </div>
 
-          <div className="overflow-y-auto p-5">
+          <div className="min-h-0 overflow-y-auto p-5">
             <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline">状态机：{flowState.status}</Badge>
@@ -1529,7 +1543,7 @@ export function CodexMultiRouterWizard({
           </DialogContent>
         </Dialog>
 
-        <div className="flex items-center justify-between border-t px-5 py-4">
+        <div className="flex shrink-0 items-center justify-between border-t px-5 py-4">
           <Button variant="ghost" onClick={() => closeWizard(true)}>
             跳过
           </Button>

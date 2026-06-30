@@ -1,5 +1,11 @@
 # CC Switch Repository Memory
 
+## 2026-06-30 Codex MultiRouter Wizard Small Window Layout Fix
+
+- 用户截图显示 Codex MultiRouter 向导在较小窗口、尤其接近 Tauri 默认 `1000x650` / 最小 `900x600` 时底部按钮区被裁掉。根因不是向导状态机或步骤跳转，而是 `CodexMultiRouterWizard` 中间 grid 使用 `max-h-[82vh]`，但外层没有整体高度约束，最终高度约等于 header + `82vh` + footer，默认高度下会超过视口。
+- 修复边界：只调整 `src/components/codex/CodexMultiRouterWizard.tsx` 的遮罩弹窗布局。外层 overlay 改成 flex 居中并 `overflow-hidden`，向导 shell 改为 `max-h-full flex flex-col min-h-0`，header/footer `shrink-0`，中间 body `flex-1 min-h-0 overflow-hidden`，右侧内容和左侧步骤栏各自滚动。不要通过单纯提高 `tauri.conf.json` 默认窗口高度来掩盖问题，因为用户仍可能缩小窗口或恢复旧窗口状态。
+- 回归测试落点：`tests/components/CodexMultiRouterWizard.test.tsx` 断言向导 shell/body/footer 的关键布局类，避免后续把高度约束重新放回 `82vh` 内容区。验证命令：`pnpm vitest run tests/components/CodexMultiRouterWizard.test.tsx`、`pnpm typecheck`、`pnpm build:renderer`、`git diff --check`。浏览器直接打开 Vite renderer 会因缺少 Tauri IPC 出现 `window.__TAURI__` 相关错误，只能作为有限页面加载检查；完整交互仍以 Tauri 桌面或组件测试为准。
+
 ## 2026-06-30 Codex MultiRouter Post-Setup Validation Refresh
 
 - 用户追问“配置完返回的校验和刷新流程”，排查范围仍只限 Codex MultiRouter。现有成功判定已经正确：`StatusTab` 只在本地代理运行、Codex 接管、当前 provider 是选中 MultiRouter、入口/规则启用，并且当前方案 route 有真实成功转发证据时才触发 `onRuntimeReady`，不会因为其它 Codex 请求 200 就提前进入历史修复。
