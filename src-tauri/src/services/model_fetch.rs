@@ -7,6 +7,7 @@
 use reqwest::header::{HeaderValue, USER_AGENT};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::Duration;
 
 /// 获取到的模型信息
@@ -33,6 +34,13 @@ struct ModelEntry {
 }
 
 const FETCH_TIMEOUT_SECS: u64 = 15;
+
+/// 智谱官方模型概览 markdown。
+///
+/// 智谱 `/models` 只返回账号可用模型 id，不返回上下文窗口；官方 Mintlify 文档提供
+/// `.md` 形态，更适合程序解析。只在智谱域名且 `/models` 缺上下文字段时作为补充来源。
+const ZHIPU_MODEL_OVERVIEW_MD_URL: &str =
+    "https://docs.bigmodel.cn/cn/guide/start/model-overview.md";
 
 /// 404/405 响应体截断长度：避免把几十 KB HTML 404 页整页保留到错误串里。
 const ERROR_BODY_MAX_CHARS: usize = 512;
@@ -106,6 +114,7 @@ pub async fn fetch_models(
                 })
                 .collect();
 
+            enrich_zhipu_context_windows(&client, url, &mut models).await;
             models.sort_by(|a, b| a.id.cmp(&b.id));
             return Ok(models);
         }
@@ -172,6 +181,232 @@ fn extract_context_window(obj: &serde_json::Map<String, serde_json::Value>) -> O
         .iter()
         .filter_map(|key| obj.get(*key).and_then(|value| value.as_object()))
         .find_map(extract_context_window)
+}
+
+/// 为智谱模型补齐官方文档里的上下文窗口。
+///
+/// 智谱 Coding Plan 的 `/models` 响应只证明账号可用模型集合，模型规格需要从官方文档取。
+/// 这里只填充缺失值，不覆盖上游未来可能直接返回的真实 metadata。
+async fn enrich_zhipu_context_windows(
+    client: &reqwest::Client,
+    endpoint_url: &str,
+    models: &mut [FetchedModel],
+) {
+    if !is_zhipu_models_endpoint(endpoint_url)
+        || !models
+            .iter()
+            .any(|model| model.context_window.is_none() && is_glm_model_id(&model.id))
+    {
+        return;
+    }
+
+    let mut contexts = fetch_zhipu_model_overview_contexts(client).await;
+    enrich_missing_zhipu_detail_contexts(client, models, &mut contexts).await;
+
+    for model in models.iter_mut() {
+        if model.context_window.is_none() {
+            let key = normalize_zhipu_model_id(&model.id);
+            model.context_window = contexts.get(&key).copied();
+        }
+    }
+}
+
+/// 判断当前成功的 `/models` endpoint 是否属于智谱/Z.AI。
+fn is_zhipu_models_endpoint(endpoint_url: &str) -> bool {
+    let lower = endpoint_url.to_ascii_lowercase();
+    lower.contains("open.bigmodel.cn") || lower.contains("api.z.ai")
+}
+
+/// 判断模型 id 是否是 GLM 文本/视觉模型。
+fn is_glm_model_id(model_id: &str) -> bool {
+    let normalized = normalize_zhipu_model_id(model_id);
+    normalized.starts_with("glm-") || normalized.contains("/glm-")
+}
+
+/// 拉取智谱模型概览表，并解析模型上下文列。
+///
+/// 网络或文档格式异常只会导致补充 metadata 缺失，不阻断 `/models` 本身成功返回。
+async fn fetch_zhipu_model_overview_contexts(client: &reqwest::Client) -> HashMap<String, u64> {
+    let text = match client
+        .get(ZHIPU_MODEL_OVERVIEW_MD_URL)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => response.text().await.ok(),
+        _ => None,
+    };
+
+    text.as_deref()
+        .map(parse_zhipu_model_overview_contexts)
+        .unwrap_or_default()
+}
+
+/// 对概览表没覆盖的 GLM 模型，按官方单模型 markdown 页面补查上下文。
+///
+/// 例如 `glm-4.5` 的规格在 `glm-4.5.md` 概览卡片中，而概览表当前只列出
+/// `GLM-4.5-Air`；补查可以让真实 `/models` 返回的 `glm-4.5` 也得到 128K。
+async fn enrich_missing_zhipu_detail_contexts(
+    client: &reqwest::Client,
+    models: &[FetchedModel],
+    contexts: &mut HashMap<String, u64>,
+) {
+    for model in models {
+        if model.context_window.is_some() {
+            continue;
+        }
+        let key = normalize_zhipu_model_id(&model.id);
+        if contexts.contains_key(&key) {
+            continue;
+        }
+        let Some(slug) = zhipu_docs_slug_for_model_id(&model.id) else {
+            continue;
+        };
+        if let Some(context) = fetch_zhipu_detail_context(client, &slug).await {
+            contexts.insert(key, context);
+        }
+    }
+}
+
+/// 将 GLM 模型 id 映射到智谱文档 markdown slug。
+fn zhipu_docs_slug_for_model_id(model_id: &str) -> Option<String> {
+    let normalized = normalize_zhipu_model_id(model_id);
+    if !normalized.starts_with("glm-") {
+        return None;
+    }
+    if normalized.starts_with("glm-4.5") {
+        return Some("glm-4.5".to_string());
+    }
+    Some(normalized)
+}
+
+/// 拉取单模型 markdown 页面，并解析“上下文窗口”卡片。
+async fn fetch_zhipu_detail_context(client: &reqwest::Client, slug: &str) -> Option<u64> {
+    let url = format!("https://docs.bigmodel.cn/cn/guide/models/text/{slug}.md");
+    let response = client
+        .get(url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let text = response.text().await.ok()?;
+    parse_zhipu_detail_context(&text)
+}
+
+/// 解析智谱模型概览 markdown 表格中的“模型 / 上下文”列。
+fn parse_zhipu_model_overview_contexts(markdown: &str) -> HashMap<String, u64> {
+    let mut contexts = HashMap::new();
+    let mut pending_row = String::new();
+
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if pending_row.is_empty() {
+            if !trimmed.starts_with("| [") {
+                continue;
+            }
+            pending_row.push_str(trimmed);
+        } else {
+            pending_row.push('\n');
+            pending_row.push_str(trimmed);
+        }
+
+        if pending_row.matches('|').count() < 5 || !trimmed.ends_with('|') {
+            continue;
+        }
+
+        if let Some((model, context)) = parse_zhipu_overview_table_row(&pending_row) {
+            contexts.insert(model, context);
+        }
+        pending_row.clear();
+    }
+
+    contexts
+}
+
+/// 解析单行智谱模型表格。
+fn parse_zhipu_overview_table_row(row: &str) -> Option<(String, u64)> {
+    let columns = row
+        .split('|')
+        .map(str::trim)
+        .filter(|column| !column.is_empty())
+        .collect::<Vec<_>>();
+    if columns.len() < 4 {
+        return None;
+    }
+
+    let model = extract_markdown_link_label(columns[0]).unwrap_or(columns[0]);
+    let context = parse_context_tokens(columns[2])?;
+    Some((normalize_zhipu_model_id(model), context))
+}
+
+/// 从 markdown 链接 `[label](url)` 中取 label；非链接返回 `None`。
+fn extract_markdown_link_label(value: &str) -> Option<&str> {
+    let start = value.find('[')? + 1;
+    let end = value[start..].find(']')? + start;
+    Some(&value[start..end])
+}
+
+/// 解析单模型页概览卡片中的“上下文窗口”值。
+fn parse_zhipu_detail_context(markdown: &str) -> Option<u64> {
+    let mut seen_context_card = false;
+    let mut waiting_for_value = false;
+
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if trimmed.contains("title=\"上下文窗口\"") {
+            seen_context_card = true;
+            waiting_for_value = trimmed.contains("}>");
+            continue;
+        }
+        if seen_context_card && trimmed.contains("}>") {
+            waiting_for_value = true;
+            continue;
+        }
+        if waiting_for_value
+            && !trimmed.is_empty()
+            && !trimmed.starts_with('<')
+            && !trimmed.starts_with('}')
+        {
+            return parse_context_tokens(trimmed);
+        }
+    }
+
+    None
+}
+
+/// 统一模型 id：大小写、空格、`ZhipuAI/` 命名空间和 `[1m]` 后缀都不影响匹配。
+fn normalize_zhipu_model_id(value: &str) -> String {
+    let mut normalized = value.trim().to_ascii_lowercase();
+    if let Some(stripped) = normalized.strip_prefix("zhipuai/") {
+        normalized = stripped.to_string();
+    }
+    normalized = normalized.replace(' ', "-");
+    normalized = normalized.replace("[1m]", "");
+    normalized = normalized.replace("（即将下线）", "");
+    normalized.trim().to_string()
+}
+
+/// 将智谱文档里的 `1M`、`200K`、纯数字解析为 token 数。
+fn parse_context_tokens(value: &str) -> Option<u64> {
+    let compact = value
+        .trim()
+        .trim_matches('`')
+        .replace(',', "")
+        .replace(' ', "")
+        .to_ascii_lowercase();
+    if compact.is_empty() || compact.contains('：') || compact.contains("≤") {
+        return None;
+    }
+    if let Some(number) = compact.strip_suffix('m') {
+        return number.parse::<u64>().ok().map(|value| value * 1_000_000);
+    }
+    if let Some(number) = compact.strip_suffix('k') {
+        return number.parse::<u64>().ok().map(|value| value * 1_000);
+    }
+    compact.parse::<u64>().ok().filter(|value| *value > 0)
 }
 
 /// 将 JSON 数字或纯数字字符串解析为正整数。
@@ -550,6 +785,47 @@ mod tests {
         assert_eq!(data[8].context_window, Some(262_144));
         assert_eq!(data[9].context_window, Some(32_768));
         assert_eq!(data[10].context_window, Some(65_536));
+    }
+
+    #[test]
+    fn test_parse_zhipu_model_overview_contexts() {
+        let markdown = r#"
+| 模型 | 特点 | 上下文 | 最大输出 |
+| :--- | :--- | :--- | :--- |
+| [GLM-5.2](/cn/guide/models/text/glm-5.2) | 1M 上下文，支撑复杂长程任务稳定执行
+Coding 能力开源 SOTA，从代码生成走向工程交付 | 1M | 128K |
+| [GLM-5.1](/cn/guide/models/text/glm-5.1) | 长程任务显著提升 | 200K | 128K |
+| [GLM-OCR](/cn/guide/models/vlm/glm-ocr) | 文档理解 | 输入：单图 ≤ 10 MB | |
+"#;
+        let contexts = parse_zhipu_model_overview_contexts(markdown);
+
+        assert_eq!(contexts.get("glm-5.2"), Some(&1_000_000));
+        assert_eq!(contexts.get("glm-5.1"), Some(&200_000));
+        assert!(!contexts.contains_key("glm-ocr"));
+    }
+
+    #[test]
+    fn test_parse_zhipu_detail_context() {
+        let markdown = r#"
+<Card title="上下文窗口" icon={<svg />}>
+  128K
+</Card>
+"#;
+
+        assert_eq!(parse_zhipu_detail_context(markdown), Some(128_000));
+    }
+
+    #[test]
+    fn test_zhipu_model_id_normalization_and_slug() {
+        assert_eq!(normalize_zhipu_model_id("ZhipuAI/GLM-5.2[1m]"), "glm-5.2");
+        assert_eq!(
+            zhipu_docs_slug_for_model_id("glm-4.5-air").as_deref(),
+            Some("glm-4.5")
+        );
+        assert_eq!(
+            zhipu_docs_slug_for_model_id("glm-5-turbo").as_deref(),
+            Some("glm-5-turbo")
+        );
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 ## 2026-06-30 Codex GLM Model Context and Probe Guidance
 
+- 2026-06-30 复查用户提供的智谱 Coding Plan key 后确认：`https://open.bigmodel.cn/api/coding/paas/v4/models` 当前返回的 GLM 条目只有 `id/object/created/owned_by`，没有 `context_window`、`max_context_length` 等规格字段；因此自动获取模型列表若要补齐 GLM 上下文，不能只靠 `/models`。官方 Mintlify 文档提供稳定 markdown：`/cn/guide/start/model-overview.md` 的模型表给出 GLM-5.2 `1M`、GLM-5.1/5/5-Turbo/4.7/4.6 `200K`、GLM-4.5-Air `128K`，单模型页如 `/cn/guide/models/text/glm-4.5.md` 给出 GLM-4.5 `128K`。后端 `model_fetch.rs` 的正确策略是：先解析 `/models` 显式 metadata；若智谱/Z.AI endpoint 的 GLM 模型缺上下文，再从官方 docs markdown 补齐，且只填缺失值、不覆盖上游显式值。
 - 智谱 `/models` 端点会返回模型上下文元数据时，Codex provider 自动获取模型列表必须优先从后端 `model_fetch.rs::extract_context_window` 解析真实字段；不要在前端为 GLM 写静态上下文表。应持续补充 `/models` 解析字段，比如 `context_length`、`max_context_length`、`max_input_tokens`、`limit.context`、`limits.context`、`metadata.maxContextLength` 等。
 - 前端 `resolveFetchedCodexModelContextWindow` 的正确优先级仍是：远端 `/models` 显式值 > 用户已有 catalog 值 > 少量历史保守兜底（如 DeepSeek alias / preset 已有值）。如果某个供应商实际返回了上下文字段但 UI 为空，先修 `model_fetch.rs` 字段解析。
 - Codex 表单的“测试 Chat / Responses”依赖模型目录；如果 catalog 为空，不能只 toast “请先获取模型列表”。正确交互是展开高级选项，滚到“模型映射”，聚焦并高亮右上角“获取模型列表”按钮，同时在确认框和提示文案里明确测试前需要先获取/添加模型。
