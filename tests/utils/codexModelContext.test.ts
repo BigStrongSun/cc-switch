@@ -43,35 +43,6 @@ describe("Codex model context inference", () => {
     ).toBe(1000000);
   });
 
-  it("fills Zhipu GLM coding contexts when the official /models endpoint only returns ids", () => {
-    const source = {
-      providerName: "Zhipu GLM",
-      baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
-    };
-
-    expect(
-      resolveFetchedCodexModelContextWindow({ id: "glm-4.5" }, source),
-    ).toBe(128000);
-    expect(
-      resolveFetchedCodexModelContextWindow({ id: "glm-4.6" }, source),
-    ).toBe(200000);
-    expect(
-      resolveFetchedCodexModelContextWindow({ id: "glm-5.1" }, source),
-    ).toBe(200000);
-    expect(
-      resolveFetchedCodexModelContextWindow({ id: "glm-5.2" }, source),
-    ).toBe(1000000);
-  });
-
-  it("does not fill GLM-looking ids for unrelated providers", () => {
-    expect(
-      resolveFetchedCodexModelContextWindow(
-        { id: "glm-5.2" },
-        { baseUrl: "https://example.com/v1" },
-      ),
-    ).toBeUndefined();
-  });
-
   it("does not invent a context window for unknown third-party models", () => {
     expect(
       resolveFetchedCodexModelContextWindow(

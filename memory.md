@@ -2,8 +2,8 @@
 
 ## 2026-06-30 Codex GLM Model Context and Probe Guidance
 
-- 智谱 `/models` 端点可能只返回模型 id，不返回每个模型的上下文窗口；Codex provider 自动获取模型列表时必须通过 `resolveFetchedCodexModelContextWindow` 用本地 provider-aware 知识补上下文，而不是要求用户手填。
-- GLM 上下文补全只应在来源明显是 Zhipu / GLM / BigModel / Z.ai provider 时生效，避免不相关第三方刚好有 `glm-*` 同名模型就被套用官方上下文。当前已知档位：`glm-4.5*` 128K，`glm-4.6` / `glm-4.7*` / `glm-5` / `glm-5-turbo` / `glm-5.1` 200K，`glm-5.2` 1M。
+- 智谱 `/models` 端点会返回模型上下文元数据时，Codex provider 自动获取模型列表必须优先从后端 `model_fetch.rs::extract_context_window` 解析真实字段；不要在前端为 GLM 写静态上下文表。应持续补充 `/models` 解析字段，比如 `context_length`、`max_context_length`、`max_input_tokens`、`limit.context`、`limits.context`、`metadata.maxContextLength` 等。
+- 前端 `resolveFetchedCodexModelContextWindow` 的正确优先级仍是：远端 `/models` 显式值 > 用户已有 catalog 值 > 少量历史保守兜底（如 DeepSeek alias / preset 已有值）。如果某个供应商实际返回了上下文字段但 UI 为空，先修 `model_fetch.rs` 字段解析。
 - Codex 表单的“测试 Chat / Responses”依赖模型目录；如果 catalog 为空，不能只 toast “请先获取模型列表”。正确交互是展开高级选项，滚到“模型映射”，聚焦并高亮右上角“获取模型列表”按钮，同时在确认框和提示文案里明确测试前需要先获取/添加模型。
 
 ## 2026-06-30 UI Portal Layer Ordering Audit

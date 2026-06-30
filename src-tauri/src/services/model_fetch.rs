@@ -141,17 +141,37 @@ pub async fn fetch_models(
 /// 避免把价格、限流等其它数值误当作 context window。
 fn extract_context_window(obj: &serde_json::Map<String, serde_json::Value>) -> Option<u64> {
     const KEYS: &[&str] = &[
+        "context",
         "context_window",
+        "context_length",
+        "contextLength",
         "max_context_window",
+        "max_context_length",
         "contextWindow",
         "maxContextWindow",
+        "maxContextLength",
         "max_model_len",
         "maxModelLen",
+        "max_input_tokens",
+        "maxInputTokens",
+        "max_prompt_tokens",
+        "maxPromptTokens",
+        "input_token_limit",
+        "inputTokenLimit",
     ];
 
-    KEYS.iter()
+    let direct = KEYS
+        .iter()
         .filter_map(|key| obj.get(*key))
-        .find_map(parse_positive_u64)
+        .find_map(parse_positive_u64);
+    if direct.is_some() {
+        return direct;
+    }
+
+    ["limit", "limits", "capabilities", "metadata"]
+        .iter()
+        .filter_map(|key| obj.get(*key).and_then(|value| value.as_object()))
+        .find_map(extract_context_window)
 }
 
 /// 将 JSON 数字或纯数字字符串解析为正整数。
@@ -506,7 +526,7 @@ mod tests {
 
     #[test]
     fn test_parse_response_extracts_context_window() {
-        let json = r#"{"object":"list","data":[{"id":"model-a","context_window":262144},{"id":"model-b","maxContextWindow":"1000000"},{"id":"model-c","max_model_len":262144},{"id":"model-d","maxModelLen":"131072"},{"id":"model-e","contextWindow":"128000 tokens"}]}"#;
+        let json = r#"{"object":"list","data":[{"id":"model-a","context_window":262144},{"id":"model-b","maxContextWindow":"1000000"},{"id":"model-c","max_model_len":262144},{"id":"model-d","maxModelLen":"131072"},{"id":"model-e","contextWindow":"128000 tokens"},{"id":"model-f","context_length":200000},{"id":"model-g","max_context_length":"204800"},{"id":"model-h","max_input_tokens":1000000},{"id":"model-i","limit":{"context":262144}},{"id":"model-j","limits":{"context_window":"32768"}},{"id":"model-k","metadata":{"maxContextLength":65536}}]}"#;
         let resp: ModelsResponse = serde_json::from_str(json).unwrap();
         let data = resp
             .data
@@ -524,6 +544,12 @@ mod tests {
         assert_eq!(data[2].context_window, Some(262_144));
         assert_eq!(data[3].context_window, Some(131_072));
         assert_eq!(data[4].context_window, None);
+        assert_eq!(data[5].context_window, Some(200_000));
+        assert_eq!(data[6].context_window, Some(204_800));
+        assert_eq!(data[7].context_window, Some(1_000_000));
+        assert_eq!(data[8].context_window, Some(262_144));
+        assert_eq!(data[9].context_window, Some(32_768));
+        assert_eq!(data[10].context_window, Some(65_536));
     }
 
     #[test]

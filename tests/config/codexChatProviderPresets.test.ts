@@ -41,14 +41,14 @@ const expectedChatPresets = new Map<
     "Zhipu GLM",
     {
       baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
-      contextWindows: { "glm-5.2": 1000000 },
+      contextWindows: { "glm-5.2": 200000 },
     },
   ],
   [
     "Zhipu GLM en",
     {
       baseUrl: "https://api.z.ai/api/coding/paas/v4",
-      contextWindows: { "glm-5.2": 1000000 },
+      contextWindows: { "glm-5.2": 200000 },
     },
   ],
   [

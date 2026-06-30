@@ -24,21 +24,6 @@ const DEEPSEEK_ALIAS_CONTEXT_WINDOWS: Record<string, number> = {
   "deepseek-reasoner": 1000000,
 };
 
-const GLM_ALIAS_CONTEXT_WINDOWS: Record<string, number> = {
-  "glm-4.5": 128000,
-  "glm-4.5-air": 128000,
-  "glm-4.5-x": 128000,
-  "glm-4.5-airx": 128000,
-  "glm-4.5-flash": 128000,
-  "glm-4.6": 200000,
-  "glm-4.7": 200000,
-  "glm-4.7-flashx": 200000,
-  "glm-5": 200000,
-  "glm-5-turbo": 200000,
-  "glm-5.1": 200000,
-  "glm-5.2": 1000000,
-};
-
 // 解析 UI/配置里可能出现的上下文窗口，允许保留旧数据中的 "128000 tokens" 形态。
 function parsePositiveContextWindow(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
@@ -78,26 +63,6 @@ function providerMatchesPreset(
       signal.includes(presetNameSignal) ||
       (presetHostSignal && signal.includes(presetHostSignal)),
   );
-}
-
-// 只在明显是智谱 / Z.ai / GLM 编码计划 provider 时，为 /models 返回的裸模型 id 补本地上下文。
-function sourceLooksLikeGlmProvider(
-  source: CodexContextInferenceSource,
-): boolean {
-  return [
-    source.providerId,
-    source.providerName,
-    source.baseUrl,
-    source.websiteUrl,
-  ]
-    .map((value) => value?.toLowerCase() ?? "")
-    .some(
-      (signal) =>
-        signal.includes("glm") ||
-        signal.includes("zhipu") ||
-        signal.includes("bigmodel.cn") ||
-        signal.includes("z.ai"),
-    );
 }
 
 // 优先从当前 provider 已有目录读取，避免获取模型列表时覆盖用户手工修正过的上下文。
@@ -144,20 +109,7 @@ export function inferCodexModelContextWindow(
     return deepseekAliasContext;
   }
 
-  if (sourceLooksLikeGlmProvider(source)) {
-    const glmAliasContext = GLM_ALIAS_CONTEXT_WINDOWS[lowerModel];
-    if (glmAliasContext) {
-      return glmAliasContext;
-    }
-  }
-
   for (const preset of codexProviderPresets) {
-    if (
-      GLM_ALIAS_CONTEXT_WINDOWS[lowerModel] &&
-      !sourceLooksLikeGlmProvider(source)
-    ) {
-      continue;
-    }
     const presetModel = preset.modelCatalog?.find(
       (model) => model.model.trim() === normalizedModel,
     );
