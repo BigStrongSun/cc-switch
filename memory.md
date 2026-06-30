@@ -9,6 +9,10 @@
 - 前端 `resolveFetchedCodexModelContextWindow` 的正确优先级仍是：远端 `/models` 显式值 > 用户已有 catalog 值 > 少量历史保守兜底（如 DeepSeek alias / preset 已有值）。如果某个供应商实际返回了上下文字段但 UI 为空，先修 `model_fetch.rs` 字段解析。
 - Codex 表单的“测试 Chat / Responses”依赖模型目录；如果 catalog 为空，不能只 toast “请先获取模型列表”。正确交互是展开高级选项，滚到“模型映射”，聚焦并高亮右上角“获取模型列表”按钮，同时在确认框和提示文案里明确测试前需要先获取/添加模型。
 
+## 2026-06-30 Release Pipeline Notes
+
+- `scripts/local-release-pipeline.ps1` 会在 `scripts/export-latest-ccswitchmulti.ps1` 导出后追加 `RELEASE-METADATA.md`，因此必须在写完 metadata 后重新生成 `SHA256SUMS.txt`，否则 release 资产里的校验和会漏掉 metadata 文件。后续修改发布流程时要保持这个顺序：build/export -> metadata -> checksums -> upload。
+
 ## 2026-06-30 UI Portal Layer Ordering Audit
 
 - Codex MultiRouter 向导相关的“点击后像卡死”不只来自单个 Dialog：全屏 provider panel 可到 `z-[140]`，但共享 Radix `SelectContent`/`PopoverContent`/`TooltipContent` 之前停在 `z-[100]`，`DropdownMenuContent` 甚至是 `z-50`，都会在向导上方打开 provider 表单时被面板遮住。
