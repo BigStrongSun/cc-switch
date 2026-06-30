@@ -2,6 +2,8 @@
 
 ## 2026-06-30 Codex GLM Model Context and Probe Guidance
 
+- 2026-07-01 Codex provider 的“测试 Chat / Responses”不能只在按钮旁显示一条错误摘要；真实问题是每个模型可能有不同协议能力。`CodexFormFields` 的探测结果应按模型保存并在“模型映射”每行显示小 tag：`双协议`、`Responses`、`Chat`、`不可用`，tag title 保留 Responses/Chat 详细返回。汇总文案要列出双协议通过、仅 Responses、仅 Chat、双协议失败的模型，避免用户只看到第一个失败模型（如 `glm-4.5`）而不知道其它模型状态。
+- 2026-07-01 “下一步”必须由真实探测结果驱动而不是模型名启发式：双协议通过和仅 Responses 通过的模型进入 Responses provider，只有 Chat 通过的模型进入 Chat provider，双失败模型不进入拆分建议。拆分成两个 provider 只在新增 provider 场景有 `onProviderSplitSuggestionChange` 回调时弹确认框；编辑已有 provider 时只显示行级协议 tag 和汇总，不弹一个确认后无实际保存效果的拆分对话框。
 - 2026-06-30 复查用户提供的智谱 Coding Plan key 后确认：`https://open.bigmodel.cn/api/coding/paas/v4/models` 当前返回的 GLM 条目只有 `id/object/created/owned_by`，没有 `context_window`、`max_context_length` 等规格字段；因此自动获取模型列表若要补齐 GLM 上下文，不能只靠 `/models`。官方 Mintlify 文档提供稳定 markdown：`/cn/guide/start/model-overview.md` 的模型表给出 GLM-5.2 `1M`、GLM-5.1/5/5-Turbo/4.7/4.6 `200K`、GLM-4.5-Air `128K`，单模型页如 `/cn/guide/models/text/glm-4.5.md` 给出 GLM-4.5 `128K`。后端 `model_fetch.rs` 的正确策略是：先解析 `/models` 显式 metadata；若智谱/Z.AI endpoint 的 GLM 模型缺上下文，再从官方 docs markdown 补齐，且只填缺失值、不覆盖上游显式值。
 - 2026-06-30 后续完善为分层上下文补齐：`model_fetch.rs::enrich_missing_context_windows` 是统一入口，优先保留 `/models` 显式字段，其次 provider 官方 resolver（当前智谱 docs markdown），最后才用 `https://models.dev/api.json` 的 `limit.context` 作为公共目录兜底。models.dev 不能全局按模型名匹配，必须先确认当前成功 `/models` endpoint 以该 provider 的 `api` 前缀开头，再在该 provider 的 `models` 对象里匹配 key/id 或唯一后缀；否则 OpenRouter/Requesty 这类聚合目录中的同名模型容易串供应商。
 - 2026-06-30 分层补齐的不变量已集中到 `model_fetch.rs::apply_missing_context_windows`：所有 provider 官方 resolver 和公共目录 fallback 都必须通过它写回，确保只填 `context_window=None` 的模型，永远不覆盖 `/models` 显式 metadata。新增 resolver 时同步补三类测试：显式值不被覆盖、provider/模型识别边界、官方文档解析退化场景。

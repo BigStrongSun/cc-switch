@@ -44,6 +44,7 @@ import {
   probeCodexChatForConfig,
   probeCodexResponsesForConfig,
   showFetchModelsError,
+  type CodexResponsesProbeResult,
   type FetchedModel,
 } from "@/lib/api/model-fetch";
 import { CustomUserAgentField } from "./CustomUserAgentField";
@@ -62,6 +63,139 @@ import type {
 
 interface EndpointCandidate {
   url: string;
+}
+
+interface CodexProtocolProbeOutcome {
+  model: string;
+  responses: CodexResponsesProbeResult;
+  chat: CodexResponsesProbeResult;
+}
+
+// 把单模型双协议探测结果归类，供汇总文案和协议自动选择复用。
+function classifyProtocolProbeOutcome(outcome: CodexProtocolProbeOutcome) {
+  if (outcome.responses.ok && outcome.chat.ok) return "both";
+  if (outcome.responses.ok) return "responses";
+  if (outcome.chat.ok) return "chat";
+  return "failed";
+}
+
+// 将模型名压缩成适合内联展示的列表，避免大量模型时把表单撑爆。
+function summarizeProbeModels(
+  outcomes: CodexProtocolProbeOutcome[],
+  limit = 4,
+) {
+  if (outcomes.length === 0) return "";
+  const names = outcomes.slice(0, limit).map((outcome) => outcome.model);
+  return `${names.join("、")}${outcomes.length > limit ? ` 等 ${outcomes.length} 个` : ""}`;
+}
+
+// 生成每个协议探测分类的摘要，确保用户能同时看到其它模型是成功、部分成功还是失败。
+export function summarizeCodexProtocolProbeOutcomes(
+  outcomes: CodexProtocolProbeOutcome[],
+) {
+  const groups = {
+    both: outcomes.filter(
+      (outcome) => classifyProtocolProbeOutcome(outcome) === "both",
+    ),
+    responses: outcomes.filter(
+      (outcome) => classifyProtocolProbeOutcome(outcome) === "responses",
+    ),
+    chat: outcomes.filter(
+      (outcome) => classifyProtocolProbeOutcome(outcome) === "chat",
+    ),
+    failed: outcomes.filter(
+      (outcome) => classifyProtocolProbeOutcome(outcome) === "failed",
+    ),
+  };
+
+  const details = [
+    groups.both.length > 0
+      ? `双协议通过：${summarizeProbeModels(groups.both)}`
+      : "",
+    groups.responses.length > 0
+      ? `仅 Responses 通过：${summarizeProbeModels(groups.responses)}`
+      : "",
+    groups.chat.length > 0
+      ? `仅 Chat 通过：${summarizeProbeModels(groups.chat)}`
+      : "",
+    groups.failed.length > 0
+      ? `双协议失败：${groups.failed
+          .slice(0, 3)
+          .map(
+            (outcome) =>
+              `${outcome.model}（Responses=${outcome.responses.detail}; Chat=${outcome.chat.detail}）`,
+          )
+          .join("；")}${groups.failed.length > 3 ? "；..." : ""}`
+      : "",
+  ].filter(Boolean);
+
+  return {
+    responsesPass: groups.both.length + groups.responses.length,
+    chatPass: groups.both.length + groups.chat.length,
+    failedCount: groups.failed.length,
+    detail: details.length > 0 ? ` 结果明细：${details.join("；")}。` : "",
+  };
+}
+
+// 根据真实探测结果生成拆分建议：双协议通过默认归入 Responses，只 Chat 通过归入 Chat，双失败不参与建议。
+function buildSplitCodexProviderSuggestionForProbeOutcomes({
+  providerName,
+  outcomes,
+}: {
+  providerName?: string;
+  outcomes: CodexProtocolProbeOutcome[];
+}): CodexProviderSplitSuggestion | null {
+  const responsesModels = outcomes
+    .filter((outcome) => {
+      const kind = classifyProtocolProbeOutcome(outcome);
+      return kind === "both" || kind === "responses";
+    })
+    .map((outcome) => outcome.model);
+  const chatModels = outcomes
+    .filter((outcome) => classifyProtocolProbeOutcome(outcome) === "chat")
+    .map((outcome) => outcome.model);
+
+  if (responsesModels.length === 0 || chatModels.length === 0) return null;
+  return {
+    providerName: providerName?.trim() || "provider",
+    responsesModels,
+    chatModels,
+  };
+}
+
+// 为模型行生成紧凑的协议状态 tag，用户不需要回读长摘要也能知道每个模型该走哪种协议。
+function getProtocolProbeBadge(outcome?: CodexProtocolProbeOutcome) {
+  if (!outcome) return null;
+  const kind = classifyProtocolProbeOutcome(outcome);
+  if (kind === "both") {
+    return {
+      label: "双协议",
+      title: `Responses=${outcome.responses.detail}; Chat=${outcome.chat.detail}`,
+      className:
+        "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    };
+  }
+  if (kind === "responses") {
+    return {
+      label: "Responses",
+      title: `Responses=${outcome.responses.detail}; Chat=${outcome.chat.detail}`,
+      className:
+        "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    };
+  }
+  if (kind === "chat") {
+    return {
+      label: "Chat",
+      title: `Responses=${outcome.responses.detail}; Chat=${outcome.chat.detail}`,
+      className:
+        "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+    };
+  }
+  return {
+    label: "不可用",
+    title: `Responses=${outcome.responses.detail}; Chat=${outcome.chat.detail}`,
+    className: "border-destructive/40 bg-destructive/10 text-destructive",
+  };
 }
 
 interface CodexFormFieldsProps {
@@ -402,6 +536,8 @@ export function CodexFormFields({
   const [protocolProbeTone, setProtocolProbeTone] = useState<
     "muted" | "success" | "warning" | "error"
   >("muted");
+  const [protocolProbeOutcomesByModel, setProtocolProbeOutcomesByModel] =
+    useState<Record<string, CodexProtocolProbeOutcome>>({});
   const [shouldHighlightFetchModels, setShouldHighlightFetchModels] =
     useState(false);
   const [pendingSplitRouting, setPendingSplitRouting] =
@@ -701,12 +837,11 @@ export function CodexFormFields({
     setIsProtocolProbeConfirmOpen(false);
     setIsProbingProtocol(true);
     setProtocolProbeTone("muted");
+    setProtocolProbeOutcomesByModel({});
     setProtocolProbeSummary(
       `正在测试 ${models.length} 个模型的 Chat / Responses 基础连通性...`,
     );
-    let responsesPass = 0;
-    let chatPass = 0;
-    const failures: string[] = [];
+    const outcomes: CodexProtocolProbeOutcome[] = [];
     try {
       for (const [index, model] of models.entries()) {
         setProtocolProbeSummary(
@@ -726,45 +861,62 @@ export function CodexFormFields({
           isFullUrl,
           customUserAgent,
         );
-        if (responses.ok) responsesPass += 1;
-        if (chat.ok) chatPass += 1;
-        if (!responses.ok && !chat.ok) {
-          failures.push(
-            `${model}: Responses=${responses.detail}; Chat=${chat.detail}`,
-          );
-        }
+        outcomes.push({ model, responses, chat });
       }
 
-      const failureDetail =
-        failures.length > 0
-          ? ` 另有 ${failures.length} 个模型双协议都未通过：${failures
-              .slice(0, 3)
-              .join("；")}${failures.length > 3 ? "；..." : ""}`
-          : "";
+      const { responsesPass, chatPass, failedCount, detail } =
+        summarizeCodexProtocolProbeOutcomes(outcomes);
+      setProtocolProbeOutcomesByModel(
+        Object.fromEntries(outcomes.map((outcome) => [outcome.model, outcome])),
+      );
+      const splitSuggestion = buildSplitCodexProviderSuggestionForProbeOutcomes(
+        {
+          providerName,
+          outcomes,
+        },
+      );
+      const canApplySplitSuggestion = Boolean(
+        splitSuggestion && onProviderSplitSuggestionChange,
+      );
+      if (splitSuggestion && onProviderSplitSuggestionChange) {
+        setPendingSplitRouting(splitSuggestion);
+        onProviderSplitSuggestionChange(null);
+      }
 
       if (responsesPass > 0) {
         onApiFormatChange("openai_responses");
         const summary =
           chatPass > 0
-            ? `Responses 和 Chat 的基础请求都有模型可用，已优先切换为 Responses。Responses 通过 ${responsesPass}/${models.length}，Chat 通过 ${chatPass}/${models.length}。通过不等于完整 Codex 功能验证。${failureDetail}`
-            : `只有 Responses 基础请求可用，已切换为 Responses。Responses 通过 ${responsesPass}/${models.length}。通过不等于完整 Codex 功能验证。${failureDetail}`;
-        setProtocolProbeTone(failures.length > 0 ? "warning" : "success");
+            ? `Responses 和 Chat 的基础请求都有模型可用，已优先切换为 Responses。Responses 通过 ${responsesPass}/${models.length}，Chat 通过 ${chatPass}/${models.length}。${
+                canApplySplitSuggestion
+                  ? "检测到真实协议结果混合，建议下一步拆成 Responses / Chat 两个 provider。"
+                  : ""
+              }通过不等于完整 Codex 功能验证。${detail}`
+            : `只有 Responses 基础请求可用，已切换为 Responses。Responses 通过 ${responsesPass}/${models.length}。通过不等于完整 Codex 功能验证。${detail}`;
+        const tone = failedCount > 0 ? "warning" : "success";
+        setProtocolProbeTone(tone);
         setProtocolProbeSummary(summary);
-        toast.success(summary, { closeButton: true });
+        if (tone === "warning") {
+          toast.warning(summary, { closeButton: true });
+        } else {
+          toast.success(summary, { closeButton: true });
+        }
         return;
       }
       if (chatPass > 0) {
         onApiFormatChange("openai_chat");
-        const summary = `Responses 不通但 Chat 可用，已切换为 Chat Completions。Chat 通过 ${chatPass}/${models.length}。${failureDetail}`;
+        const summary = `Responses 不通但 Chat 可用，已切换为 Chat Completions。Chat 通过 ${chatPass}/${models.length}。${
+          canApplySplitSuggestion
+            ? "检测到真实协议结果混合，建议下一步拆成 Responses / Chat 两个 provider。"
+            : ""
+        }${detail}`;
         setProtocolProbeTone("warning");
         setProtocolProbeSummary(summary);
         toast.warning(summary, { closeButton: true });
         return;
       }
 
-      const summary =
-        failures[0] ??
-        "Responses 和 Chat Completions 都不通，请检查 API Key、Base URL、模型权限、额度、网络或上游状态。";
+      const summary = `Responses 和 Chat Completions 都不通，请检查 API Key、Base URL、模型权限、额度、网络或上游状态。${detail}`;
       setProtocolProbeTone("error");
       setProtocolProbeSummary(summary);
       toast.error(summary, { closeButton: true });
@@ -783,6 +935,8 @@ export function CodexFormFields({
     fetchedModels,
     isFullUrl,
     onApiFormatChange,
+    onProviderSplitSuggestionChange,
+    providerName,
     revealModelCatalogFetchAction,
     t,
   ]);
@@ -1967,176 +2121,201 @@ export function CodexFormFields({
                       <span />
                     </div>
 
-                    {catalogRows.map((row, index) => (
-                      <div
-                        key={row.rowId}
-                        className="grid grid-cols-1 gap-2 md:grid-cols-[88px_1fr_1fr_1fr_132px_76px_36px]"
-                      >
-                        <label className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded border-border-default"
-                            checked={selectedSpawnAgentModelSet.has(row.model)}
-                            disabled={!row.model.trim()}
-                            onChange={(event) =>
-                              handleToggleSpawnAgentModel(
+                    {catalogRows.map((row, index) => {
+                      const probeModel =
+                        catalogRowUpstreamModel(row) || row.model.trim();
+                      const probeBadge = getProtocolProbeBadge(
+                        protocolProbeOutcomesByModel[probeModel],
+                      );
+
+                      return (
+                        <div
+                          key={row.rowId}
+                          className="grid grid-cols-1 gap-2 md:grid-cols-[88px_1fr_1fr_1fr_132px_76px_36px]"
+                        >
+                          <label className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-border-default"
+                              checked={selectedSpawnAgentModelSet.has(
                                 row.model,
-                                event.target.checked,
-                              )
-                            }
-                            aria-label={t("codexConfig.spawnAgentCheckbox", {
-                              defaultValue: "加入子 Agent 候选",
-                            })}
-                          />
-                          <span className="md:hidden">
-                            {t("codexConfig.spawnAgentColumn", {
-                              defaultValue: "子 Agent",
-                            })}
-                          </span>
-                        </label>
-                        <Input
-                          value={row.displayName ?? ""}
-                          onChange={(event) =>
-                            handleUpdateCatalogRow(index, {
-                              displayName: event.target.value,
-                            })
-                          }
-                          placeholder={t(
-                            "codexConfig.catalogDisplayNamePlaceholder",
-                            {
-                              defaultValue: "例如: DeepSeek V4 Flash",
-                            },
-                          )}
-                          aria-label={t("codexConfig.catalogColumnDisplay", {
-                            defaultValue: "菜单显示名",
-                          })}
-                        />
-                        <Input
-                          value={row.model}
-                          onChange={(event) =>
-                            handleUpdateCatalogRow(index, {
-                              model: event.target.value,
-                            })
-                          }
-                          placeholder={t(
-                            "codexConfig.catalogModelPlaceholder",
-                            {
-                              defaultValue: "例如: gpt-5.5-thirdparty",
-                            },
-                          )}
-                          aria-label={t("codexConfig.catalogColumnModel", {
-                            defaultValue: "候选模型名",
-                          })}
-                        />
-                        <div className="flex gap-1">
+                              )}
+                              disabled={!row.model.trim()}
+                              onChange={(event) =>
+                                handleToggleSpawnAgentModel(
+                                  row.model,
+                                  event.target.checked,
+                                )
+                              }
+                              aria-label={t("codexConfig.spawnAgentCheckbox", {
+                                defaultValue: "加入子 Agent 候选",
+                              })}
+                            />
+                            <span className="md:hidden">
+                              {t("codexConfig.spawnAgentColumn", {
+                                defaultValue: "子 Agent",
+                              })}
+                            </span>
+                          </label>
                           <Input
-                            value={
-                              row.upstreamModel ?? row.upstream_model ?? ""
-                            }
+                            value={row.displayName ?? ""}
                             onChange={(event) =>
                               handleUpdateCatalogRow(index, {
-                                upstreamModel: event.target.value,
+                                displayName: event.target.value,
                               })
                             }
                             placeholder={t(
-                              "codexConfig.catalogUpstreamModelPlaceholder",
+                              "codexConfig.catalogDisplayNamePlaceholder",
                               {
-                                defaultValue: "留空则使用候选模型名",
+                                defaultValue: "例如: DeepSeek V4 Flash",
                               },
                             )}
-                            aria-label={t(
-                              "codexConfig.catalogColumnUpstreamModel",
-                              {
-                                defaultValue: "上游模型名",
-                              },
-                            )}
-                            className="flex-1"
+                            aria-label={t("codexConfig.catalogColumnDisplay", {
+                              defaultValue: "菜单显示名",
+                            })}
                           />
-                          {fetchedModels.length > 0 && (
-                            <ModelDropdown
-                              models={fetchedModels}
-                              onSelect={(id) =>
-                                handleSelectFetchedCatalogModel(
-                                  index,
-                                  id,
-                                  row.model,
-                                  row.displayName,
-                                )
+                          <Input
+                            value={row.model}
+                            onChange={(event) =>
+                              handleUpdateCatalogRow(index, {
+                                model: event.target.value,
+                              })
+                            }
+                            placeholder={t(
+                              "codexConfig.catalogModelPlaceholder",
+                              {
+                                defaultValue: "例如: gpt-5.5-thirdparty",
+                              },
+                            )}
+                            aria-label={t("codexConfig.catalogColumnModel", {
+                              defaultValue: "候选模型名",
+                            })}
+                          />
+                          <div className="space-y-1">
+                            <div className="flex gap-1">
+                              <Input
+                                value={
+                                  row.upstreamModel ?? row.upstream_model ?? ""
+                                }
+                                onChange={(event) =>
+                                  handleUpdateCatalogRow(index, {
+                                    upstreamModel: event.target.value,
+                                  })
+                                }
+                                placeholder={t(
+                                  "codexConfig.catalogUpstreamModelPlaceholder",
+                                  {
+                                    defaultValue: "留空则使用候选模型名",
+                                  },
+                                )}
+                                aria-label={t(
+                                  "codexConfig.catalogColumnUpstreamModel",
+                                  {
+                                    defaultValue: "上游模型名",
+                                  },
+                                )}
+                                className="flex-1"
+                              />
+                              {fetchedModels.length > 0 && (
+                                <ModelDropdown
+                                  models={fetchedModels}
+                                  onSelect={(id) =>
+                                    handleSelectFetchedCatalogModel(
+                                      index,
+                                      id,
+                                      row.model,
+                                      row.displayName,
+                                    )
+                                  }
+                                />
+                              )}
+                            </div>
+                            {probeBadge && (
+                              <span
+                                className={cn(
+                                  "inline-flex w-fit items-center rounded border px-1.5 py-0.5 text-[11px] font-medium",
+                                  probeBadge.className,
+                                )}
+                                title={probeBadge.title}
+                              >
+                                {probeBadge.label}
+                              </span>
+                            )}
+                          </div>
+                          <Input
+                            type="number"
+                            min={1}
+                            inputMode="numeric"
+                            value={row.contextWindow ?? ""}
+                            onChange={(event) =>
+                              handleUpdateCatalogRow(index, {
+                                contextWindow: event.target.value.replace(
+                                  /[^\d]/g,
+                                  "",
+                                ),
+                              })
+                            }
+                            placeholder={t(
+                              "codexConfig.contextWindowPlaceholder",
+                              {
+                                defaultValue: "例如: 128000",
+                              },
+                            )}
+                            aria-label={t("codexConfig.catalogColumnContext", {
+                              defaultValue: "上下文窗口",
+                            })}
+                          />
+                          <div className="flex h-9 items-center gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground"
+                              disabled={
+                                spawnAgentModels.indexOf(row.model) <= 0
                               }
-                            />
-                          )}
-                        </div>
-                        <Input
-                          type="number"
-                          min={1}
-                          inputMode="numeric"
-                          value={row.contextWindow ?? ""}
-                          onChange={(event) =>
-                            handleUpdateCatalogRow(index, {
-                              contextWindow: event.target.value.replace(
-                                /[^\d]/g,
-                                "",
-                              ),
-                            })
-                          }
-                          placeholder={t(
-                            "codexConfig.contextWindowPlaceholder",
-                            {
-                              defaultValue: "例如: 128000",
-                            },
-                          )}
-                          aria-label={t("codexConfig.catalogColumnContext", {
-                            defaultValue: "上下文窗口",
-                          })}
-                        />
-                        <div className="flex h-9 items-center gap-1">
+                              onClick={() =>
+                                handleMoveSpawnAgentModel(row.model, -1)
+                              }
+                              title={t("common.moveUp", {
+                                defaultValue: "上移",
+                              })}
+                            >
+                              <ArrowUp className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground"
+                              disabled={
+                                spawnAgentModels.indexOf(row.model) < 0 ||
+                                spawnAgentModels.indexOf(row.model) >=
+                                  spawnAgentModels.length - 1
+                              }
+                              onClick={() =>
+                                handleMoveSpawnAgentModel(row.model, 1)
+                              }
+                              title={t("common.moveDown", {
+                                defaultValue: "下移",
+                              })}
+                            >
+                              <ArrowDown className="h-4 w-4" />
+                            </Button>
+                          </div>
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-muted-foreground"
-                            disabled={spawnAgentModels.indexOf(row.model) <= 0}
-                            onClick={() =>
-                              handleMoveSpawnAgentModel(row.model, -1)
-                            }
-                            title={t("common.moveUp", {
-                              defaultValue: "上移",
-                            })}
+                            className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                            onClick={() => handleRemoveCatalogRow(index)}
+                            title={t("common.delete", { defaultValue: "删除" })}
                           >
-                            <ArrowUp className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground"
-                            disabled={
-                              spawnAgentModels.indexOf(row.model) < 0 ||
-                              spawnAgentModels.indexOf(row.model) >=
-                                spawnAgentModels.length - 1
-                            }
-                            onClick={() =>
-                              handleMoveSpawnAgentModel(row.model, 1)
-                            }
-                            title={t("common.moveDown", {
-                              defaultValue: "下移",
-                            })}
-                          >
-                            <ArrowDown className="h-4 w-4" />
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-muted-foreground hover:text-destructive"
-                          onClick={() => handleRemoveCatalogRow(index)}
-                          title={t("common.delete", { defaultValue: "删除" })}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

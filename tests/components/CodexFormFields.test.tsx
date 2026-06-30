@@ -103,7 +103,11 @@ function renderRoutingHarness(
 
 function renderCatalogHarness(
   initialCatalog: CodexCatalogModel[],
-  options: { shouldShowSpeedTest?: boolean } = {},
+  options: {
+    shouldShowSpeedTest?: boolean;
+    providerName?: string;
+    onProviderSplitSuggestionChange?: ReturnType<typeof vi.fn>;
+  } = {},
 ) {
   const onCatalogChange = vi.fn();
   const onApiFormatChange = vi.fn();
@@ -122,6 +126,7 @@ function renderCatalogHarness(
     return (
       <CodexFormFields
         providerId="codex-thirdparty"
+        providerName={options.providerName}
         codexApiKey="sk-test"
         onApiKeyChange={vi.fn()}
         category="custom"
@@ -145,6 +150,9 @@ function renderCatalogHarness(
         spawnAgentModels={[]}
         onSpawnAgentModelsChange={vi.fn()}
         codexRouting={{ enabled: false, defaultRouteId: "", routes: [] }}
+        onProviderSplitSuggestionChange={
+          options.onProviderSplitSuggestionChange
+        }
         speedTestEndpoints={[]}
         customUserAgent=""
         onCustomUserAgentChange={vi.fn()}
@@ -407,6 +415,97 @@ describe("CodexFormFields local model routing", () => {
       false,
       "",
     );
+  });
+
+  it("shows per-model protocol tags and suggests split providers for mixed probe results", async () => {
+    vi.mocked(probeCodexResponsesForConfig)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        url: "https://api.thirdparty.example/v1/responses",
+        model: "gpt-5.5",
+        detail: "ok",
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        url: "https://api.thirdparty.example/v1/responses",
+        model: "qwen3.6",
+        detail: "HTTP 404",
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        url: "https://api.thirdparty.example/v1/responses",
+        model: "glm-4.5",
+        detail: "HTTP 404",
+      });
+    vi.mocked(probeCodexChatForConfig)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        url: "https://api.thirdparty.example/v1/chat/completions",
+        model: "gpt-5.5",
+        detail: "ok",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        url: "https://api.thirdparty.example/v1/chat/completions",
+        model: "qwen3.6",
+        detail: "ok",
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        url: "https://api.thirdparty.example/v1/chat/completions",
+        model: "glm-4.5",
+        detail: "HTTP 404",
+      });
+    const onProviderSplitSuggestionChange = vi.fn();
+    const { onApiFormatChange } = renderCatalogHarness(
+      [
+        { model: "gpt-5.5", upstreamModel: "gpt-5.5" },
+        { model: "qwen3.6", upstreamModel: "qwen3.6" },
+        { model: "glm-4.5", upstreamModel: "glm-4.5" },
+      ],
+      {
+        providerName: "Relay",
+        shouldShowSpeedTest: true,
+        onProviderSplitSuggestionChange,
+      },
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "测试 Chat / Responses" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "确认测试" }));
+
+    await waitFor(() => {
+      expect(onApiFormatChange).toHaveBeenCalledWith("openai_responses");
+    });
+    expect(screen.getByTitle("Responses=ok; Chat=ok")).toHaveTextContent(
+      "双协议",
+    );
+    expect(screen.getByTitle("Responses=HTTP 404; Chat=ok")).toHaveTextContent(
+      "Chat",
+    );
+    expect(
+      screen.getByTitle("Responses=HTTP 404; Chat=HTTP 404"),
+    ).toHaveTextContent("不可用");
+    expect(document.body).toHaveTextContent("双协议通过：gpt-5.5");
+    expect(document.body).toHaveTextContent("仅 Chat 通过：qwen3.6");
+    expect(document.body).toHaveTextContent("双协议失败：glm-4.5");
+    expect(await screen.findByText("检测到混合协议模型")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "确认生成两个 provider" }),
+    );
+    expect(onProviderSplitSuggestionChange).toHaveBeenCalledWith({
+      providerName: "Relay",
+      responsesModels: ["gpt-5.5"],
+      chatModels: ["qwen3.6"],
+    });
   });
 
   it("opens the protocol probe confirmation above the full screen provider panel", () => {
