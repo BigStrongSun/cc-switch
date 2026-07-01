@@ -5,6 +5,8 @@
 - Codex Desktop app 登录态的唯一安全来源是 live `~/.codex/auth.json`。CCSwitchMulti 的 MultiRouter/OAuth 只负责 LLM 请求出口，异常恢复、关闭接管、启动自恢复都不能把旧 `proxy_live_backup` 里的空 auth、API key auth 或过期 OAuth 快照覆盖到当前 live auth。
 - 崩溃/系统重启/Codex 先于 CCSwitchMulti 启动的关键风险不是 `15721` 本地代理配置本身，而是恢复旧备份时删除或回滚 `auth.json`。`ProxyService::write_codex_live_verbatim` 现在在恢复 Codex 备份时，如果当前 live auth 有 OAuth 登录材料，只写/投影 `config.toml`，保留 live `auth.json`；第三方 API key 仍放进 `experimental_bearer_token`。
 - 保持兼容边界：如果当前 live 没有 OAuth 登录材料，空 auth 备份仍可删除 `auth.json`，以支持 config-only 第三方 provider；有 live OAuth 时，空 auth 和 stale OAuth 备份都不能影响 app 登录。回归测试覆盖 `codex_restore_empty_auth_backup_preserves_current_live_oauth_login` 与 `codex_restore_stale_oauth_backup_preserves_current_live_oauth_login`。
+- 日志证据要按时间线判断：`app-exit-events.jsonl` 里的 `abnormal_exit_detected` 后，`cc-switch.log` 会立即出现“检测到上次异常退出（存在接管残留）”“codex Live 配置已从备份恢复”“正在重新接管并补齐 Live”。这说明 Codex-only 启动时掉登录不是 Codex 启动瞬间被 CCSM 改了，而是旧版本 CCSM 上次恢复/重新接管时已经把坏 `auth.json` 留在 live 目录里。
+- 额外审计边界：`services/provider/live.rs::LiveSnapshot::restore()` 当前是 `#[allow(dead_code)]` 且无生产调用者，但它原本也会原样写入或删除 Codex `auth.json`。为防止以后回滚/快照流程重新接入后复发，该路径也必须遵守同一规则：live auth 有 OAuth 登录材料时只恢复 `config.toml`，不写、不删、不回滚 `auth.json`。回归测试覆盖 `codex_live_snapshot_restore_empty_auth_preserves_live_oauth_login`、`codex_live_snapshot_restore_stale_oauth_preserves_live_oauth_login` 和无 live OAuth 时仍删除空 auth 的兼容行为。
 
 ## 2026-07-01 GitHub CI and Release Workflow Failure Boundaries
 

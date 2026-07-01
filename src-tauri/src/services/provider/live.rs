@@ -740,6 +740,17 @@ pub(crate) enum LiveSnapshot {
     },
 }
 
+/// 判断快照恢复是否应该保留当前 Codex Desktop 的 OAuth 登录态。
+///
+/// `LiveSnapshot` 语义是故障回滚/恢复现场，不是用户主动切换官方账号。
+/// 如果 live `auth.json` 仍有 OAuth 登录材料，恢复旧快照只能处理
+/// `config.toml`，不能把空 auth、API key auth 或过期 OAuth 快照写回。
+fn should_preserve_live_codex_oauth_for_snapshot_restore() -> bool {
+    read_json_file::<Value>(&get_codex_auth_path())
+        .ok()
+        .is_some_and(|auth| crate::codex_config::codex_auth_has_oauth_login_material(&auth))
+}
+
 impl LiveSnapshot {
     #[allow(dead_code)]
     pub(crate) fn restore(&self) -> Result<(), AppError> {
@@ -755,7 +766,11 @@ impl LiveSnapshot {
             LiveSnapshot::Codex { auth, config } => {
                 let auth_path = get_codex_auth_path();
                 let config_path = get_codex_config_path();
-                if let Some(value) = auth {
+                if should_preserve_live_codex_oauth_for_snapshot_restore() {
+                    log::info!(
+                        "Codex LiveSnapshot restore preserved existing OAuth auth.json and only restored config.toml"
+                    );
+                } else if let Some(value) = auth {
                     write_json_file(&auth_path, value)?;
                 } else if auth_path.exists() {
                     delete_file(&auth_path)?;
@@ -1672,6 +1687,162 @@ pub fn remove_openclaw_provider_from_live(provider_id: &str) -> Result<(), AppEr
 mod tests {
     use super::*;
     use serde_json::json;
+    use serial_test::serial;
+    use std::env;
+    use tempfile::TempDir;
+
+    /// 为会触碰 `~/.codex` 的单测提供隔离主目录。
+    ///
+    /// Windows 上真实 home 不一定受 `HOME` 控制，因此同时设置
+    /// `CC_SWITCH_TEST_HOME`、`HOME` 和 `USERPROFILE`，Drop 时恢复原值。
+    struct TempHome {
+        #[allow(dead_code)]
+        dir: TempDir,
+        original_home: Option<String>,
+        original_userprofile: Option<String>,
+        original_test_home: Option<String>,
+    }
+
+    impl TempHome {
+        /// 创建临时主目录并保存原始环境变量，避免测试污染用户真实配置。
+        fn new() -> Self {
+            let dir = TempDir::new().expect("failed to create temp home");
+            let original_home = env::var("HOME").ok();
+            let original_userprofile = env::var("USERPROFILE").ok();
+            let original_test_home = env::var("CC_SWITCH_TEST_HOME").ok();
+
+            env::set_var("HOME", dir.path());
+            env::set_var("USERPROFILE", dir.path());
+            env::set_var("CC_SWITCH_TEST_HOME", dir.path());
+
+            Self {
+                dir,
+                original_home,
+                original_userprofile,
+                original_test_home,
+            }
+        }
+    }
+
+    impl Drop for TempHome {
+        /// 恢复测试前的主目录环境变量，避免影响后续测试或开发环境。
+        fn drop(&mut self) {
+            match &self.original_home {
+                Some(value) => env::set_var("HOME", value),
+                None => env::remove_var("HOME"),
+            }
+
+            match &self.original_userprofile {
+                Some(value) => env::set_var("USERPROFILE", value),
+                None => env::remove_var("USERPROFILE"),
+            }
+
+            match &self.original_test_home {
+                Some(value) => env::set_var("CC_SWITCH_TEST_HOME", value),
+                None => env::remove_var("CC_SWITCH_TEST_HOME"),
+            }
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn codex_live_snapshot_restore_empty_auth_preserves_live_oauth_login() {
+        let _home = TempHome::new();
+        let live_oauth = json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "account_id": "acct-live",
+                "access_token": "current-access",
+                "refresh_token": "current-refresh"
+            }
+        });
+        crate::config::write_json_file(&get_codex_auth_path(), &live_oauth)
+            .expect("seed live OAuth auth");
+
+        let snapshot = LiveSnapshot::Codex {
+            auth: None,
+            config: Some(
+                "model_provider = \"custom\"\nmodel = \"deepseek-v4-flash\"\n".to_string(),
+            ),
+        };
+
+        snapshot.restore().expect("restore Codex snapshot");
+
+        let restored_auth: Value =
+            crate::config::read_json_file(&get_codex_auth_path()).expect("read restored auth");
+        assert_eq!(
+            restored_auth, live_oauth,
+            "snapshot rollback must not delete current Codex Desktop OAuth auth.json"
+        );
+        let restored_config =
+            std::fs::read_to_string(get_codex_config_path()).expect("read restored config.toml");
+        assert!(
+            restored_config.contains("deepseek-v4-flash"),
+            "snapshot restore should still apply config.toml, got:\n{restored_config}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn codex_live_snapshot_restore_stale_oauth_preserves_live_oauth_login() {
+        let _home = TempHome::new();
+        let live_oauth = json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "account_id": "acct-live",
+                "access_token": "current-access",
+                "refresh_token": "current-refresh"
+            }
+        });
+        crate::config::write_json_file(&get_codex_auth_path(), &live_oauth)
+            .expect("seed live OAuth auth");
+
+        let snapshot = LiveSnapshot::Codex {
+            auth: Some(json!({
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "account_id": "acct-live",
+                    "access_token": "stale-access",
+                    "refresh_token": "stale-refresh"
+                }
+            })),
+            config: Some("model_provider = \"openai\"\nmodel = \"gpt-5.5\"\n".to_string()),
+        };
+
+        snapshot.restore().expect("restore Codex snapshot");
+
+        let restored_auth: Value =
+            crate::config::read_json_file(&get_codex_auth_path()).expect("read restored auth");
+        assert_eq!(
+            restored_auth, live_oauth,
+            "snapshot rollback must not roll current Codex Desktop OAuth tokens back to stale backup tokens"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn codex_live_snapshot_restore_empty_auth_deletes_auth_without_live_oauth_login() {
+        let _home = TempHome::new();
+        crate::config::write_json_file(
+            &get_codex_auth_path(),
+            &json!({
+                "OPENAI_API_KEY": "sk-third-party"
+            }),
+        )
+        .expect("seed API-key auth");
+
+        let snapshot = LiveSnapshot::Codex {
+            auth: None,
+            config: Some("model_provider = \"custom\"\n".to_string()),
+        };
+
+        snapshot.restore().expect("restore Codex snapshot");
+
+        assert!(
+            !get_codex_auth_path().exists(),
+            "empty-auth snapshot should keep legacy delete behavior when live auth has no OAuth login"
+        );
+    }
 
     #[test]
     fn claude_common_config_apply_and_remove_roundtrip_for_non_overlapping_fields() {
