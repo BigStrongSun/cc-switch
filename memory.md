@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-07-01 Codex OAuth Native Request Shape Diagnostics
+
+- Added read-only script `scripts/codex-oauth-diagnostics.ps1` for capacity/OAuth triage. It writes sanitized evidence under `scripts/logs/codex-oauth-diagnostics/<timestamp>`: live Codex config, auth metadata, parsed `codex-router.log` events, capacity/error candidates, and summary. Token-like fields plus account ids are represented only by length and short SHA256 prefixes.
+- Added `scripts/codex-request-shape-compare.mjs` for native-vs-proxy request shape diffing. It supports `--self-test`, `--serve-self-test`, file-based `--native/--proxy`, and mock-server mode with `--serve --native-command ... --proxy-command ...`. Mock mode exposes `CODEX_COMPARE_BASE_URL`, `CODEX_COMPARE_NATIVE_BASE_URL`, and `CODEX_COMPARE_PROXY_BASE_URL`; requests can be tagged with `x-codex-compare-side` or `?side=`.
+- Added `docs/codex-oauth-native-diff.md` to fix the analysis order: first identify whether traffic is pure native, CCSwitchMulti local facade to official OAuth, or third-party routing; then compare `service_tier`, `prompt_cache_key`, `client_metadata`, `originator`, Responses-Lite, account id, and session/window ids; use Fiddler/mitmproxy only after source/log/mock diff cannot explain the behavior.
+- Validation on this machine: Windows PowerShell 5.1 runs `codex-oauth-diagnostics.ps1`; the latest 100 parsed router events had no capacity/error candidates. Node `--self-test` and `--serve-self-test` both generated diff reports successfully.
+
 ## 2026-07-01 Codex Desktop Login Preservation During Takeover Restore
 
 - Codex Desktop app 登录态的唯一安全来源是 live `~/.codex/auth.json`。CCSwitchMulti 的 MultiRouter/OAuth 只负责 LLM 请求出口，异常恢复、关闭接管、启动自恢复都不能把旧 `proxy_live_backup` 里的空 auth、API key auth 或过期 OAuth 快照覆盖到当前 live auth。
