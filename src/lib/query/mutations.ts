@@ -10,6 +10,7 @@ import { generateUUID } from "@/utils/uuid";
 import { openclawKeys } from "@/hooks/useOpenClaw";
 import { invalidateHermesProviderCaches } from "@/hooks/useHermes";
 import { usageKeys } from "@/lib/query/usage";
+import { syncCodexMultiRouterPlansAfterProviderChange } from "@/lib/codexMultiRouterSync";
 
 export const useAddProviderMutation = (appId: AppId) => {
   const queryClient = useQueryClient();
@@ -140,6 +141,17 @@ export const useUpdateProviderMutation = (appId: AppId) => {
       originalId?: string;
     }) => {
       await providersApi.update(provider, appId, originalId);
+      if (appId === "codex") {
+        const providerMap = await providersApi.getAll(appId);
+        const syncedPlans = syncCodexMultiRouterPlansAfterProviderChange(
+          Object.values(providerMap),
+          provider,
+          originalId,
+        );
+        for (const plan of syncedPlans) {
+          await providersApi.update(plan, appId);
+        }
+      }
       return provider;
     },
     onSuccess: async (provider, variables) => {
