@@ -1,5 +1,13 @@
 # CC Switch Repository Memory
 
+## 2026-07-01 CCSwitchMulti v3.16.4-5 Formal Release
+
+- CCSwitchMulti 正式发布远端是 `fork` (`BigStrongSun/ccswitchmulti`)；`origin`/`upstream` 指向原版 `farion1231/cc-switch`，发布、tag、asset upload 都不能推到 `origin`。
+- `v3.16.4-5` 的发布语义是“本地最新改完的 `main` 作为正式版本”。如果发布准备后又产生发布质量修正（例如清理重复脚本键），必须先提交到 `main`，再把 annotated tag `v3.16.4-5` 移到最终 `HEAD`，然后推 `fork/main` 和强推 tag。
+- `package.json` 曾经有两个相同的 `history:tool:check` script key。虽然值相同、行为不变，但会让 Vite/esbuild 在正式打包时提示 duplicate key；发布前必须只保留一个，验证用 `Select-String -Path package.json -Pattern '"history:tool:check"'`。
+- 用户要求的流程是先创建 GitHub release，再打包和上传资产。release URL 是 `https://github.com/BigStrongSun/ccswitchmulti/releases/tag/v3.16.4-5`；创建 release 后如果 tag 被移动，需要 `gh release edit v3.16.4-5 --repo BigStrongSun/ccswitchmulti --latest --notes-file docs/release-notes/v3.16.4-5-zh.md` 重新确认 release 元数据。
+- 本地正式打包建议使用独立目录 `C:\Users\sunda\Documents\LLMservice\ccswitchmulti-release-v3.16.4-5`，命令：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts\local-release-pipeline.ps1 -ReleaseRoot C:\Users\sunda\Documents\LLMservice\ccswitchmulti-release-v3.16.4-5 -Reason "manual-formal-release-v3.16.4-5"`。不要清理无关未跟踪目录，例如旧 `output/release-*` 和 `scripts/logs/`。
+
 ## 2026-07-01 Local Branch Merge Audit
 
 - 本地 `main` 已吸收三个此前未合入的修复/功能分支：`codex/upstream-preserve-codex-live-settings`、`upstream/codex-history-repair-session-ui`、`upstream/codex-history-repair-session-manager`。
