@@ -7069,8 +7069,12 @@ reviewDelivery = "detached"
             "restore must keep Codex Desktop review delivery preference, got:\n{restored}"
         );
         assert!(
-            !restored.contains("127.0.0.1:15721"),
-            "restore must still remove takeover proxy endpoint, got:\n{restored}"
+            restored.contains("model_provider = \"openai\""),
+            "restore must still apply the backup/provider route, got:\n{restored}"
+        );
+        assert!(
+            !restored.contains("http://127.0.0.1:15721"),
+            "restore must remove the takeover proxy endpoint, got:\n{restored}"
         );
     }
 

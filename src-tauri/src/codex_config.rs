@@ -1979,8 +1979,35 @@ pub fn prepare_codex_live_config_text_with_optional_catalog(
 /// 属于当前 provider；而 `[features]`、`[desktop]`、`[memories]`、
 /// `[projects]`、`[mcp_servers]` 等表结构属于用户全局配置，不能被历史
 /// provider 快照覆盖。
-fn codex_toml_item_is_table_like(item: &toml_edit::Item) -> bool {
+fn codex_toml_item_is_table_like(item: &Item) -> bool {
     item.as_table().is_some() || item.as_array_of_tables().is_some()
+}
+
+/// 将 provider 需要的配置叠加到 live 表里，冲突时保留 provider。
+///
+/// 这个方向只用于真正由 provider 管理的字段；用户自有表结构通过
+/// `merge_missing_codex_toml_item` 只补缺失值，避免旧备份覆盖新设置。
+fn merge_codex_toml_item_prefer_provider(target: &mut Item, source: &Item) {
+    if let Some(source_table) = source.as_table_like() {
+        if let Some(target_table) = target.as_table_like_mut() {
+            merge_codex_toml_table_like_prefer_provider(target_table, source_table);
+            return;
+        }
+    }
+
+    *target = source.clone();
+}
+
+/// 递归合并 TOML 表，provider 侧同名键优先。
+fn merge_codex_toml_table_like_prefer_provider(target: &mut dyn TableLike, source: &dyn TableLike) {
+    for (key, source_item) in source.iter() {
+        match target.get_mut(key) {
+            Some(target_item) => merge_codex_toml_item_prefer_provider(target_item, source_item),
+            None => {
+                target.insert(key, source_item.clone());
+            }
+        }
+    }
 }
 
 /// 将 provider 表结构里 live 缺失的子项补进 live 配置，已有项一律保留 live。
@@ -2120,7 +2147,7 @@ fn remove_codex_provider_owned_fields_missing_from_provider(
         remove_active_custom_codex_model_provider_section(live_doc);
     }
 
-    for key in ["model", "model_provider"] {
+    for key in ["model", "model_provider", "model_context_window"] {
         if provider_doc.get(key).is_none() {
             live_doc.as_table_mut().remove(key);
         }
@@ -2129,7 +2156,6 @@ fn remove_codex_provider_owned_fields_missing_from_provider(
     if provider_doc.get("openai_base_url").is_none() {
         live_doc.as_table_mut().remove("openai_base_url");
     }
-
     if provider_doc.get("model_catalog_json").is_none() {
         remove_cc_switch_model_catalog_json_if_stale(live_doc);
     }
@@ -2228,7 +2254,14 @@ pub(crate) fn merge_codex_provider_config_texts(
                 .get_mut("model_providers")
                 .and_then(|item| item.as_table_mut())
             {
-                live_providers.insert(provider_id, provider_item);
+                match live_providers.get_mut(provider_id) {
+                    Some(live_item) => {
+                        merge_codex_toml_item_prefer_provider(live_item, &provider_item)
+                    }
+                    None => {
+                        live_providers.insert(provider_id, provider_item);
+                    }
+                }
             }
         }
     }
