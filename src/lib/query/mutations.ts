@@ -10,7 +10,16 @@ import { generateUUID } from "@/utils/uuid";
 import { openclawKeys } from "@/hooks/useOpenClaw";
 import { invalidateHermesProviderCaches } from "@/hooks/useHermes";
 import { usageKeys } from "@/lib/query/usage";
-import { syncCodexMultiRouterPlansAfterProviderChange } from "@/lib/codexMultiRouterSync";
+import {
+  syncCodexMultiRouterPlansAfterProviderChange,
+  type CodexMultiRouterPlanSyncResult,
+} from "@/lib/codexMultiRouterSync";
+
+// Provider 保存结果需要携带 Codex MultiRouter 同步报告，供上层决定是否提示用户补选子 Agent 模型。
+export interface UpdateProviderMutationResult {
+  provider: Provider;
+  codexMultiRouterSyncResults?: CodexMultiRouterPlanSyncResult[];
+}
 
 export const useAddProviderMutation = (appId: AppId) => {
   const queryClient = useQueryClient();
@@ -141,20 +150,25 @@ export const useUpdateProviderMutation = (appId: AppId) => {
       originalId?: string;
     }) => {
       await providersApi.update(provider, appId, originalId);
+      let codexMultiRouterSyncResults:
+        | CodexMultiRouterPlanSyncResult[]
+        | undefined;
       if (appId === "codex") {
         const providerMap = await providersApi.getAll(appId);
-        const syncedPlans = syncCodexMultiRouterPlansAfterProviderChange(
-          Object.values(providerMap),
-          provider,
-          originalId,
-        );
-        for (const plan of syncedPlans) {
-          await providersApi.update(plan, appId);
+        codexMultiRouterSyncResults =
+          syncCodexMultiRouterPlansAfterProviderChange(
+            Object.values(providerMap),
+            provider,
+            originalId,
+          );
+        for (const result of codexMultiRouterSyncResults) {
+          await providersApi.update(result.plan, appId);
         }
       }
-      return provider;
+      return { provider, codexMultiRouterSyncResults };
     },
-    onSuccess: async (provider, variables) => {
+    onSuccess: async (result, variables) => {
+      const provider = result.provider;
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
       await queryClient.invalidateQueries({
         queryKey: usageKeys.script(provider.id, appId),

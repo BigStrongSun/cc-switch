@@ -17,7 +17,7 @@ function provider(overrides: Partial<Provider>): Provider {
 }
 
 describe("codexMultiRouterSync", () => {
-  it("同步 provider 保留模型变更到 route、总 catalog 和子 Agent 候选", () => {
+  it("同步 provider 保留模型变更到 route、总 catalog，并只剪枝子 Agent 候选", () => {
     const deepseek = provider({
       id: "deepseek",
       name: "DeepSeek",
@@ -85,13 +85,11 @@ describe("codexMultiRouterSync", () => {
       ]),
     );
 
-    expect(synced?.settingsConfig.codexRouting.routes[0].match.models).toEqual([
-      "deepseek-chat",
-      "deepseek-reasoner",
-      "deepseek-v4-flash",
-    ]);
     expect(
-      synced?.settingsConfig.modelCatalog.models.map(
+      synced?.plan.settingsConfig.codexRouting.routes[0].match.models,
+    ).toEqual(["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"]);
+    expect(
+      synced?.plan.settingsConfig.modelCatalog.models.map(
         (model: { model: string }) => model.model,
       ),
     ).toEqual([
@@ -100,12 +98,10 @@ describe("codexMultiRouterSync", () => {
       "deepseek-v4-flash",
       "qwen3.6",
     ]);
-    expect(synced?.settingsConfig.modelCatalog.spawnAgentModels).toEqual([
+    expect(synced?.plan.settingsConfig.modelCatalog.spawnAgentModels).toEqual([
       "qwen3.6",
-      "deepseek-chat",
-      "deepseek-reasoner",
-      "deepseek-v4-flash",
     ]);
+    expect(synced?.removedSpawnAgentModels).toEqual(["old-removed-model"]);
   });
 
   it("同步 provider 模型变更时保留已保存 route 的别名 modelMap", () => {
@@ -154,18 +150,17 @@ describe("codexMultiRouterSync", () => {
       ]),
     );
 
-    expect(synced?.settingsConfig.codexRouting.routes[0].match.models).toEqual([
-      "gpt-5.5-relay",
-      "gpt-5.4-mini",
-    ]);
     expect(
-      synced?.settingsConfig.codexRouting.routes[0].upstream.modelMap,
+      synced?.plan.settingsConfig.codexRouting.routes[0].match.models,
+    ).toEqual(["gpt-5.5-relay", "gpt-5.4-mini"]);
+    expect(
+      synced?.plan.settingsConfig.codexRouting.routes[0].upstream.modelMap,
     ).toEqual({ "gpt-5.5-relay": "gpt-5.5" });
-    expect(synced?.settingsConfig.modelCatalog.spawnAgentModels).toEqual([
+    expect(synced?.plan.settingsConfig.modelCatalog.spawnAgentModels).toEqual([
       "gpt-5.5-relay",
-      "gpt-5.4-mini",
     ]);
-    expect(synced?.settingsConfig.modelCatalog.models).toEqual([
+    expect(synced?.removedSpawnAgentModels).toEqual([]);
+    expect(synced?.plan.settingsConfig.modelCatalog.models).toEqual([
       {
         model: "gpt-5.5-relay",
         upstreamModel: "gpt-5.5",
@@ -218,14 +213,15 @@ describe("codexMultiRouterSync", () => {
       "old-provider",
     );
 
-    expect(synced.settingsConfig.codexRouting.routes[0].targetProviderId).toBe(
-      "new-provider",
+    expect(
+      synced.plan.settingsConfig.codexRouting.routes[0].targetProviderId,
+    ).toBe("new-provider");
+    expect(
+      synced.plan.settingsConfig.codexRouting.routes[0].match.models,
+    ).toEqual(["new-model"]);
+    expect(synced.plan.settingsConfig.modelCatalog.spawnAgentModels).toEqual(
+      [],
     );
-    expect(synced.settingsConfig.codexRouting.routes[0].match.models).toEqual([
-      "new-model",
-    ]);
-    expect(synced.settingsConfig.modelCatalog.spawnAgentModels).toEqual([
-      "new-model",
-    ]);
+    expect(synced.removedSpawnAgentModels).toEqual(["old-model"]);
   });
 });

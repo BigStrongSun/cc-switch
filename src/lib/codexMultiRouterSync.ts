@@ -6,11 +6,13 @@ import type {
   Provider,
 } from "@/types";
 import { isCodexMultiRouterPlan } from "@/lib/codexMultiRouterWizard";
-import {
-  CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT,
-  normalizeCodexSpawnAgentModels,
-  readCodexModelCatalog,
-} from "@/utils/codexSpawnAgentCandidates";
+import { readCodexModelCatalog } from "@/utils/codexSpawnAgentCandidates";
+
+// MultiRouter 同步返回写回后的 plan，以及需要用户人工补选的子 Agent 候选删减。
+export interface CodexMultiRouterPlanSyncResult {
+  plan: Provider;
+  removedSpawnAgentModels: string[];
+}
 
 // 读取 route 的目标 provider id；兼容旧草稿里可能残留在 upstream/provider 字段的写法。
 function routeTargetProviderId(route: CodexRoutingRoute): string | undefined {
@@ -184,12 +186,32 @@ function applyRouteCapabilities(
   };
 }
 
+// 子 Agent 候选只保留仍在最新聚合 catalog 中的旧选择；被删除的候选交给 UI 提醒用户人工处理。
+function pruneSpawnAgentModels(
+  existingSpawnAgentModels: string[],
+  models: CodexCatalogModel[],
+): { spawnAgentModels: string[]; removedSpawnAgentModels: string[] } {
+  const availableModels = new Set(models.map((model) => model.model));
+  const spawnAgentModels = existingSpawnAgentModels.filter((model) =>
+    availableModels.has(model),
+  );
+  return {
+    spawnAgentModels,
+    removedSpawnAgentModels: existingSpawnAgentModels.filter(
+      (model) => !availableModels.has(model),
+    ),
+  };
+}
+
 // 按当前 routes 和 provider SSOT 重建 MultiRouter 聚合模型目录，并清理不可用的子 Agent 候选。
 function rebuildPlanModelCatalog(
   plan: Provider,
   routes: CodexRoutingRoute[],
   providersById: Map<string, Provider>,
-): CodexModelCatalogConfig {
+): {
+  modelCatalog: CodexModelCatalogConfig;
+  removedSpawnAgentModels: string[];
+} {
   const byModel = new Map<string, CodexCatalogModel>();
   for (const route of routes) {
     const targetId = routeTargetProviderId(route);
@@ -217,13 +239,16 @@ function rebuildPlanModelCatalog(
   )
     ? plan.settingsConfig.modelCatalog.spawnAgentModels
     : [];
-  return {
+  const { spawnAgentModels, removedSpawnAgentModels } = pruneSpawnAgentModels(
+    existingSpawnAgentModels,
     models,
-    spawnAgentModels: normalizeCodexSpawnAgentModels(
-      existingSpawnAgentModels,
+  );
+  return {
+    modelCatalog: {
       models,
-      CODEX_SPAWN_AGENT_VISIBLE_MODEL_LIMIT,
-    ),
+      spawnAgentModels,
+    },
+    removedSpawnAgentModels,
   };
 }
 
@@ -231,7 +256,7 @@ function rebuildPlanModelCatalog(
 export function syncCodexMultiRouterPlanWithProviders(
   plan: Provider,
   providersById: Map<string, Provider>,
-): Provider | null {
+): CodexMultiRouterPlanSyncResult | null {
   const routing = plan.settingsConfig?.codexRouting as
     | CodexRoutingConfig
     | undefined;
@@ -274,11 +299,8 @@ export function syncCodexMultiRouterPlanWithProviders(
     };
   });
 
-  const nextModelCatalog = rebuildPlanModelCatalog(
-    plan,
-    nextRoutes,
-    providersById,
-  );
+  const { modelCatalog: nextModelCatalog, removedSpawnAgentModels } =
+    rebuildPlanModelCatalog(plan, nextRoutes, providersById);
   const catalogChanged =
     JSON.stringify(plan.settingsConfig?.modelCatalog ?? null) !==
     JSON.stringify(nextModelCatalog);
@@ -286,15 +308,18 @@ export function syncCodexMultiRouterPlanWithProviders(
   if (!changed && !catalogChanged) return null;
 
   return {
-    ...plan,
-    settingsConfig: {
-      ...plan.settingsConfig,
-      codexRouting: {
-        ...routing,
-        routes: nextRoutes,
+    plan: {
+      ...plan,
+      settingsConfig: {
+        ...plan.settingsConfig,
+        codexRouting: {
+          ...routing,
+          routes: nextRoutes,
+        },
+        modelCatalog: nextModelCatalog,
       },
-      modelCatalog: nextModelCatalog,
     },
+    removedSpawnAgentModels,
   };
 }
 
@@ -303,7 +328,7 @@ export function syncCodexMultiRouterPlansAfterProviderChange(
   providers: Provider[],
   changedProvider: Provider,
   originalProviderId?: string,
-): Provider[] {
+): CodexMultiRouterPlanSyncResult[] {
   const providersById = new Map(
     providers.map((provider) => [provider.id, provider]),
   );
@@ -340,5 +365,7 @@ export function syncCodexMultiRouterPlansAfterProviderChange(
         : plan;
       return syncCodexMultiRouterPlanWithProviders(rewiredPlan, providersById);
     })
-    .filter((provider): provider is Provider => Boolean(provider));
+    .filter((result): result is CodexMultiRouterPlanSyncResult =>
+      Boolean(result),
+    );
 }

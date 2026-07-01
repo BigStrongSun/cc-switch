@@ -681,8 +681,24 @@ function App() {
     provider: Provider;
     originalId?: string;
   }) => {
-    await updateProvider(provider, originalId);
+    const result = await updateProvider(provider, originalId);
     setEditingProvider(null);
+    for (const syncResult of result?.codexMultiRouterSyncResults ?? []) {
+      if (syncResult.removedSpawnAgentModels.length === 0) continue;
+      const removedModels = syncResult.removedSpawnAgentModels.join("、");
+      toast.warning(
+        `MultiRouter「${syncResult.plan.name}」的子 Agent 候选已移除不可用模型，请手动处理。`,
+        {
+          description: `已移除：${removedModels}`,
+          closeButton: true,
+          duration: 12000,
+          action: {
+            label: "处理",
+            onClick: () => openCodexRouterWorkspace(syncResult.plan, "routes"),
+          },
+        },
+      );
+    }
   };
 
   /**

@@ -134,7 +134,10 @@ export function useProviderActions(
   // 更新供应商
   const updateProvider = useCallback(
     async (provider: Provider, originalId?: string) => {
-      await updateProviderMutation.mutateAsync({ provider, originalId });
+      const result = await updateProviderMutation.mutateAsync({
+        provider,
+        originalId,
+      });
 
       // 更新托盘菜单（失败不影响主操作）
       try {
@@ -145,6 +148,7 @@ export function useProviderActions(
           trayError,
         );
       }
+      return result;
     },
     [updateProviderMutation],
   );
