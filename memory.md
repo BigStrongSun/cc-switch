@@ -1,5 +1,11 @@
 # CC Switch Repository Memory
 
+## 2026-07-01 CCSwitchMulti v3.16.4-6 Release
+
+- v3.16.4-6 是 v3.16.4-5 后的热修正式发布，核心变更是 `fix(codex): strip invalid content from oauth response items`：Codex OAuth `/responses` 直透 ChatGPT backend 前会删除非 message/reasoning input item 上的冗余 `content`，避免 `Invalid input[3].content: array too long`。
+- 版本面必须同步更新 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`，release note 是 `docs/release-notes/v3.16.4-6-zh.md`。
+- 发布输出目录使用独立路径 `C:\Users\sunda\Documents\LLMservice\ccswitchmulti-release-v3.16.4-6`，不要复用默认“最新版ccswitchmulti”目录或清理旧 `output/release-*` / `scripts/logs/` 未跟踪目录。
+
 ## 2026-07-01 Codex OAuth Responses Passthrough Content Shape
 
 - 用户截图里的 `Invalid 'input[3].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead.` 发生在 Codex `/responses` 直透 ChatGPT Codex OAuth backend，日志特征是 `responses_to_chat=false`、`responses_to_messages=false`、`upstream_url=https://chatgpt.com/backend-api/codex/responses`。这不是第三方 Chat 转换问题，也不是模型容量问题。
