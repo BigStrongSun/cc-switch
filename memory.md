@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-07-02 Codex MultiRouter Empty Catalog Relay GPT Misroute
+
+- 多人反馈“本来走第三方中转的 GPT 请求被路由去官方”时，先查 provider 保存后的 MultiRouter 同步结果：`settingsConfig.codexRouting.routes[].match.models` 是否被清空、第三方 route 的 `upstream.modelMap` 是否丢失、聚合 `modelCatalog.models` 是否还包含 `gpt-*-relay` 这类可见别名。
+- 根因不是 OAuth 代理与原生 Codex 差异，也不是 Rust runtime 主匹配优先级直接抢路由。直接触发点是 `c10a1541 fix(codex): sync multirouter catalogs after provider model edits` 引入的同步逻辑：`syncCodexMultiRouterPlanWithProviders` 把目标 provider 的空 `modelCatalog.models` 当成“用户删除了所有模型”，随后写入 `match.models=[]` 并删除 `upstream.modelMap`。relay route 失去可见 alias 后，运行时只能命中官方 GPT exact/prefix route。
+- 修复边界：目标 provider 当前没有可用 catalog 时，不覆盖已保存 route 的 `match.models` / `modelMap`；`rebuildPlanModelCatalog` 在空目录回退路径复用 plan 里已有 catalog 条目的 `displayName`、`contextWindow`、`upstreamModel` 等字段。目标 provider 目录非空时仍按新目录同步新增/删除模型，并继续剪枝失效的 `spawnAgentModels`。
+- 回归测试：`tests/lib/codexMultiRouterSync.test.ts` 的“目标 provider 目录暂时为空时不清空第三方 GPT 别名 route”覆盖官方 `gpt-5.5` 与第三方 `gpt-5.5-relay -> gpt-5.5` 并存、relay provider catalog 暂时为空、official catalog 正常更新时，relay route 和 spawn agent 候选必须保留。
+
 ## 2026-07-02 Volcengine AgentPlan OpenAPI Model Fetch
 
 - 用户截图里的“目前火山引擎 Agentplan 获取不到模型”不是 API Key、网络或 `/models` 候选顺序的单点问题。火山 Agent Plan 的模型枚举文档是 `ListArkAgentPlanModel - 查询 Agent Plan 支持的模型列表`，在 `Agent Plan API` 管控面下；同页导航还有独立的 `ListArkCodingPlanModel - 查询 Coding Plan 支持的模型列表`。这类接口不是数据面 `https://ark.cn-beijing.volces.com/api/coding/v3/models` 或 OpenAI `/v1/models`。

@@ -213,6 +213,7 @@ function rebuildPlanModelCatalog(
   removedSpawnAgentModels: string[];
 } {
   const byModel = new Map<string, CodexCatalogModel>();
+  const planCatalogByModel = buildPlanCatalogByModel(plan);
   for (const route of routes) {
     const targetId = routeTargetProviderId(route);
     const targetProvider = targetId ? providersById.get(targetId) : undefined;
@@ -222,10 +223,19 @@ function rebuildPlanModelCatalog(
     const sourceModels =
       targetModels.length > 0
         ? buildSyncedRouteModels(plan, route, targetModels)
-        : (route.match.models ?? []).map((model) => ({
-            model,
-            upstreamModel: route.upstream.modelMap?.[model] ?? model,
-          }));
+        : (route.match.models ?? []).map((model) => {
+            const existingModel = planCatalogByModel.get(model);
+            const upstream =
+              route.upstream.modelMap?.[model] ??
+              existingModel?.upstreamModel ??
+              existingModel?.upstream_model ??
+              model;
+            return {
+              ...(existingModel ?? {}),
+              model,
+              upstreamModel: upstream,
+            };
+          });
     for (const sourceModel of sourceModels) {
       const id = sourceModel.model?.trim();
       if (!id || byModel.has(id)) continue;
@@ -270,6 +280,12 @@ export function syncCodexMultiRouterPlanWithProviders(
     if (!targetProvider) return route;
 
     const targetModels = readStrictProviderCatalogModels(targetProvider);
+    // 目标 provider 当前没有可用 catalog 时不能把已保存 route 当成“用户删除了所有模型”。
+    // `/models` 失败、刚创建 provider 或旧配置缺少 modelCatalog 都会走到这里；保留旧
+    // match/modelMap，避免第三方中转 alias 被清空后 GPT 请求回落到官方 route。
+    if (targetModels.length === 0) {
+      return route;
+    }
     const nextRouteModels = buildSyncedRouteModels(plan, route, targetModels);
     const nextModelIds = nextRouteModels
       .map((model) => model.model?.trim())

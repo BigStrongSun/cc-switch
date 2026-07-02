@@ -175,6 +175,97 @@ describe("codexMultiRouterSync", () => {
     ]);
   });
 
+  it("目标 provider 目录暂时为空时不清空第三方 GPT 别名 route", () => {
+    const official = provider({
+      id: "official",
+      name: "OpenAI Official",
+      settingsConfig: {
+        modelCatalog: {
+          models: [{ model: "gpt-5.5", contextWindow: 300000 }],
+        },
+      },
+    });
+    const relay = provider({
+      id: "relay",
+      name: "Relay",
+      settingsConfig: {
+        modelCatalog: { models: [] },
+      },
+    });
+    const plan = provider({
+      id: "router",
+      settingsConfig: {
+        modelCatalog: {
+          models: [
+            { model: "gpt-5.5", contextWindow: 272000 },
+            {
+              model: "gpt-5.5-relay",
+              upstreamModel: "gpt-5.5",
+              displayName: "Relay GPT",
+              contextWindow: 272000,
+            },
+          ],
+          spawnAgentModels: ["gpt-5.5-relay"],
+        },
+        codexRouting: {
+          enabled: true,
+          routes: [
+            {
+              id: "router-official",
+              targetProviderId: "official",
+              match: { models: ["gpt-5.5"] },
+              upstream: {
+                apiFormat: "openai_responses",
+                auth: { source: "managed_codex_oauth" },
+              },
+            },
+            {
+              id: "router-relay",
+              targetProviderId: "relay",
+              match: { models: ["gpt-5.5-relay"] },
+              upstream: {
+                apiFormat: "openai_chat",
+                auth: { source: "provider_config" },
+                modelMap: { "gpt-5.5-relay": "gpt-5.5" },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const synced = syncCodexMultiRouterPlanWithProviders(
+      plan,
+      new Map([
+        [official.id, official],
+        [relay.id, relay],
+        [plan.id, plan],
+      ]),
+    );
+
+    expect(synced).not.toBeNull();
+    const nextPlan = synced?.plan ?? plan;
+    expect(nextPlan.settingsConfig.codexRouting.routes[1].match.models).toEqual(
+      ["gpt-5.5-relay"],
+    );
+    expect(
+      nextPlan.settingsConfig.codexRouting.routes[1].upstream.modelMap,
+    ).toEqual({ "gpt-5.5-relay": "gpt-5.5" });
+    expect(nextPlan.settingsConfig.modelCatalog.models).toEqual([
+      { model: "gpt-5.5", upstreamModel: "gpt-5.5", contextWindow: 300000 },
+      {
+        model: "gpt-5.5-relay",
+        upstreamModel: "gpt-5.5",
+        displayName: "Relay GPT",
+        contextWindow: 272000,
+      },
+    ]);
+    expect(nextPlan.settingsConfig.modelCatalog.spawnAgentModels).toEqual([
+      "gpt-5.5-relay",
+    ]);
+    expect(synced?.removedSpawnAgentModels).toEqual([]);
+  });
+
   it("provider id 改名时同步 route 目标并按新 provider 目录重建", () => {
     const renamed = provider({
       id: "new-provider",
