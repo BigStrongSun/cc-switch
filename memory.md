@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-07-02 Codex MultiRouter Catalog Route Divergence Misroute
+
+- 另一位用户的日志包 `ccswitchmulti_logs_2026-07-02_141527-150209(1).zip` 证明了第三种 GPT 错路由形态：51 条 `request_model=gpt-5.5-longnows-gpt` 的 Codex 请求都落到 `codex-multirouter::route::router-codex-official`，实际上游模型被改写为 `model=gpt-5.5`；同时 `_codex_session` 侧仍记录 `gpt-5.5-longnows-gpt`，说明 Codex 选择器能看到 longnows alias，但 runtime 没有对应 exact route，只能被官方 `gpt` 前缀 route 接走。
+- 这和“空 catalog 清掉 relay route”以及“双 route 重复 exact 名称”都不同。根因边界是工作台 `buildModelCatalogForRoutes` 曾经把 target provider 的 `modelCatalog.models` 全量写进 MultiRouter 聚合 catalog，即使当前 route 的 `match.models/prefixes` 接不住这些模型；例如 LongNows route 只声明 `claude-opus-4-8`/`claude`，但 catalog 仍暴露 `gpt-5.5-longnows-gpt`。
+- 修复边界：聚合 catalog 只能投影当前 route 可 exact/prefix 匹配的可见模型；provider 模型刷新影响已保存 plan 时复用 `syncCodexMultiRouterPlanWithProviders`，让 `route.match.models`、`upstream.modelMap` 和 `modelCatalog.models` 同步重算，不再让工作台刷新路径和 provider 保存路径分叉。
+- 回归测试：`src/components/codex/CodexRouterWorkspacePage.test.ts` 的“does not expose provider catalog models that no saved route can match”固定 LongNows Claude-only route 不得暴露 `gpt-5.5-longnows-gpt`；验证命令覆盖 `pnpm vitest run tests/lib/codexMultiRouterSync.test.ts tests/lib/codexMultiRouterWizard.test.ts src/components/codex/CodexRouterWorkspacePage.test.ts`。
+
 ## 2026-07-02 Codex MultiRouter Duplicate Exact Route Bidirectional Misroute
 
 - 多人同日下午反馈“中转 GPT 走到官方”和“官方 GPT 走到中转”时，不要只沿空 `modelCatalog` 单向清空 alias 的链路排查；双向错路由的运行时根因是同一个 MultiRouter plan 里多条 enabled route 同时声明相同 exact 可见模型名，例如官方和第三方中转都保存了 `match.models=["gpt-5.5"]`。Rust `find_codex_route_by_match_priority` 无法从同一个 `request.model` 判断用户意图，只能按 routes 数组顺序取第一条 exact match，所以 route 顺序不同会产生两个方向的错路由。

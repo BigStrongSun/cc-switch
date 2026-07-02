@@ -57,6 +57,7 @@ import { providersApi } from "@/lib/api";
 import { fetchModelsForConfig, type FetchedModel } from "@/lib/api/model-fetch";
 import { proxyApi } from "@/lib/api/proxy";
 import { resolveWizardModelNameCollisions } from "@/lib/codexMultiRouterWizard";
+import { syncCodexMultiRouterPlanWithProviders } from "@/lib/codexMultiRouterSync";
 import { usageApi } from "@/lib/api/usage";
 import {
   usageKeys,
@@ -1530,6 +1531,30 @@ export function normalizeCodexRoutesForVisibleModelAliases(
   });
 }
 
+/// 判断某个 catalog 可见模型是否真的会被当前 route 接住。
+///
+/// MultiRouter runtime 只按请求里的可见模型字符串做 exact/prefix 匹配；如果 catalog
+/// 暴露了 route 不匹配的模型，Codex 选择器会让用户选到一个随后落入其他 route 的模型。
+function routeCanMatchVisibleCatalogModel(
+  route: CodexRoute,
+  visibleModel: string,
+): boolean {
+  const model = visibleModel.trim();
+  if (!model) return false;
+  const lowerModel = model.toLowerCase();
+  if (
+    (route.match?.models ?? []).some(
+      (matchedModel) => matchedModel.trim().toLowerCase() === lowerModel,
+    )
+  ) {
+    return true;
+  }
+  return (route.match?.prefixes ?? []).some((prefix) => {
+    const normalizedPrefix = prefix.trim().toLowerCase();
+    return normalizedPrefix && lowerModel.startsWith(normalizedPrefix);
+  });
+}
+
 /// route 能力比 provider catalog 更接近最终路由结果；写入聚合 catalog，确保 Codex 看到的模型能力与规则一致。
 function applyRouteCapabilitiesToCatalogModel(
   model: CodexCatalogModelDraft,
@@ -1566,10 +1591,13 @@ export function buildModelCatalogForRoutes(
       targetProvider && targetCatalogModels.length === 0
         ? fallbackCatalogDraftForProvider(targetProvider)
         : [];
-    for (const catalogModel of [
+    const routableCatalogModels = [
       ...targetCatalogModels,
       ...fallbackCatalogModels,
-    ]) {
+    ].filter((catalogModel) =>
+      routeCanMatchVisibleCatalogModel(route, catalogModel.model ?? ""),
+    );
+    for (const catalogModel of routableCatalogModels) {
       const id = catalogModel.model?.trim();
       if (!id || byModel.has(id)) continue;
       byModel.set(
@@ -2357,27 +2385,12 @@ export function CodexRouterWorkspacePage({
           ) {
             continue;
           }
-          const normalizedRoutes = normalizeCodexRoutesForVisibleModelAliases(
+          const syncResult = syncCodexMultiRouterPlanWithProviders(
             plan,
-            routes,
             updatedRoutableProvidersById,
           );
-          const currentRouting = readCodexRouting(plan) ?? {};
-          const nextPlan: Provider = {
-            ...plan,
-            settingsConfig: {
-              ...plan.settingsConfig,
-              codexRouting: {
-                ...currentRouting,
-                routes: normalizedRoutes,
-              },
-              modelCatalog: buildModelCatalogForRoutes(
-                plan,
-                normalizedRoutes,
-                updatedRoutableProvidersById,
-              ),
-            },
-          };
+          if (!syncResult) continue;
+          const nextPlan = syncResult.plan;
           await providersApi.update(nextPlan, "codex");
           if (!isCurrentAttempt()) {
             return { status: "stale" };

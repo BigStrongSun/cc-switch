@@ -1269,6 +1269,82 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
     ]);
   });
 
+  it("does not expose provider catalog models that no saved route can match", () => {
+    const official: Provider = {
+      id: "codex-official",
+      name: "OpenAI Official",
+      category: "official",
+      settingsConfig: {
+        modelCatalog: { models: [{ model: "gpt-5.5" }] },
+      },
+      meta: { apiFormat: "openai_responses" },
+    };
+    const longnows: Provider = {
+      id: "codex-longnows",
+      name: "LongNows",
+      category: "custom",
+      settingsConfig: {
+        modelCatalog: {
+          models: [
+            { model: "claude-opus-4-8", contextWindow: 200000 },
+            {
+              model: "gpt-5.5-longnows-gpt",
+              upstreamModel: "gpt-5.5",
+              displayName: "LongNows GPT",
+              contextWindow: 272000,
+            },
+          ],
+        },
+      },
+      meta: { apiFormat: "openai_chat" },
+    };
+    const plan = createDraftRoutingPlan(
+      [official, longnows],
+      [official, longnows],
+    );
+    const routes = [
+      normalizeCodexRouteForSave(
+        {
+          id: "router-codex-official",
+          label: official.name,
+          targetProviderId: official.id,
+          match: { models: ["gpt-5.5"], prefixes: ["gpt"] },
+          upstream: { apiFormat: "openai_responses" },
+        },
+        0,
+        new Set<string>(),
+      ),
+      normalizeCodexRouteForSave(
+        {
+          id: "router-longnows-claude",
+          label: longnows.name,
+          targetProviderId: longnows.id,
+          match: { models: ["claude-opus-4-8"], prefixes: ["claude"] },
+          upstream: { apiFormat: "openai_chat" },
+        },
+        1,
+        new Set<string>(),
+      ),
+    ];
+
+    const catalog = buildModelCatalogForRoutes(
+      plan,
+      routes,
+      new Map([
+        [official.id, official],
+        [longnows.id, longnows],
+      ]),
+    );
+
+    expect(catalog.models.map((model) => model.model)).toEqual([
+      "gpt-5.5",
+      "claude-opus-4-8",
+    ]);
+    expect(
+      catalog.models.find((model) => model.model === "gpt-5.5-longnows-gpt"),
+    ).toBeUndefined();
+  });
+
   it("reads legacy array codexRouting without clearing routes", () => {
     const plan: Provider = {
       id: "codex-multirouter",
