@@ -1,5 +1,13 @@
 # CC Switch Repository Memory
 
+## 2026-07-03 CCSwitchMulti v3.16.4-9 GitHub Release Verification
+
+- `v3.16.4-9` 已推到 `BigStrongSun/ccswitchmulti` 并通过 GitHub Actions release run `28610511658`，head sha 为 `0e8b25cdd0cbfe8e2bff054b46850ce1c5215c0e`。该 run 覆盖 Linux x64、Linux ARM64、Windows x64、Windows ARM64、macOS universal、Publish GitHub Release 和 Assemble `latest.json`，全部成功。
+- 这次验证了 Windows ARM64 从 WiX MSI 切到 NSIS 的修复是有效的：release 资产包含 `CC-Switch-v3.16.4-9-Windows-arm64-Setup.exe`、`.sig` 和 `Windows-arm64-Portable.zip`，`latest.json` 的 `windows-aarch64.url` 也指向 `Windows-arm64-Setup.exe`。
+- macOS 会自动 build：workflow 的 `macos-14` job 会构建 `aarch64-apple-darwin` 与 `x86_64-apple-darwin` target，合成 universal `codex-history-repairer` sidecar，并执行 `pnpm tauri build --target universal-apple-darwin`。本次产物包含 `CC-Switch-v3.16.4-9-macOS.tar.gz`、`.sig` 和 `CC-Switch-v3.16.4-9-macOS.zip`，`latest.json` 同时给 `darwin-aarch64` / `darwin-x86_64` 指向同一个 universal updater tarball。
+- 本次没有发布 macOS `.dmg`，不是 macOS 自动 build 失败，而是 GitHub Actions 日志显示 `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID` 都为空，`APPLE_SIGNING_IDENTITY` 因此缺失。workflow 只在 Apple 签名/公证凭据齐全时生成并上传签名 DMG；缺凭据时只发布 updater tarball 和 app zip。后续如果要有正式 DMG，需要先补齐 Apple Developer ID 证书与 notarization secrets，或者明确决定上传未签名 Tauri 生成的 DMG。
+- 发布后校验：`gh api repos/BigStrongSun/ccswitchmulti/releases/latest` 返回 `tag_name=v3.16.4-9`、`draft=false`、`prerelease=false`；release 资产共 18 个，包含 `latest.json`，但不包含 `.dmg`。
+
 ## 2026-07-03 GitHub Release Windows ARM64 NSIS Fallback
 
 - `v3.16.4-8` tag 验证了上一轮 CI/Release 修复的大部分链路：main push CI 成功；Release 的 Linux x64、Linux ARM64、Windows x64 均成功；Windows ARM64 已成功交叉编译主程序和 `codex-history-repairer.exe` sidecar。
