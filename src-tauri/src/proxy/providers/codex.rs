@@ -676,17 +676,29 @@ fn find_codex_route_by_match_priority<'a>(
     routes: &'a [JsonValue],
     request_model: &str,
 ) -> Option<&'a JsonValue> {
-    routes
+    let exact_matches = routes
         .iter()
-        .find(|route| {
+        .filter(|route| {
             codex_route_is_enabled(route) && codex_route_has_exact_model_match(route, request_model)
         })
-        .or_else(|| {
-            routes.iter().find(|route| {
-                codex_route_is_enabled(route)
-                    && codex_route_has_prefix_model_match(route, request_model)
-            })
+        .collect::<Vec<_>>();
+    if exact_matches.len() > 1 {
+        let route_ids = exact_matches
+            .iter()
+            .filter_map(|route| route.get("id").and_then(|value| value.as_str()))
+            .collect::<Vec<_>>();
+        log::warn!(
+            "[Codex MultiRouter] ambiguous exact route match for model `{}`; route_ids={:?}; using the first enabled route by order. Save or refresh the plan to generate unique visible model aliases.",
+            request_model,
+            route_ids
+        );
+    }
+    exact_matches.into_iter().next().or_else(|| {
+        routes.iter().find(|route| {
+            codex_route_is_enabled(route)
+                && codex_route_has_prefix_model_match(route, request_model)
         })
+    })
 }
 
 /// 判断单条 Codex route 是否匹配请求模型。
@@ -2694,6 +2706,53 @@ experimental_bearer_token = "PROXY_MANAGED"
         assert_eq!(
             routed[1].settings_config["codexResolvedRouteMatched"],
             false
+        );
+    }
+
+    #[test]
+    fn test_codex_router_duplicate_exact_routes_remain_order_dependent() {
+        let provider = create_provider(json!({
+            "codexRouting": {
+                "routes": [
+                    {
+                        "id": "relay",
+                        "label": "Relay GPT",
+                        "targetProviderId": "relay-provider",
+                        "match": { "models": ["gpt-5.5"] },
+                        "upstream": {
+                            "apiFormat": "openai_chat",
+                            "auth": { "source": "provider_config" }
+                        }
+                    },
+                    {
+                        "id": "official",
+                        "label": "OpenAI Official",
+                        "targetProviderId": "codex-official",
+                        "match": { "models": ["gpt-5.5"] },
+                        "upstream": {
+                            "apiFormat": "openai_responses",
+                            "auth": { "source": "managed_codex_oauth" }
+                        }
+                    }
+                ],
+                "enabled": true
+            }
+        }));
+
+        let routed =
+            resolve_codex_model_routed_providers(&provider, &json!({ "model": "gpt-5.5" }));
+
+        assert_eq!(routed.len(), 2);
+        assert_eq!(
+            routed[0].id, "test::route::relay",
+            "相同可见模型名没有额外选择信息，只能按 route 顺序命中第一条；前端保存/同步必须生成唯一别名"
+        );
+        assert_eq!(routed[0].settings_config["codexResolvedRouteMatched"], true);
+        assert_eq!(routed[1].id, "test::route::official");
+        assert_eq!(
+            routed[1].settings_config["codexResolvedRouteMatched"],
+            true,
+            "diagnostic flag describes whether the route rule matches the model, not whether it was selected as primary"
         );
     }
 

@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-07-02 Codex MultiRouter Duplicate Exact Route Bidirectional Misroute
+
+- 多人同日下午反馈“中转 GPT 走到官方”和“官方 GPT 走到中转”时，不要只沿空 `modelCatalog` 单向清空 alias 的链路排查；双向错路由的运行时根因是同一个 MultiRouter plan 里多条 enabled route 同时声明相同 exact 可见模型名，例如官方和第三方中转都保存了 `match.models=["gpt-5.5"]`。Rust `find_codex_route_by_match_priority` 无法从同一个 `request.model` 判断用户意图，只能按 routes 数组顺序取第一条 exact match，所以 route 顺序不同会产生两个方向的错路由。
+- 真正修复边界在保存/同步层生成唯一可见模型名：官方/OAuth canonical source 保留原名，第三方/中转同上游模型必须变成 `gpt-5.5-<provider-suffix>` 这类 alias，并在 route 级 `upstream.modelMap` 写回 `{alias:"gpt-5.5"}`。`syncCodexMultiRouterPlanWithProviders` 现在先对当前 plan 实际引用的 provider 跑 `resolveWizardModelNameCollisions`，坏旧配置里 relay route 的裸 `gpt-5.5` 会被修成 `gpt-5.5-relay-gpt`；工作台 `handleSaveRoutingRoutes` 和 routes tab 自动刷新也会调用 `normalizeCodexRoutesForVisibleModelAliases` 修复手动编辑/旧配置绕过口。
+- 运行时只增加诊断防线：当多个 route exact 命中同一模型时，`codex.rs` 会写 warning，提示 `ambiguous exact route match`、route ids 和“按顺序取第一条”。不要试图在 runtime 靠 provider 类型猜用户想走哪条；没有唯一可见模型名时，用户侧的选择信息已经丢失。
+- 回归测试：`tests/lib/codexMultiRouterSync.test.ts` 覆盖 provider 同步修复官方/relay 同名 exact route；`src/components/codex/CodexRouterWorkspacePage.test.ts` 覆盖手动保存前修复重复 exact route；`src-tauri/src/proxy/providers/codex.rs` 的 `test_codex_router_duplicate_exact_routes_remain_order_dependent` 固定运行时顺序依赖和诊断语义。
+
 ## 2026-07-02 Codex MultiRouter Empty Catalog Relay GPT Misroute
 
 - 多人反馈“本来走第三方中转的 GPT 请求被路由去官方”时，先查 provider 保存后的 MultiRouter 同步结果：`settingsConfig.codexRouting.routes[].match.models` 是否被清空、第三方 route 的 `upstream.modelMap` 是否丢失、聚合 `modelCatalog.models` 是否还包含 `gpt-*-relay` 这类可见别名。

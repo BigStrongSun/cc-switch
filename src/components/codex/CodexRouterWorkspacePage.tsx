@@ -364,13 +364,17 @@ type CodexCatalogModelDraft = {
 };
 
 /// 读取 catalog 条目的真实上游模型名；未配置别名映射时，上游模型名就是可见模型名。
-function catalogDraftUpstreamModel(
-  model: Pick<
-    CodexCatalogModelDraft,
-    "model" | "upstreamModel" | "upstream_model"
-  >,
-): string {
-  return (model.upstreamModel ?? model.upstream_model ?? model.model).trim();
+function catalogDraftUpstreamModel(model: {
+  model?: string;
+  upstreamModel?: string;
+  upstream_model?: string;
+}): string {
+  return (
+    model.upstreamModel ??
+    model.upstream_model ??
+    model.model ??
+    ""
+  ).trim();
 }
 
 type CodexModelCatalogDraft = {
@@ -1405,6 +1409,127 @@ export function normalizeCodexRouteForSave(
   };
 }
 
+/// 建立当前方案里已有 catalog 的索引；修复旧 route 时用它找回可见名背后的真实上游模型。
+function buildExistingCatalogByModel(
+  plan: Provider,
+): Map<string, CodexCatalogModelDraft> {
+  const existingCatalog = plan.settingsConfig?.modelCatalog;
+  const existingModels = Array.isArray(existingCatalog?.models)
+    ? (existingCatalog.models as CodexCatalogModelDraft[])
+    : [];
+  const existingModelById = new Map<string, CodexCatalogModelDraft>();
+  for (const model of existingModels) {
+    const id = model.model?.trim();
+    if (id) existingModelById.set(id, model);
+  }
+  return existingModelById;
+}
+
+/// 解析 route 中某个可见模型真正要发给上游的模型名；route modelMap 优先于聚合 catalog。
+function routeModelUpstreamForAliasRepair(
+  route: CodexRoute,
+  visibleModel: string,
+  existingModelById: Map<string, CodexCatalogModelDraft>,
+): string {
+  const catalogModel = existingModelById.get(visibleModel);
+  return (
+    route.upstream?.modelMap?.[visibleModel] ??
+    catalogModel?.upstreamModel ??
+    catalogModel?.upstream_model ??
+    visibleModel
+  ).trim();
+}
+
+/// 手动保存 routes 前按 collision-resolved provider catalog 修复可见模型名。
+///
+/// 运行时只能根据 `request.model` 字符串匹配 route；如果官方和中转同时保存
+/// `gpt-*` 这类同名 exact match，就会按 route 顺序抢路由。这里在保存前把非
+/// canonical provider 的可见模型改成稳定别名，并同步写回 route 级 modelMap。
+export function normalizeCodexRoutesForVisibleModelAliases(
+  plan: Provider,
+  routes: CodexRoute[],
+  providersById: Map<string, Provider>,
+): CodexRoute[] {
+  const existingModelById = buildExistingCatalogByModel(plan);
+  return routes.map((route) => {
+    const targetProvider = routeTargetProvider(route, providersById);
+    const targetCatalogModels = targetProvider
+      ? readCodexModelCatalog(targetProvider).models
+      : [];
+    if (!targetProvider || targetCatalogModels.length === 0) return route;
+
+    const targetModelByUpstream = new Map<
+      string,
+      CodexCatalogModel | CodexCatalogModelDraft
+    >();
+    const targetModelByVisible = new Map<
+      string,
+      CodexCatalogModel | CodexCatalogModelDraft
+    >();
+    for (const model of targetCatalogModels) {
+      const visible = model.model?.trim();
+      if (!visible) continue;
+      targetModelByVisible.set(visible, model);
+      const upstream = catalogDraftUpstreamModel(model);
+      if (upstream && !targetModelByUpstream.has(upstream)) {
+        targetModelByUpstream.set(upstream, model);
+      }
+    }
+
+    const nextModels: string[] = [];
+    for (const visibleModel of route.match?.models ?? []) {
+      const trimmedVisible = visibleModel.trim();
+      if (!trimmedVisible) continue;
+      const upstream = routeModelUpstreamForAliasRepair(
+        route,
+        trimmedVisible,
+        existingModelById,
+      );
+      const targetModel =
+        targetModelByUpstream.get(upstream) ??
+        targetModelByVisible.get(trimmedVisible);
+      const nextVisible = targetModel?.model?.trim() ?? trimmedVisible;
+      if (nextVisible && !nextModels.includes(nextVisible)) {
+        nextModels.push(nextVisible);
+      }
+    }
+
+    const nextModelMapEntries = nextModels
+      .map((visibleModel) => {
+        const targetModel = targetModelByVisible.get(visibleModel);
+        const upstream = targetModel
+          ? catalogDraftUpstreamModel(targetModel)
+          : routeModelUpstreamForAliasRepair(
+              route,
+              visibleModel,
+              existingModelById,
+            );
+        return upstream && upstream !== visibleModel
+          ? [visibleModel, upstream]
+          : null;
+      })
+      .filter((entry): entry is [string, string] => Boolean(entry));
+    const nextModelMap =
+      nextModelMapEntries.length > 0
+        ? Object.fromEntries(nextModelMapEntries)
+        : undefined;
+    const { modelMap: _modelMap, ...upstreamWithoutModelMap } =
+      route.upstream ?? {};
+
+    return {
+      ...route,
+      match: {
+        ...(route.match ?? {}),
+        models: nextModels,
+      },
+      upstream: {
+        ...upstreamWithoutModelMap,
+        ...(nextModelMap ? { modelMap: nextModelMap } : {}),
+      },
+    };
+  });
+}
+
 /// route 能力比 provider catalog 更接近最终路由结果；写入聚合 catalog，确保 Codex 看到的模型能力与规则一致。
 function applyRouteCapabilitiesToCatalogModel(
   model: CodexCatalogModelDraft,
@@ -1427,14 +1552,7 @@ export function buildModelCatalogForRoutes(
   providersById: Map<string, Provider>,
 ): CodexModelCatalogDraft {
   const existingCatalog = plan.settingsConfig?.modelCatalog;
-  const existingModels = Array.isArray(existingCatalog?.models)
-    ? (existingCatalog.models as CodexCatalogModelDraft[])
-    : [];
-  const existingModelById = new Map<string, CodexCatalogModelDraft>();
-  for (const model of existingModels) {
-    const id = model.model?.trim();
-    if (id) existingModelById.set(id, model);
-  }
+  const existingModelById = buildExistingCatalogByModel(plan);
 
   const byModel = new Map<string, CodexCatalogModelDraft>();
   for (const route of routes) {
@@ -2239,13 +2357,23 @@ export function CodexRouterWorkspacePage({
           ) {
             continue;
           }
+          const normalizedRoutes = normalizeCodexRoutesForVisibleModelAliases(
+            plan,
+            routes,
+            updatedRoutableProvidersById,
+          );
+          const currentRouting = readCodexRouting(plan) ?? {};
           const nextPlan: Provider = {
             ...plan,
             settingsConfig: {
               ...plan.settingsConfig,
+              codexRouting: {
+                ...currentRouting,
+                routes: normalizedRoutes,
+              },
               modelCatalog: buildModelCatalogForRoutes(
                 plan,
-                routes,
+                normalizedRoutes,
                 updatedRoutableProvidersById,
               ),
             },
@@ -2529,11 +2657,16 @@ export function CodexRouterWorkspacePage({
   async function handleSaveRoutingRoutes(plan: Provider, routes: CodexRoute[]) {
     const currentRouting = readCodexRouting(plan) ?? {};
     const usedRouteIds = new Set<string>();
-    const normalizedRoutes = dedupeCodexRoutesBySemanticProvider(
+    const normalizedRouteDrafts = dedupeCodexRoutesBySemanticProvider(
       routes.map((route, index) =>
         normalizeCodexRouteForSave(route, index, usedRouteIds),
       ),
       routableModelSources,
+    );
+    const normalizedRoutes = normalizeCodexRoutesForVisibleModelAliases(
+      plan,
+      normalizedRouteDrafts,
+      routableProvidersById,
     );
     const enabledRouteIds = normalizedRoutes
       .filter((route) => route.enabled !== false)

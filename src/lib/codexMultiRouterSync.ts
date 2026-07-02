@@ -5,7 +5,10 @@ import type {
   CodexRoutingRoute,
   Provider,
 } from "@/types";
-import { isCodexMultiRouterPlan } from "@/lib/codexMultiRouterWizard";
+import {
+  isCodexMultiRouterPlan,
+  resolveWizardModelNameCollisions,
+} from "@/lib/codexMultiRouterWizard";
 import { readCodexModelCatalog } from "@/utils/codexSpawnAgentCandidates";
 
 // MultiRouter 同步返回写回后的 plan，以及需要用户人工补选的子 Agent 候选删减。
@@ -156,7 +159,14 @@ function buildSyncedRouteModels(
   return targetModels
     .map((sourceModel) => {
       const upstream = catalogModelUpstreamId(sourceModel);
-      const visible = visibleByUpstream.get(upstream) ?? sourceModel.model;
+      const existingVisible = visibleByUpstream.get(upstream);
+      // 如果旧 route 已经有自定义别名则继续保留；如果旧坏配置把非官方中转也写成
+      // 原始 upstream 名，则以 collision-resolved provider catalog 为准生成唯一可见名。
+      const visible =
+        existingVisible &&
+        (existingVisible !== upstream || sourceModel.model === upstream)
+          ? existingVisible
+          : sourceModel.model;
       const existingVisibleModel = planCatalogByModel.get(visible);
       const displayName =
         existingVisibleModel?.displayName ??
@@ -262,6 +272,30 @@ function rebuildPlanModelCatalog(
   };
 }
 
+// 按当前 plan 实际引用的 provider 重算一次别名目录；只有参与同一个 MultiRouter
+// 方案的模型源才需要互相避让，避免无关 provider 的同名模型影响当前方案。
+function buildRoutableProvidersByRoute(
+  routes: CodexRoutingRoute[],
+  providersById: Map<string, Provider>,
+): Map<string, Provider> {
+  const targetProviders: Provider[] = [];
+  const seenProviderIds = new Set<string>();
+  for (const route of routes) {
+    const targetId = routeTargetProviderId(route);
+    if (!targetId || seenProviderIds.has(targetId)) continue;
+    const provider = providersById.get(targetId);
+    if (!provider) continue;
+    seenProviderIds.add(targetId);
+    targetProviders.push(provider);
+  }
+  return new Map(
+    resolveWizardModelNameCollisions(targetProviders).map((provider) => [
+      provider.id,
+      provider,
+    ]),
+  );
+}
+
 // 用最新 provider modelCatalog 重算单个 MultiRouter plan；返回 null 表示没有实际变化。
 export function syncCodexMultiRouterPlanWithProviders(
   plan: Provider,
@@ -273,10 +307,21 @@ export function syncCodexMultiRouterPlanWithProviders(
   const routes = routing?.routes ?? [];
   if (!isCodexMultiRouterPlan(plan) || routes.length === 0) return null;
 
+  const routableProvidersById = buildRoutableProvidersByRoute(
+    routes,
+    providersById,
+  );
+  const syncedProvidersById = new Map(providersById);
+  for (const [providerId, provider] of routableProvidersById) {
+    syncedProvidersById.set(providerId, provider);
+  }
+
   let changed = false;
   const nextRoutes = routes.map((route) => {
     const targetId = routeTargetProviderId(route);
-    const targetProvider = targetId ? providersById.get(targetId) : undefined;
+    const targetProvider = targetId
+      ? syncedProvidersById.get(targetId)
+      : undefined;
     if (!targetProvider) return route;
 
     const targetModels = readStrictProviderCatalogModels(targetProvider);
@@ -316,7 +361,7 @@ export function syncCodexMultiRouterPlanWithProviders(
   });
 
   const { modelCatalog: nextModelCatalog, removedSpawnAgentModels } =
-    rebuildPlanModelCatalog(plan, nextRoutes, providersById);
+    rebuildPlanModelCatalog(plan, nextRoutes, syncedProvidersById);
   const catalogChanged =
     JSON.stringify(plan.settingsConfig?.modelCatalog ?? null) !==
     JSON.stringify(nextModelCatalog);

@@ -18,6 +18,7 @@ import {
   isRoutingPlan,
   mergeRoutePickerDraftIds,
   normalizeCodexRouteForSave,
+  normalizeCodexRoutesForVisibleModelAliases,
   readCodexRouting,
   validateProxyListenDraft,
 } from "./CodexRouterWorkspacePage";
@@ -1184,6 +1185,88 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
     expect(relayRoute?.upstream?.modelMap).toEqual({
       "gpt-5.5-relay-gpt": "gpt-5.5",
     });
+  });
+
+  it("repairs duplicate exact route models before saving manual routes", () => {
+    const official: Provider = {
+      id: "codex-official",
+      name: "OpenAI Official",
+      category: "official",
+      settingsConfig: {
+        modelCatalog: { models: [{ model: "gpt-5.5" }] },
+      },
+      meta: { apiFormat: "openai_responses" },
+    };
+    const relay: Provider = {
+      id: "codex-relay-gpt",
+      name: "Relay GPT",
+      category: "custom",
+      settingsConfig: {
+        modelCatalog: {
+          models: [
+            {
+              model: "gpt-5.5-relay-gpt",
+              displayName: "Relay GPT 5.5",
+              upstreamModel: "gpt-5.5",
+            },
+          ],
+        },
+      },
+      meta: { apiFormat: "openai_chat" },
+    };
+    const plan = createDraftRoutingPlan([official, relay], [official, relay]);
+    const usedRouteIds = new Set<string>();
+    const badRoutes = [
+      normalizeCodexRouteForSave(
+        {
+          id: "router-official",
+          label: official.name,
+          targetProviderId: official.id,
+          match: { models: ["gpt-5.5"], prefixes: ["gpt"] },
+          upstream: { apiFormat: "openai_responses" },
+        },
+        0,
+        usedRouteIds,
+      ),
+      normalizeCodexRouteForSave(
+        {
+          id: "router-relay",
+          label: relay.name,
+          targetProviderId: relay.id,
+          match: { models: ["gpt-5.5"], prefixes: ["gpt"] },
+          upstream: { apiFormat: "openai_chat" },
+        },
+        1,
+        usedRouteIds,
+      ),
+    ];
+
+    const normalizedRoutes = normalizeCodexRoutesForVisibleModelAliases(
+      plan,
+      badRoutes,
+      new Map([
+        [official.id, official],
+        [relay.id, relay],
+      ]),
+    );
+    const catalog = buildModelCatalogForRoutes(
+      plan,
+      normalizedRoutes,
+      new Map([
+        [official.id, official],
+        [relay.id, relay],
+      ]),
+    );
+
+    expect(normalizedRoutes[0].match?.models).toEqual(["gpt-5.5"]);
+    expect(normalizedRoutes[1].match?.models).toEqual(["gpt-5.5-relay-gpt"]);
+    expect(normalizedRoutes[1].upstream?.modelMap).toEqual({
+      "gpt-5.5-relay-gpt": "gpt-5.5",
+    });
+    expect(catalog.models.map((model) => model.model)).toEqual([
+      "gpt-5.5",
+      "gpt-5.5-relay-gpt",
+    ]);
   });
 
   it("reads legacy array codexRouting without clearing routes", () => {
