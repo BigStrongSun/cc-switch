@@ -79,6 +79,11 @@ import {
   extractCodexExperimentalBearerToken,
   getCodexBaseUrl,
 } from "@/utils/providerConfigUtils";
+import {
+  codexCatalogOnlyPlanModelFetchMessage,
+  codexPlanModelListAction,
+  isCodexCatalogOnlyPlanModelFetch,
+} from "@/utils/codexPlanModelFetch";
 import type { Provider } from "@/types";
 import type { RequestLog } from "@/types/usage";
 import type {
@@ -322,6 +327,9 @@ type ProviderModelFetchConfig = {
   apiKey: string;
   isFullUrl: boolean;
   customUserAgent?: string;
+  volcengineModelListAction?: string;
+  volcengineAccessKeyId?: string;
+  volcengineSecretAccessKey?: string;
   skipReason?: string;
 };
 
@@ -394,6 +402,9 @@ function buildProviderModelRefreshAttemptKey(
     hashSensitiveAttemptPart(fetchConfig.apiKey),
     fetchConfig.isFullUrl,
     fetchConfig.customUserAgent ?? "",
+    fetchConfig.volcengineModelListAction ?? "",
+    hashSensitiveAttemptPart(fetchConfig.volcengineAccessKeyId ?? ""),
+    hashSensitiveAttemptPart(fetchConfig.volcengineSecretAccessKey ?? ""),
   ].join("|");
 }
 
@@ -446,6 +457,15 @@ function getProviderModelFetchConfig(
       getCodexBaseUrl(provider) ??
       "",
   ).trim();
+  const planFetchSource = {
+    baseUrl,
+    partnerPromotionKey: provider.meta?.partnerPromotionKey,
+    providerName: provider.name,
+    accessKeyId: provider.meta?.usage_script?.accessKeyId,
+    secretAccessKey: provider.meta?.usage_script?.secretAccessKey,
+  };
+  const planModelListAction = codexPlanModelListAction(planFetchSource);
+  const isCatalogOnlyPlan = isCodexCatalogOnlyPlanModelFetch(planFetchSource);
   const apiKey = String(
     auth.OPENAI_API_KEY ??
       settings.apiKey ??
@@ -475,7 +495,21 @@ function getProviderModelFetchConfig(
       skipReason: "缺少 Base URL，无法读取模型列表。",
     };
   }
-  if (!apiKey) {
+  if (isCatalogOnlyPlan) {
+    const hasModelCatalog = readCodexModelCatalog(provider).models.some(
+      (model) => (model.model ?? "").trim(),
+    );
+    return {
+      baseUrl,
+      apiKey,
+      isFullUrl: false,
+      skipReason: codexCatalogOnlyPlanModelFetchMessage(
+        hasModelCatalog,
+        planFetchSource,
+      ),
+    };
+  }
+  if (!apiKey && !planModelListAction) {
     return {
       baseUrl,
       apiKey,
@@ -494,6 +528,13 @@ function getProviderModelFetchConfig(
         : typeof settings.customUserAgent === "string"
           ? settings.customUserAgent
           : undefined,
+    ...(planModelListAction
+      ? {
+          volcengineModelListAction: planModelListAction,
+          volcengineAccessKeyId: planFetchSource.accessKeyId,
+          volcengineSecretAccessKey: planFetchSource.secretAccessKey,
+        }
+      : {}),
   };
 }
 
@@ -2146,6 +2187,13 @@ export function CodexRouterWorkspacePage({
           fetchConfig.isFullUrl,
           undefined,
           fetchConfig.customUserAgent,
+          fetchConfig.volcengineModelListAction
+            ? {
+                action: fetchConfig.volcengineModelListAction,
+                accessKeyId: fetchConfig.volcengineAccessKeyId ?? "",
+                secretAccessKey: fetchConfig.volcengineSecretAccessKey ?? "",
+              }
+            : undefined,
         );
         if (!isCurrentAttempt()) {
           return { status: "stale" };

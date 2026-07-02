@@ -774,6 +774,71 @@ describe("Codex MultiRouter workspace route persistence helpers", () => {
     );
   });
 
+  it("uses Volcengine OpenAPI when the routes page refreshes AgentPlan models", async () => {
+    vi.mocked(fetchModelsForConfig).mockResolvedValueOnce([
+      { id: "ark-code-latest", ownedBy: "volcengine", contextWindow: 262144 },
+    ]);
+    const provider: Provider = {
+      id: "codex-volcengine-agentplan",
+      name: "火山 AgentPlan",
+      category: "custom",
+      meta: {
+        partnerPromotionKey: "volcengine_agentplan",
+        usage_script: {
+          enabled: true,
+          language: "javascript",
+          code: "",
+          accessKeyId: "ak-route-refresh",
+          secretAccessKey: "sk-route-refresh",
+        },
+      },
+      settingsConfig: {
+        baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3",
+        auth: {},
+        modelCatalog: { models: [{ model: "old-agentplan-model" }] },
+      },
+    };
+    const plan = createDraftRoutingPlan([provider], [provider]);
+
+    renderWorkspace(
+      React.createElement(CodexRouterWorkspacePage, {
+        providers: [provider, plan],
+        isProxyRunning: true,
+        isCodexTakeoverActive: true,
+        activeProviderId: plan.id,
+        initialProviderId: plan.id,
+        initialTab: "routes",
+        onEditProvider: vi.fn(),
+        onDeletePlan: vi.fn(),
+        onCreateProvider: vi.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(fetchModelsForConfig).toHaveBeenCalledTimes(1));
+    expect(fetchModelsForConfig).toHaveBeenCalledWith(
+      "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "",
+      false,
+      undefined,
+      undefined,
+      {
+        action: "ListArkAgentPlanModel",
+        accessKeyId: "ak-route-refresh",
+        secretAccessKey: "sk-route-refresh",
+      },
+    );
+    await waitFor(() =>
+      expect(
+        vi.mocked(providersApi.update).mock.calls.some(([savedProvider]) => {
+          if (savedProvider.id !== provider.id) return false;
+          return JSON.stringify(savedProvider.settingsConfig).includes(
+            "ark-code-latest",
+          );
+        }),
+      ).toBe(true),
+    );
+  });
+
   it("does not force the workspace back to routes after the initial jump is consumed", async () => {
     const source: Provider = {
       id: "codex-qwen",

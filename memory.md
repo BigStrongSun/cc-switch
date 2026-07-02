@@ -5,6 +5,7 @@
 - 用户截图里的“目前火山引擎 Agentplan 获取不到模型”不是 API Key、网络或 `/models` 候选顺序的单点问题。火山 Agent Plan 的模型枚举文档是 `ListArkAgentPlanModel - 查询 Agent Plan 支持的模型列表`，在 `Agent Plan API` 管控面下；同页导航还有独立的 `ListArkCodingPlanModel - 查询 Coding Plan 支持的模型列表`。这类接口不是数据面 `https://ark.cn-beijing.volces.com/api/coding/v3/models` 或 OpenAI `/v1/models`。
 - `origin/main`（2026-07-02 fetch 后为 `8d1b3306d09a27b9d8fc29694791d8421aba5f93`）没有修复 AgentPlan 专用模型枚举：全树无 `ListArkAgentPlanModel` / `ListArkCodingPlanModel`，只有通用 `/models` URL 候选和 UA 透传修正。不要把原版的通用 `model_fetch` 修复误判成火山 AgentPlan 支持。
 - 纠偏：不要把“不能走 OpenAI `/models`”等价成“只能 catalog-only”。火山 AgentPlan 有火山 AK/SK（存在 `meta.usage_script.accessKeyId` / `secretAccessKey`）时，应通过 `open.volcengineapi.com` 的 `ListArkAgentPlanModel` 管控面 OpenAPI 获取模型列表，并解析 `Result.Datas[].ModelID`。缺 AK/SK、鉴权失败、网络/解析失败时才保留内置 `modelCatalog` 作为回退。
+- 举一反三边界：AgentPlan 的“推理调用”仍是 OpenAI-compatible Chat/Responses 数据面，但“模型枚举”不是同一个接口。Provider 表单、MultiRouter 新向导、已保存路由页自动刷新三条入口都必须复用 plan-aware 获取逻辑；如果只修前两条，路由页进入 `routes` tab 时仍会用普通 `/models`，导致火山 AgentPlan 回归失败。自动刷新去重 key 也要把 OpenAPI action 与 AK/SK 的短哈希纳入比较，避免换 AK/SK 后复用旧失败状态。
 - BytePlus 仍保持 catalog 回退，直到找到可验证的 BytePlus 专用模型列表接口契约；不要把 BytePlus 未证实地并入火山 CN OpenAPI。
 - 不要通过把 `/api/coding/v3` 剥离成 `https://ark.cn-beijing.volces.com/v1/models` 之类猜测端点来“修复”。那只是换一个未证实的 OpenAI-compatible URL，和官方 `ListArkAgentPlanModel` 管控面边界不一致，容易把真实根因掩盖成另一个 404。
 
