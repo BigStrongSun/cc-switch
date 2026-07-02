@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-07-03 GitHub Release Body Must Use CCSwitchMulti Notes
+
+- Release tag 本身应继续使用推送的 fork tag（例如 `v3.16.4-11`），不要从 upstream/origin 取原版 tag 或 release 文案。`release.yml` 的 `tag_name: ${{ github.ref_name }}` 是正确边界。
+- 旧 GitHub build release 的问题不是 tag 错，而是 Release name/body 仍是泛模板 `CC Switch <tag>` 和下载说明，缺少 CCSwitchMulti 的功能更新和 bug 修复内容。
+- 修复边界：`Publish GitHub Release` job 必须 checkout 仓库，生成 `release-body.md`，优先读取 `docs/release-notes/${tag}-zh.md`，再追加下载资产说明；`softprops/action-gh-release` 使用 `name: CCSwitchMulti ${tag}` 和 `body_path: release-body.md`。
+- `v3.16.4-11` 当前 GitHub release 已手动更新为 `CCSwitchMulti v3.16.4-11`，正文包含功能更新、Bug 修复、继承的核心产品修复、验证和下载说明。后续新 tag 会由 workflow 自动使用同样规则。
+
 ## 2026-07-03 CCSwitchMulti v3.16.4-11 GitHub Release Verification
 
 - `v3.16.4-11` 已作为 BigStrongSun/ccswitchmulti 的正式 release 发布并通过 GitHub Actions release run `28616009981`，head sha 为 `8e93cd6df6b7737c3420a5b6861de41992449ca8`。五个平台 build、Publish GitHub Release、Assemble `latest.json` 全部成功。

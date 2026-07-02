@@ -708,6 +708,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v6
+
       - name: Download built release artifacts
         uses: actions/download-artifact@v8
         with:
@@ -721,31 +724,48 @@ jobs:
           set -euo pipefail
           ls -la release-assets
 
+      - name: Generate release body
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          NOTE_PATH="docs/release-notes/${TAG}-zh.md"
+          {
+            if [ -f "$NOTE_PATH" ]; then
+              cat "$NOTE_PATH"
+            else
+              echo "# CCSwitchMulti ${TAG}"
+              echo
+              echo "本版本由 GitHub Release workflow 自动发布。"
+            fi
+            cat <<EOF
+
+          ## 下载
+
+          - **macOS**: \`CC-Switch-${TAG}-macOS.dmg\`（未配置 Apple 签名时为未签名版）或 \`CC-Switch-${TAG}-macOS.zip\`（解压即用）
+          - **Windows (x86_64)**: \`CC-Switch-${TAG}-Windows-Setup.exe\`（安装版）或 \`CC-Switch-${TAG}-Windows-Portable.zip\`（绿色版）
+          - **Windows (ARM64)**: \`CC-Switch-${TAG}-Windows-arm64-Setup.exe\`（安装版）或 \`CC-Switch-${TAG}-Windows-arm64-Portable.zip\`（绿色版）
+          - **Linux (x86_64)**: \`CC-Switch-${TAG}-Linux-x86_64.AppImage\` / \`.deb\` / \`.rpm\`
+          - **Linux (ARM64)**: \`CC-Switch-${TAG}-Linux-arm64.AppImage\` / \`.deb\` / \`.rpm\`
+
+          > \`.tar.gz\` 为 Tauri updater 自动更新专用，无需手动下载。
+
+          ---
+
+          🌐 **Only Official Website / 唯一官方网站 / 唯一の公式サイト**: [ccswitch.io](https://ccswitch.io)
+
+          macOS DMG 在仓库配置 Apple 签名和公证密钥时会签名并公证；未配置时发布 Tauri 生成的未签名 DMG、updater tarball 和 app zip。
+          EOF
+          } > release-body.md
+          cat release-body.md
+
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
-          name: CC Switch ${{ github.ref_name }}
+          name: CCSwitchMulti ${{ github.ref_name }}
           prerelease: false
-          body: |
-            ## CC Switch ${{ github.ref_name }}
-
-            🌐 **Only Official Website / 唯一官方网站 / 唯一の公式サイト**: [ccswitch.io](https://ccswitch.io)
-
-            Claude Code 供应商切换工具
-
-            ### 下载
-
-            - **macOS**: `CC-Switch-${{ github.ref_name }}-macOS.dmg`（未配置 Apple 签名时为未签名版）或 `CC-Switch-${{ github.ref_name }}-macOS.zip`（解压即用）
-            - **Windows (x86_64)**: `CC-Switch-${{ github.ref_name }}-Windows-Setup.exe`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-Portable.zip`（绿色版）
-            - **Windows (ARM64)**: `CC-Switch-${{ github.ref_name }}-Windows-arm64-Setup.exe`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-arm64-Portable.zip`（绿色版）
-            - **Linux (x86_64)**: `CC-Switch-${{ github.ref_name }}-Linux-x86_64.AppImage` / `.deb` / `.rpm`
-            - **Linux (ARM64)**: `CC-Switch-${{ github.ref_name }}-Linux-arm64.AppImage` / `.deb` / `.rpm`
-
-            > `.tar.gz` 为 Tauri updater 自动更新专用，无需手动下载。
-
-            ---
-            macOS DMG 在仓库配置 Apple 签名和公证密钥时会签名并公证；未配置时发布 Tauri 生成的未签名 DMG、updater tarball 和 app zip。
+          body_path: release-body.md
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
