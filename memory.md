@@ -1,5 +1,12 @@
 # CC Switch Repository Memory
 
+## 2026-07-03 GitHub Release Windows ARM64 NSIS Fallback
+
+- `v3.16.4-8` tag 验证了上一轮 CI/Release 修复的大部分链路：main push CI 成功；Release 的 Linux x64、Linux ARM64、Windows x64 均成功；Windows ARM64 已成功交叉编译主程序和 `codex-history-repairer.exe` sidecar。
+- 新失败点仍在 Windows ARM64 安装包阶段：x64 `windows-2022` runner 上执行 `pnpm tauri build --target aarch64-pc-windows-msvc --bundles msi` 时，主程序已构建到 `src-tauri/target/aarch64-pc-windows-msvc/release/cc-switch.exe`，但 WiX v3 `light.exe` 在 `Running light to produce ..._arm64_en-US.msi` 后失败，日志只有 `failed to run ...\WixTools314\light.exe`。这说明把 ARM64 从 `windows-11-arm` 挪到 x64 runner 只能解决 runner 环境启动问题，不能保证 WiX3 ARM64 MSI 打包可靠。
+- 修复边界：Windows ARM64 release 不再强制产 MSI，改成 x64 runner 交叉编译 `aarch64-pc-windows-msvc` 后用 NSIS 生成 `CC-Switch-v*-Windows-arm64-Setup.exe`，同时继续产出 `Windows-arm64-Portable.zip`。MSI 只作为兼容旧发布的可选资产，缺失不再阻塞 Release。
+- 相关 workflow 不变量：`assemble-latest-json` 已支持 `*-Windows-arm64-Setup.exe` 映射到 `windows-aarch64`；`Prepare Windows Assets` 必须先收集 NSIS 并要求签名，再把 MSI 作为可选附加资产；GitHub Release 下载文案必须写 ARM64 `Setup.exe` 而不是 `.msi`。
+
 ## 2026-07-03 GitHub Flow CI/Release Failure Root Fix
 
 - `v3.16.4-7` 推到 `BigStrongSun/ccswitchmulti` 后 GitHub Actions 有两类真实失败：CI 的 `Backend Checks` 卡在 Rust Clippy，Release 的 Windows 打包卡在 Windows 资产构建。不要把它归因为 GitHub 本身抽风，也不要只重跑 workflow。

@@ -20,8 +20,9 @@ jobs:
       matrix:
         include:
           - os: windows-2022
-          # GitHub 的 Windows ARM64 runner 能编译主程序，但 WiX v3 light.exe 在该
-          # 环境中无法可靠启动；ARM64 安装包改由 x64 Windows runner 交叉打包。
+          # GitHub 的 Windows ARM64 runner 能编译主程序，但 WiX v3 light.exe 在
+          # ARM64 runner 和 x64 cross-build 两条路径上都不稳定；ARM64 改由 x64
+          # Windows runner 交叉编译主程序，并使用 NSIS 生成安装包。
           - os: windows-2022
             arch: arm64
           - os: ubuntu-22.04
@@ -320,7 +321,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:WINDOWS_RELEASE_ARCH -eq 'arm64') {
-            pnpm tauri build --target aarch64-pc-windows-msvc --bundles msi
+            pnpm tauri build --target aarch64-pc-windows-msvc --bundles nsis
           } else {
             pnpm tauri build --bundles nsis
           }
@@ -530,7 +531,28 @@ jobs:
           $targetRoot = if ($isArm64) { 'src-tauri/target/aarch64-pc-windows-msvc/release' } else { 'src-tauri/target/release' }
           $assetSuffix = if ($isArm64) { '-arm64' } else { '' }
 
-          # 仅 ARM64 继续使用 MSI；x64 使用 NSIS，避免 GitHub Windows runner 上 WiX light.exe 间歇失败。
+          $nsis = Get-ChildItem -Path (Join-Path $targetRoot 'bundle/nsis') -Recurse -Include *.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -ne $nsis) {
+            $dest = "CC-Switch-$VERSION-Windows$assetSuffix-Setup.exe"
+            Copy-Item $nsis.FullName (Join-Path release-assets $dest)
+            Write-Host "NSIS installer copied: $dest"
+            $sigPath = "$($nsis.FullName).sig"
+            if (Test-Path $sigPath) {
+              Copy-Item $sigPath (Join-Path release-assets ("$dest.sig"))
+              Write-Host "Signature copied: $dest.sig"
+            } elseif (-not $isArm64) {
+              Write-Warning "Signature not found for $($nsis.Name)"
+            } else {
+              throw "Signature not found for $($nsis.Name)"
+            }
+          } elseif (-not $isArm64) {
+            throw 'No Windows x64 NSIS installer found'
+          } else {
+            throw 'No Windows ARM64 NSIS installer found'
+          }
+
+          # MSI 是兼容旧发布的可选资产。Windows ARM64 不再强制产 MSI，因为 WiX v3
+          # light.exe 在 GitHub hosted runner 上对 ARM64 MSI 仍会失败。
           $msi = Get-ChildItem -Path (Join-Path $targetRoot 'bundle/msi') -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($null -eq $msi) {
             # 兜底：全局搜索 .msi
@@ -549,26 +571,8 @@ jobs:
             } else {
               Write-Warning "Signature not found for $($msi.Name)"
             }
-          } elseif ($isArm64) {
-            throw 'No Windows ARM64 MSI installer found'
           } else {
-            Write-Warning 'No Windows MSI installer found'
-          }
-
-          $nsis = Get-ChildItem -Path (Join-Path $targetRoot 'bundle/nsis') -Recurse -Include *.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($null -ne $nsis) {
-            $dest = "CC-Switch-$VERSION-Windows$assetSuffix-Setup.exe"
-            Copy-Item $nsis.FullName (Join-Path release-assets $dest)
-            Write-Host "NSIS installer copied: $dest"
-            $sigPath = "$($nsis.FullName).sig"
-            if (Test-Path $sigPath) {
-              Copy-Item $sigPath (Join-Path release-assets ("$dest.sig"))
-              Write-Host "Signature copied: $dest.sig"
-            } elseif (-not $isArm64) {
-              Write-Warning "Signature not found for $($nsis.Name)"
-            }
-          } elseif (-not $isArm64) {
-            throw 'No Windows x64 NSIS installer found'
+            Write-Warning 'No Windows MSI installer found; NSIS installer was already collected'
           }
 
           # 绿色版（portable）：仅可执行文件打 zip（不参与 Updater）
@@ -718,7 +722,7 @@ jobs:
 
             - **macOS**: `CC-Switch-${{ github.ref_name }}-macOS.dmg`（推荐）或 `CC-Switch-${{ github.ref_name }}-macOS.zip`（解压即用）
             - **Windows (x86_64)**: `CC-Switch-${{ github.ref_name }}-Windows-Setup.exe`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-Portable.zip`（绿色版）
-            - **Windows (ARM64)**: `CC-Switch-${{ github.ref_name }}-Windows-arm64.msi`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-arm64-Portable.zip`（绿色版）
+            - **Windows (ARM64)**: `CC-Switch-${{ github.ref_name }}-Windows-arm64-Setup.exe`（安装版）或 `CC-Switch-${{ github.ref_name }}-Windows-arm64-Portable.zip`（绿色版）
             - **Linux (x86_64)**: `CC-Switch-${{ github.ref_name }}-Linux-x86_64.AppImage` / `.deb` / `.rpm`
             - **Linux (ARM64)**: `CC-Switch-${{ github.ref_name }}-Linux-arm64.AppImage` / `.deb` / `.rpm`
 
