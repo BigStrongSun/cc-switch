@@ -2087,6 +2087,39 @@ fn codex_provider_table_has_proxy_placeholder(item: &Item) -> bool {
         == Some(CODEX_PROXY_AUTH_PLACEHOLDER)
 }
 
+/// 判断 URL 是否指向本机代理地址。
+///
+/// 这里不依赖 `proxy.rs` 的运行态端口，只识别接管写入时会出现的本机回环地址。
+/// 该判断只用于清理 takeover 残留，不能把用户配置的真实第三方 URL 当成可删除字段。
+fn codex_base_url_is_local_proxy(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    let Some((_, rest)) = lower.split_once("://") else {
+        return false;
+    };
+    rest.starts_with("127.")
+        || rest.starts_with("localhost")
+        || rest.starts_with("0.0.0.0")
+        || rest.starts_with("[::1]")
+        || rest.starts_with("[::]")
+        || rest.starts_with("::1")
+        || rest.starts_with("::")
+}
+
+/// 判断同名 provider 表是否仍像接管期间生成的临时代理表。
+///
+/// 恢复 provider 备份时，live config 可能还是接管态：同名表里有本地
+/// `base_url` 或 `PROXY_MANAGED` token。此时不能做“provider 键优先”的
+/// 递归合并，否则备份没有声明的接管字段会被保留下来并继续劫持请求。
+fn codex_provider_table_has_takeover_artifact(item: &Item) -> bool {
+    item.as_table_like().is_some_and(|table| {
+        codex_provider_table_has_proxy_placeholder(item)
+            || table
+                .get("base_url")
+                .and_then(|url| url.as_str())
+                .is_some_and(codex_base_url_is_local_proxy)
+    })
+}
+
 /// 移除目标 provider 不再使用的 CC Switch 自有 provider 表。
 ///
 /// 参数：
@@ -2147,7 +2180,7 @@ fn remove_codex_provider_owned_fields_missing_from_provider(
         remove_active_custom_codex_model_provider_section(live_doc);
     }
 
-    for key in ["model", "model_provider", "model_context_window"] {
+    for key in ["model", "model_provider"] {
         if provider_doc.get(key).is_none() {
             live_doc.as_table_mut().remove(key);
         }
@@ -2256,7 +2289,11 @@ pub(crate) fn merge_codex_provider_config_texts(
             {
                 match live_providers.get_mut(provider_id) {
                     Some(live_item) => {
-                        merge_codex_toml_item_prefer_provider(live_item, &provider_item)
+                        if codex_provider_table_has_takeover_artifact(live_item) {
+                            *live_item = provider_item;
+                        } else {
+                            merge_codex_toml_item_prefer_provider(live_item, &provider_item);
+                        }
                     }
                     None => {
                         live_providers.insert(provider_id, provider_item);

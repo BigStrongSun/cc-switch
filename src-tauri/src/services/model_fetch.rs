@@ -19,6 +19,31 @@ pub struct FetchedModel {
     pub context_window: Option<u64>,
 }
 
+/// 模型列表获取服务的统一入参。
+///
+/// 通用 OpenAI-compatible `/models` 字段和火山 Plan 管控面字段放在同一个请求对象里，
+/// 让服务入口保持稳定；新增 provider 专用取模逻辑时优先扩展子结构而不是继续增加函数参数。
+#[derive(Debug, Clone)]
+pub struct FetchModelsRequest<'a> {
+    pub base_url: &'a str,
+    pub api_key: &'a str,
+    pub is_full_url: bool,
+    pub models_url_override: Option<&'a str>,
+    pub user_agent: Option<HeaderValue>,
+    pub volcengine: VolcengineModelListRequest<'a>,
+}
+
+/// 火山 Agent/Coding Plan 模型枚举的管控面参数。
+///
+/// 这些字段不是推理 API 的 bearer key，而是火山 OpenAPI AK/SK；没有 action 时
+/// 主流程仍回到普通 OpenAI-compatible `/models` 候选逻辑。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VolcengineModelListRequest<'a> {
+    pub action: Option<&'a str>,
+    pub access_key_id: Option<&'a str>,
+    pub secret_access_key: Option<&'a str>,
+}
+
 /// OpenAI 兼容的 /v1/models 响应格式
 #[derive(Debug, Deserialize)]
 struct ModelsResponse {
@@ -132,46 +157,41 @@ async fn fetch_volcengine_plan_models(
 /// 获取供应商的可用模型列表
 ///
 /// 使用 OpenAI 兼容的 GET /v1/models 端点，按候选列表顺序尝试。
-pub async fn fetch_models(
-    base_url: &str,
-    api_key: &str,
-    is_full_url: bool,
-    models_url_override: Option<&str>,
-    user_agent: Option<HeaderValue>,
-    volcengine_model_list_action: Option<&str>,
-    volcengine_access_key_id: Option<&str>,
-    volcengine_secret_access_key: Option<&str>,
-) -> Result<Vec<FetchedModel>, String> {
-    if let Some(action) = normalize_volcengine_model_list_action(volcengine_model_list_action)? {
+pub async fn fetch_models(options: FetchModelsRequest<'_>) -> Result<Vec<FetchedModel>, String> {
+    if let Some(action) = normalize_volcengine_model_list_action(options.volcengine.action)? {
         return fetch_volcengine_plan_models(
-            base_url,
+            options.base_url,
             action,
-            volcengine_access_key_id,
-            volcengine_secret_access_key,
+            options.volcengine.access_key_id,
+            options.volcengine.secret_access_key,
         )
         .await;
     }
 
-    if api_key.is_empty() {
+    if options.api_key.is_empty() {
         return Err("API Key is required to fetch models".to_string());
     }
 
-    let candidates = build_models_url_candidates(base_url, is_full_url, models_url_override)?;
+    let candidates = build_models_url_candidates(
+        options.base_url,
+        options.is_full_url,
+        options.models_url_override,
+    )?;
     let client = crate::proxy::http_client::get();
     let mut last_err: Option<String> = None;
 
     for url in &candidates {
         log::debug!("[ModelFetch] Trying endpoint: {url}");
-        let mut request = client
+        let mut request_builder = client
             .get(url)
-            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Authorization", format!("Bearer {}", options.api_key))
             .timeout(Duration::from_secs(FETCH_TIMEOUT_SECS));
         // 自定义 User-Agent：部分 /models 端点同样有 UA 白名单（如 Kimi Coding Plan），
         // 与转发 / 检测路径共用同一 UA，避免"代理可用但取模型失败"。
-        if let Some(ua) = &user_agent {
-            request = request.header(USER_AGENT, ua.clone());
+        if let Some(ua) = &options.user_agent {
+            request_builder = request_builder.header(USER_AGENT, ua.clone());
         }
-        let response = match request.send().await {
+        let response = match request_builder.send().await {
             Ok(r) => r,
             Err(e) => {
                 return Err(format!("Request failed: {e}"));

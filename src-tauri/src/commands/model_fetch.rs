@@ -7,6 +7,23 @@ use reqwest::header::{HeaderValue, CONTENT_TYPE, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+/// 前端模型列表刷新命令的完整请求体。
+///
+/// 这个结构体保持 Tauri 命令只有一个入参，避免新增供应商专用字段后继续扩散成
+/// 多个并列参数；字段名由 `camelCase` 与前端 `invoke` 请求保持一致。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchModelsForConfigRequest {
+    pub base_url: String,
+    pub api_key: String,
+    pub is_full_url: Option<bool>,
+    pub models_url: Option<String>,
+    pub custom_user_agent: Option<String>,
+    pub volcengine_model_list_action: Option<String>,
+    pub volcengine_access_key_id: Option<String>,
+    pub volcengine_secret_access_key: Option<String>,
+}
+
 /// Codex 上游协议探测结果。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,29 +41,24 @@ pub struct CodexResponsesProbeResult {
 /// 否则对 baseURL 生成候选列表（含「剥离 Anthropic 兼容子路径」兜底），按序尝试。
 #[tauri::command(rename_all = "camelCase")]
 pub async fn fetch_models_for_config(
-    base_url: String,
-    api_key: String,
-    is_full_url: Option<bool>,
-    models_url: Option<String>,
-    custom_user_agent: Option<String>,
-    volcengine_model_list_action: Option<String>,
-    volcengine_access_key_id: Option<String>,
-    volcengine_secret_access_key: Option<String>,
+    request: FetchModelsForConfigRequest,
 ) -> Result<Vec<FetchedModel>, String> {
     // 与转发 / 检测路径共用 parse_custom_user_agent：非法 UA 静默忽略（不阻断取模型）。
-    let user_agent = crate::provider::parse_custom_user_agent(custom_user_agent.as_deref())
+    let user_agent = crate::provider::parse_custom_user_agent(request.custom_user_agent.as_deref())
         .ok()
         .flatten();
-    model_fetch::fetch_models(
-        &base_url,
-        &api_key,
-        is_full_url.unwrap_or(false),
-        models_url.as_deref(),
+    model_fetch::fetch_models(model_fetch::FetchModelsRequest {
+        base_url: &request.base_url,
+        api_key: &request.api_key,
+        is_full_url: request.is_full_url.unwrap_or(false),
+        models_url_override: request.models_url.as_deref(),
         user_agent,
-        volcengine_model_list_action.as_deref(),
-        volcengine_access_key_id.as_deref(),
-        volcengine_secret_access_key.as_deref(),
-    )
+        volcengine: model_fetch::VolcengineModelListRequest {
+            action: request.volcengine_model_list_action.as_deref(),
+            access_key_id: request.volcengine_access_key_id.as_deref(),
+            secret_access_key: request.volcengine_secret_access_key.as_deref(),
+        },
+    })
     .await
 }
 

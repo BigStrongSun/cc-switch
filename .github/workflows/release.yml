@@ -20,7 +20,9 @@ jobs:
       matrix:
         include:
           - os: windows-2022
-          - os: windows-11-arm
+          # GitHub 的 Windows ARM64 runner 能编译主程序，但 WiX v3 light.exe 在该
+          # 环境中无法可靠启动；ARM64 安装包改由 x64 Windows runner 交叉打包。
+          - os: windows-2022
             arch: arm64
           - os: ubuntu-22.04
           - os: ubuntu-22.04-arm
@@ -95,14 +97,14 @@ jobs:
             || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
 
       - name: Setup pnpm
-        if: runner.os != 'Windows' || matrix.arch != 'arm64'
+        if: runner.os != 'Windows' || runner.arch != 'ARM64'
         uses: pnpm/action-setup@v6
         with:
           version: 10.12.3
           run_install: false
 
       - name: Setup pnpm (Windows ARM64)
-        if: runner.os == 'Windows' && matrix.arch == 'arm64'
+        if: runner.os == 'Windows' && runner.arch == 'ARM64'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -112,13 +114,13 @@ jobs:
           pnpm --version
 
       - name: Get pnpm store directory
-        if: runner.os != 'Windows' || matrix.arch != 'arm64'
+        if: runner.os != 'Windows' || runner.arch != 'ARM64'
         id: pnpm-store
         shell: bash
         run: echo "path=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
 
       - name: Setup pnpm cache
-        if: runner.os != 'Windows' || matrix.arch != 'arm64'
+        if: runner.os != 'Windows' || runner.arch != 'ARM64'
         uses: actions/cache@v5
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
@@ -291,6 +293,24 @@ jobs:
             echo "⚠️ macOS build/notarization failed, retrying in ${sleep_seconds}s..."
             sleep "$sleep_seconds"
           done
+
+      - name: Build Windows history repair sidecar
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_RELEASE_ARCH: ${{ matrix.arch || 'x86_64' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:WINDOWS_RELEASE_ARCH -eq 'arm64') {
+            cargo build --manifest-path src-tauri/Cargo.toml --bin codex-history-repairer --features history-repairer --target aarch64-pc-windows-msvc --release
+            $sidecar = 'src-tauri/target/aarch64-pc-windows-msvc/release/codex-history-repairer.exe'
+          } else {
+            cargo build --manifest-path src-tauri/Cargo.toml --bin codex-history-repairer --features history-repairer --release
+            $sidecar = 'src-tauri/target/release/codex-history-repairer.exe'
+          }
+          if (-not (Test-Path $sidecar)) {
+            throw "codex-history-repairer sidecar was not produced: $sidecar"
+          }
 
       - name: Build Tauri App (Windows)
         if: runner.os == 'Windows'
@@ -686,7 +706,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: CC Switch ${{ github.ref_name }}
-          prerelease: true
+          prerelease: false
           body: |
             ## CC Switch ${{ github.ref_name }}
 

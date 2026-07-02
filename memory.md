@@ -1,5 +1,15 @@
 # CC Switch Repository Memory
 
+## 2026-07-03 GitHub Flow CI/Release Failure Root Fix
+
+- `v3.16.4-7` 推到 `BigStrongSun/ccswitchmulti` 后 GitHub Actions 有两类真实失败：CI 的 `Backend Checks` 卡在 Rust Clippy，Release 的 Windows 打包卡在 Windows 资产构建。不要把它归因为 GitHub 本身抽风，也不要只重跑 workflow。
+- CI 根因之一是火山 AgentPlan 模型列表支持把 `fetch_models_for_config` / `model_fetch::fetch_models` 扩成 8 个并列参数，触发 `clippy::too_many_arguments`。修复边界是把 Tauri 命令入参收敛成 `FetchModelsForConfigRequest`，后端服务收敛成 `FetchModelsRequest` / `VolcengineModelListRequest`，前端 `invoke` 改为 `{ request: ... }`。
+- CI 继续暴露的 backend test 根因是 Codex provider 配置合并边界不清：`model_context_window` 应视为用户界面/上下文显示偏好，provider 未声明时不能从 live config 删除；同名 custom provider 表如果 live 里仍带本地代理 `base_url` 或 `PROXY_MANAGED`，恢复 provider 备份时必须按 takeover 残留整表替换，否则本地代理字段会继续劫持后续请求。
+- Release Windows x64 根因是 Tauri bundler 需要 `codex-history-repairer.exe` sidecar，但 workflow 只构建主程序，NSIS 阶段报 `codex-history-repairer.exe` 不存在。修复是在 Windows Tauri build 前显式按架构构建并校验 history repair sidecar。
+- Release Windows ARM64 根因是 `windows-11-arm` runner 能编译主程序，但 WiX v3 `light.exe` 在该 ARM runner 环境无法可靠启动；正式 workflow 应在 `windows-2022` x64 runner 上交叉构建 `aarch64-pc-windows-msvc`，同时 pnpm setup/cache 条件要看 `runner.arch`，不要看目标 `matrix.arch`。
+- `release.yml` 的正式发布语义必须是 `prerelease: false`；否则 GitHub latest 不会按正式 release 晋升，即使 tag 和资产都存在。
+- 本轮本地验证覆盖：`cargo clippy --manifest-path src-tauri\Cargo.toml -- -D warnings`、`cargo test --manifest-path src-tauri\Cargo.toml`、`pnpm typecheck`、`pnpm test:unit`、`pnpm exec prettier --check src/lib/api/model-fetch.ts .github/workflows/release.yml`。`actionlint` 本机未安装，后续若继续改 workflow，优先补装或在 CI 侧验证 workflow 语法。
+
 ## 2026-07-02 CCSwitchMulti v3.16.4-7 Formal Release
 
 - `v3.16.4-7` 是 `v3.16.4-6` 后的 MultiRouter 路由热修复正式发布，核心变更是修复第三方 GPT alias 只出现在聚合 `modelCatalog`、没有回到第三方 route `match.models/modelMap` 时被官方 `gpt` 前缀 route 抢走的问题；版本提交为 `755b69e4ee0b5a91461558e4b7a8d8753b38bc5e`（`chore(release): bump CCSwitchMulti to v3.16.4-7`）。

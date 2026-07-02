@@ -37,14 +37,16 @@ export async function fetchModelsForConfig(
   volcengineModelList?: VolcengineModelListOptions,
 ): Promise<FetchedModel[]> {
   return invoke("fetch_models_for_config", {
-    baseUrl,
-    apiKey,
-    isFullUrl,
-    modelsUrl,
-    customUserAgent,
-    volcengineModelListAction: volcengineModelList?.action,
-    volcengineAccessKeyId: volcengineModelList?.accessKeyId,
-    volcengineSecretAccessKey: volcengineModelList?.secretAccessKey,
+    request: {
+      baseUrl,
+      apiKey,
+      isFullUrl,
+      modelsUrl,
+      customUserAgent,
+      volcengineModelListAction: volcengineModelList?.action,
+      volcengineAccessKeyId: volcengineModelList?.accessKeyId,
+      volcengineSecretAccessKey: volcengineModelList?.secretAccessKey,
+    },
   });
 }
 
